@@ -9,8 +9,12 @@ test('fillFields sets values and fires input events', () => {
   document.body.innerHTML = `<input type="text" id="u"><input type="password" id="p">`;
   const f = { username: document.getElementById('u') as HTMLInputElement,
               password: document.getElementById('p') as HTMLInputElement };
-  let fired = false; f.username.addEventListener('input', () => { fired = true; });
+  let inputFired = false; f.username.addEventListener('input', () => { inputFired = true; });
+  let changeFired = false; f.password.addEventListener('change', () => { changeFired = true; });
+  let bubbleInput = false; document.body.addEventListener('input', () => { bubbleInput = true; });
   fillFields(f, 'octocat', 's3cr3t');
   expect(f.username.value).toBe('octocat'); expect(f.password.value).toBe('s3cr3t');
-  expect(fired).toBe(true);
+  expect(inputFired).toBe(true);
+  expect(changeFired).toBe(true);
+  expect(bubbleInput).toBe(true);
 });
