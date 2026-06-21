@@ -32,6 +32,7 @@ export class Vault {
   }
 
   private findGroup(id: string): kdbxweb.KdbxGroup | null {
+    if (!this.db) return null;
     for (const g of this.allGroups(this.root)) if (g.uuid.id === id) return g;
     return null;
   }
@@ -80,7 +81,8 @@ export class Vault {
 
   createEntry(groupId: string, fields: Record<string, string>): string {
     if (!this.db) throw new Error('locked');
-    const g = this.findGroup(groupId) ?? this.root;
+    const g = this.findGroup(groupId);
+    if (!g) throw new Error('no group');
     const e = this.db.createEntry(g);
     this.applyFields(e, fields); this.dirty = true; return e.uuid.id;
   }
@@ -91,6 +93,7 @@ export class Vault {
   }
 
   updateGroup(id: string, fields: Record<string, string>): void {
+    if (!this.db) throw new Error('locked');
     const g = this.findGroup(id); if (!g) throw new Error('no group');
     if (fields.Name != null) g.name = fields.Name; this.dirty = true;
   }

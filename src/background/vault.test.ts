@@ -18,6 +18,7 @@ function fixture(): ArrayBuffer {
 
 test('open + read entry by url', async () => {
   const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  expect(v.dirty).toBe(false);
   const matches = v.entriesForUrl('https://github.com/login');
   expect(matches).toHaveLength(1);
   expect(matches[0].username).toBe('octocat');
@@ -38,6 +39,7 @@ test('edit marks dirty and round-trips through serialize', async () => {
   v.updateEntry(id, { UserName: 'newuser' });
   expect(v.dirty).toBe(true);
   const bytes = await v.serialize();
+  expect(v.dirty).toBe(false);
   const v2 = new Vault(); await v2.open(bytes, 'correct horse', null);
   expect(v2.getEntry(id)?.username).toBe('newuser');
 });
@@ -48,4 +50,9 @@ test('create entry appears in url matches', async () => {
   const id = v.createEntry(root, { Title: 'Ex', URL: 'https://example.com', UserName: 'u', Password: 'p' });
   expect(v.getEntry(id)?.title).toBe('Ex');
   expect(v.entriesForUrl('https://example.com')[0].id).toBe(id);
+});
+
+test('createEntry throws on unknown groupId', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  expect(() => v.createEntry('does-not-exist', { Title: 'x' })).toThrow('no group');
 });
