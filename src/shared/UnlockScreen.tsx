@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { sendToSW } from './messages';
 import { pickAndStoreDb, readKeyFile } from './pickFile';
 import { loadHandle } from '../background/fileHandle';
@@ -9,7 +9,7 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: () => void }) {
   const [keyFile, setKeyFile] = useState<number[] | null>(null);
   const [pwd, setPwd] = useState('');
   const [err, setErr] = useState('');
-  useState(() => { void loadHandle().then(h => setDbName(h?.name ?? null)); });
+  useEffect(() => { void loadHandle().then(h => setDbName(h?.name ?? null)); }, []);
 
   const canUnlock = (pwd.length > 0) || (useKey && keyFile);
   async function unlock() {
@@ -21,13 +21,13 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: () => void }) {
   }
   return (
     <div className="p-4 space-y-3">
-      <button className="btn" onClick={async () => setDbName(await pickAndStoreDb())}>
+      <button className="btn" onClick={async () => { try { setDbName(await pickAndStoreDb()); } catch (e) { if ((e as DOMException).name !== 'AbortError') throw e; } }}>
         {dbName ? `Database: ${dbName}` : 'Open .kdbx file…'}
       </button>
       <label className="flex items-center gap-2">
         <input type="checkbox" checked={useKey} onChange={e => setUseKey(e.target.checked)} /> Use key file
       </label>
-      {useKey && <button className="btn" onClick={async () => setKeyFile(await readKeyFile())}>
+      {useKey && <button className="btn" onClick={async () => { try { setKeyFile(await readKeyFile()); } catch (e) { if ((e as DOMException).name !== 'AbortError') throw e; } }}>
         {keyFile ? 'Key file selected' : 'Choose key file…'}</button>}
       <input type="password" className="input" placeholder="Master password" value={pwd}
         onChange={e => setPwd(e.target.value)} onKeyDown={e => e.key === 'Enter' && canUnlock && unlock()} />
