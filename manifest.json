@@ -1,10 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "name in manifest.json",
-  "description": "description in manifest.json",
-  "options_ui": {
-    "page": "src/pages/options/index.html"
-  },
+  "name": "QuickKee",
+  "description": "KeePass-compatible password manager as a Chrome extension.",
+  "options_page": "src/pages/options/index.html",
   "action": {
     "default_popup": "src/pages/popup/index.html",
     "default_icon": {
@@ -15,21 +13,29 @@
     "128": "icon-128.png"
   },
   "permissions": [
-    "activeTab"
+    "storage",
+    "alarms",
+    "activeTab",
+    "scripting",
+    "tabs",
+    "sidePanel",
+    "webNavigation"
   ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "side_panel": {
+    "default_path": "src/pages/panel/index.html"
+  },
   "content_scripts": [
     {
       "matches": [
-        "http://*/*",
-        "https://*/*",
         "<all_urls>"
       ],
       "js": [
         "src/pages/content/index.tsx"
       ],
-      "css": [
-        "contentStyle.css"
-      ]
+      "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
@@ -39,7 +45,9 @@
         "icon-128.png",
         "icon-32.png"
       ],
-      "matches": []
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }
