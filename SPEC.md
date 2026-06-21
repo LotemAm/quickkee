@@ -38,3 +38,6 @@ On a website without a password:
 - Below it a form to create and save an entry
     - Password already default auto generated
     - URL autofilled to current website
+
+## Testing
+Automated testing through Playwright
