@@ -6,7 +6,7 @@ let registered = false;
 export function registerArgon2(): void {
   if (registered) return;
   registered = true;
-  kdbxweb.CryptoEngine.setArgon2Impl(async (pwd, salt, mem, iter, len, par, type, _ver) => {
+  kdbxweb.CryptoEngine.setArgon2Impl(async (pwd, salt, mem, iter, len, par, type, ver) => {
     const fn = type === kdbxweb.CryptoEngine.Argon2TypeArgon2id ? argon2id : argon2d;
     return fn({
       password: new Uint8Array(pwd),
@@ -16,6 +16,7 @@ export function registerArgon2(): void {
       memorySize: mem,
       hashLength: len,
       outputType: 'binary',
+      version: ver,
     });
   });
 }

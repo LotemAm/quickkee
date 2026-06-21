@@ -23,11 +23,31 @@ test('opens fixture with correct password', async () => {
   const creds = new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString('correct horse'));
   const db = await kdbxweb.Kdbx.load(ab, creds);
   expect(db.meta.name).toBe('QuickKee Test');
+
+  // Assert fixture contents
+  const root = db.getDefaultGroup();
+  const sitesGroup = root.groups.find((g) => g.name === 'Sites');
+  expect(sitesGroup).toBeDefined();
+
+  const entry = sitesGroup!.entries[0];
+  const title = entry.fields.get('Title');
+  const userName = entry.fields.get('UserName');
+  const token = entry.fields.get('Token');
+
+  expect(
+    title instanceof kdbxweb.ProtectedValue ? title.getText() : title,
+  ).toBe('GitHub');
+  expect(
+    userName instanceof kdbxweb.ProtectedValue ? userName.getText() : userName,
+  ).toBe('octocat');
+  expect(
+    token instanceof kdbxweb.ProtectedValue ? token.getText() : token,
+  ).toBe('abc123');
 });
 
 test('rejects wrong password', async () => {
   registerArgon2();
   const ab = loadFixture();
   const creds = new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString('wrong'));
-  await expect(kdbxweb.Kdbx.load(ab, creds)).rejects.toBeTruthy();
+  await expect(kdbxweb.Kdbx.load(ab, creds)).rejects.toThrow();
 });

@@ -2,7 +2,7 @@ import * as kdbxweb from 'kdbxweb';
 import { argon2id, argon2d } from 'hash-wasm';
 import { writeFileSync } from 'node:fs';
 
-kdbxweb.CryptoEngine.setArgon2Impl(async (pwd, salt, mem, iter, len, par, type, _ver) => {
+kdbxweb.CryptoEngine.setArgon2Impl(async (pwd, salt, mem, iter, len, par, type, ver) => {
   const fn = type === kdbxweb.CryptoEngine.Argon2TypeArgon2id ? argon2id : argon2d;
   return fn({
     password: new Uint8Array(pwd),
@@ -12,6 +12,7 @@ kdbxweb.CryptoEngine.setArgon2Impl(async (pwd, salt, mem, iter, len, par, type, 
     memorySize: mem,
     hashLength: len,
     outputType: 'binary',
+    version: ver,
   });
 });
 
