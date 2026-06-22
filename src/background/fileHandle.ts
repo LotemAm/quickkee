@@ -26,7 +26,7 @@ export async function loadHandle(): Promise<FileSystemFileHandle | null> {
 export async function clearHandle(): Promise<void> { await tx('readwrite', s => s.delete(KEY)); }
 
 export async function ensurePermission(h: FileSystemFileHandle, mode: 'read' | 'readwrite'): Promise<boolean> {
-  const opts = { mode } as FileSystemHandlePermissionDescriptor;
+  const opts = { mode } as { mode: 'read' | 'readwrite' };
   // @ts-expect-error: queryPermission is experimental
   if ((await h.queryPermission(opts)) === 'granted') return true;
   // @ts-expect-error: requestPermission is experimental

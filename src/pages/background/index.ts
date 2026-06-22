@@ -11,6 +11,9 @@ const vault = new Vault();
 let handle: FileSystemFileHandle | null = null;
 const autolock = new AutoLock(() => doLock());
 
+// Tracks tabs with an active cert-warning badge so match-count updates don't overwrite them.
+const warnedTabs = new Set<number>();
+
 function doLock() { vault.lock(); handle = null; autolock.disarm(); refreshAllIcons(); }
 
 async function handle_(req: Request): Promise<Response> {
@@ -72,19 +75,30 @@ chrome.runtime.onStartup.addListener(doLock);
 
 // per-tab icon
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
-  if (info.status === 'complete' && tab.url) void updateIconForTab(tabId, tab.url, vault);
+  if (info.status === 'complete' && tab.url) {
+    if (warnedTabs.has(tabId)) return; // cert warning badge takes priority
+    void updateIconForTab(tabId, tab.url, vault);
+  }
 });
 async function refreshAllIcons() {
   const tabs = await chrome.tabs.query({});
-  for (const t of tabs) if (t.id && t.url) void updateIconForTab(t.id, t.url, vault);
+  for (const t of tabs) {
+    if (t.id && t.url && !warnedTabs.has(t.id)) void updateIconForTab(t.id, t.url, vault);
+  }
 }
 
 // open side panel on action click is configured in panel task
 chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: false }).catch(() => {});
 
 // certificate error warning badge
+// Clear the warning when a new top-frame navigation starts so a stale ! doesn't linger.
+chrome.webNavigation.onBeforeNavigate.addListener(details => {
+  if (details.frameId === 0) warnedTabs.delete(details.tabId);
+});
+
 chrome.webNavigation.onErrorOccurred.addListener(details => {
   if (details.frameId !== 0 || !shouldWarnCertError(details)) return;
+  warnedTabs.add(details.tabId);
   void chrome.action.setBadgeText({ tabId: details.tabId, text: '!' });
   void chrome.action.setBadgeBackgroundColor({ tabId: details.tabId, color: '#dc2626' });
   void chrome.action.setTitle({ tabId: details.tabId, title: 'Warning: certificate error on this site' });

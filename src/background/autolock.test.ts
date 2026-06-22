@@ -1,5 +1,7 @@
 import { AutoLock } from './autolock';
 
+afterEach(() => vi.useRealTimers());
+
 test('fires after the armed window', () => {
   vi.useFakeTimers(); let locked = false;
   const a = new AutoLock(() => { locked = true; });
