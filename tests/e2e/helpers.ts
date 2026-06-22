@@ -2,6 +2,7 @@ import { test as base, chromium, type BrowserContext, type Page } from '@playwri
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
+import { startHttpFixture, startHttpsFixture } from './servers';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.resolve(__dirname, '../../dist_chrome');
@@ -9,6 +10,8 @@ const DIST = path.resolve(__dirname, '../../dist_chrome');
 export const test = base.extend<{
   context: BrowserContext;
   extensionId: string;
+  http: Awaited<ReturnType<typeof startHttpFixture>>;
+  https: Awaited<ReturnType<typeof startHttpsFixture>>;
 }>({
   context: async ({}, use) => {
     const ctx = await chromium.launchPersistentContext('', {
@@ -27,6 +30,8 @@ export const test = base.extend<{
     if (!sw) sw = await context.waitForEvent('serviceworker');
     await use(new URL(sw.url()).host);
   },
+  http: async ({}, use) => { const s = await startHttpFixture(); await use(s); await s.close(); },
+  https: async ({}, use) => { const s = await startHttpsFixture(); await use(s); await s.close(); },
 });
 
 export const expect = test.expect;
