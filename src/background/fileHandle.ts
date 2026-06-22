@@ -19,6 +19,9 @@ export async function saveHandle(h: FileSystemFileHandle): Promise<string> {
   await tx('readwrite', s => s.put(h, KEY)); return KEY;
 }
 
+const TEST = import.meta.env.VITE_QK_TEST === '1';
+const BYTES_KEY = 'testBytes', NAME_KEY = 'testName';
+
 export async function loadHandle(): Promise<FileSystemFileHandle | null> {
   if (TEST) {
     const name = await tx<string | undefined>('readonly', s => s.get(NAME_KEY));
@@ -28,9 +31,6 @@ export async function loadHandle(): Promise<FileSystemFileHandle | null> {
 }
 
 export async function clearHandle(): Promise<void> { await tx('readwrite', s => s.delete(KEY)); }
-
-const TEST = import.meta.env.VITE_QK_TEST === '1';
-const BYTES_KEY = 'testBytes', NAME_KEY = 'testName';
 
 export async function saveTestBytes(name: string, bytes: ArrayBuffer): Promise<void> {
   await tx('readwrite', s => s.put(bytes, BYTES_KEY));

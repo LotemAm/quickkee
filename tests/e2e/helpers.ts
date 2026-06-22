@@ -43,6 +43,7 @@ export async function openExtensionPage(
 
 export async function installDb(page: Page, kdbxPath: string = E2E_KDBX): Promise<void> {
   const b64 = fs.readFileSync(kdbxPath).toString('base64');
+  const name = path.basename(kdbxPath);
   await page.waitForFunction(() => Boolean((window as any).__qkTest));
-  await page.evaluate((data) => (window as any).__qkTest.installDb('e2e.kdbx', data), b64);
+  await page.evaluate(({ data, name }) => (window as any).__qkTest.installDb(name, data), { data: b64, name });
 }
