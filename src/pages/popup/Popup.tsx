@@ -15,8 +15,15 @@ export function Popup() {
   const [rootGroup, setRootGroup] = useState(''); const [clearSecs, setClearSecs] = useState(30);
 
   useEffect(() => { loadSettings().then(s => { applyTheme(s.theme); setClearSecs(s.clipboardClearSeconds); }); }, []);
-  useEffect(() => { chrome.tabs.query({ active: true, currentWindow: true })
-    .then(([t]) => t?.id && t.url && setTab({ id: t.id, url: t.url })); }, []);
+  useEffect(() => {
+    const p = new URLSearchParams(location.search);
+    if (import.meta.env.VITE_QK_TEST === '1' && p.get('qkurl')) {
+      setTab({ id: Number(p.get('qktab')), url: p.get('qkurl')! });
+      return;
+    }
+    chrome.tabs.query({ active: true, currentWindow: true })
+      .then(([t]) => t?.id && t.url && setTab({ id: t.id, url: t.url }));
+  }, []);
   useEffect(() => { if (locked || !tab) return;
     sendToSW({ type: 'getEntriesForUrl', url: tab.url }).then(r => 'entries' in r && setEntries(r.entries));
     sendToSW({ type: 'getTree' }).then(r => 'tree' in r && setRootGroup(r.tree.groupId));

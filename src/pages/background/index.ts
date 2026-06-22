@@ -61,6 +61,7 @@ async function handle_(req: Request): Promise<Response> {
 }
 
 chrome.runtime.onMessage.addListener((req: Request, _s, sendResponse) => {
+  if ((req as unknown as { __qk?: string }).__qk === 'test') return false;
   handle_(req).then(sendResponse).catch(e => sendResponse({ ok: false, error: String(e) }));
   return true; // async
 });
@@ -103,3 +104,32 @@ chrome.webNavigation.onErrorOccurred.addListener(details => {
   void chrome.action.setBadgeBackgroundColor({ tabId: details.tabId, color: '#dc2626' });
   void chrome.action.setTitle({ tabId: details.tabId, title: 'Warning: certificate error on this site' });
 });
+
+if (import.meta.env.VITE_QK_TEST === '1') {
+  chrome.runtime.onMessage.addListener((req: any, _s, send) => {
+    if (!req || req.__qk !== 'test') return false;
+    (async () => {
+      switch (req.cmd) {
+        case 'badge': {
+          const text = await chrome.action.getBadgeText({ tabId: req.tabId });
+          const color = await chrome.action.getBadgeBackgroundColor({ tabId: req.tabId });
+          send({ text, color });
+          break;
+        }
+        case 'match':
+          send({ count: vault.isOpen() ? vault.entriesForUrl(req.url).length : 0, cert: warnedTabs.has(req.tabId) });
+          break;
+        case 'lock': doLock(); send({ ok: true }); break;
+        case 'armShort': autolock.arm(req.hours); send({ ok: true }); break;
+        case 'tabId': {
+          const tabs = await chrome.tabs.query({});
+          send({ id: tabs.find(t => t.url?.startsWith(req.url))?.id });
+          break;
+        }
+        case 'warned': send({ tabs: Array.from(warnedTabs) }); break;
+        default: send({});
+      }
+    })();
+    return true;
+  });
+}

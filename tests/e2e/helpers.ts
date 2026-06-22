@@ -47,3 +47,18 @@ export async function installDb(page: Page, kdbxPath: string = E2E_KDBX): Promis
   await page.waitForFunction(() => Boolean((window as any).__qkTest));
   await page.evaluate(({ data, name }) => (window as any).__qkTest.installDb(name, data), { data: b64, name });
 }
+
+export async function swCmd(page: Page, msg: Record<string, unknown>): Promise<any> {
+  return page.evaluate((m) => chrome.runtime.sendMessage({ __qk: 'test', ...m }), msg);
+}
+
+export async function openPopupForTab(
+  context: BrowserContext, extensionId: string, url: string, tabId: number,
+): Promise<Page> {
+  const page = await context.newPage();
+  await page.goto(
+    `chrome-extension://${extensionId}/src/pages/popup/index.html` +
+    `?qkurl=${encodeURIComponent(url)}&qktab=${tabId}`,
+  );
+  return page;
+}
