@@ -4,6 +4,7 @@ import { loadHandle, ensurePermission, readBytes, writeBytes } from '../../backg
 import { loadSettings } from '../../shared/settings';
 import { generatePassword, DEFAULT_PWGEN } from '../../shared/pwgen';
 import { updateIconForTab } from '../../background/icon';
+import { shouldWarnCertError } from '../../background/certwarn';
 import type { Request, Response } from '../../shared/messages';
 
 const vault = new Vault();
@@ -80,3 +81,11 @@ async function refreshAllIcons() {
 
 // open side panel on action click is configured in panel task
 chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: false }).catch(() => {});
+
+// certificate error warning badge
+chrome.webNavigation.onErrorOccurred.addListener(details => {
+  if (details.frameId !== 0 || !shouldWarnCertError(details)) return;
+  void chrome.action.setBadgeText({ tabId: details.tabId, text: '!' });
+  void chrome.action.setBadgeBackgroundColor({ tabId: details.tabId, color: '#dc2626' });
+  void chrome.action.setTitle({ tabId: details.tabId, title: 'Warning: certificate error on this site' });
+});
