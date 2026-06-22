@@ -90,7 +90,8 @@ export async function reReadKdbx(page: Page, password = 'correct horse'): Promis
     open.onsuccess = () => {
       const req = open.result.transaction('handles', 'readonly').objectStore('handles').get('testBytes');
       req.onsuccess = () => {
-        const buf = req.result as ArrayBuffer;
+        const buf = req.result as ArrayBuffer | undefined;
+        if (!buf) { rej(new Error('testBytes not found in IndexedDB (vault not installed?)')); return; }
         const bytes = new Uint8Array(buf);
         let s = ''; for (const b of bytes) s += String.fromCharCode(b);
         res(btoa(s));
