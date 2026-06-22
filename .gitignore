@@ -393,3 +393,7 @@ public/manifest.json
 
 # project tooling
 .superpowers/
+
+# Playwright
+playwright-report/
+test-results/

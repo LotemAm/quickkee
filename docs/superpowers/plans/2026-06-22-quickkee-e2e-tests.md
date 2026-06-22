@@ -620,7 +620,6 @@ test('saved site: badge count, copy, autofill', async ({ context, extensionId, h
 
   // Autofill -> the content script fills the form on the site tab.
   await popup.getByRole('button', { name: 'Autofill' }).click();
-  await expect.poll(() => site.locator('#username').inputValue()).resolves; // settle
   await expect(site.locator('#username')).toHaveValue('e2e-user');
   await expect(site.locator('#password')).toHaveValue('e2e-pass');
 });

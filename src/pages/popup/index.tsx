@@ -1,3 +1,4 @@
+import '../../shared/testSeam';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import '@pages/popup/index.css';
