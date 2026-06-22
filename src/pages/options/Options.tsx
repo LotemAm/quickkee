@@ -22,7 +22,7 @@ export function Options() {
         </select></label>
       <fieldset className="border p-2"><legend>Default generated password</legend>
         <label>Length <input type="number" className="input w-20" value={s.pwgen.length}
-          onChange={e => update({ pwgen: { ...s.pwgen, length: Number(e.target.value) } })} /></label>
+          onChange={e => update({ pwgen: { ...s.pwgen, length: Math.max(1, Number(e.target.value) || 1) } })} /></label>
         {(['lower', 'upper', 'digits', 'symbols'] as const).map(k => (
           <label key={k} className="flex gap-2"><input type="checkbox" checked={s.pwgen[k]}
             onChange={e => update({ pwgen: { ...s.pwgen, [k]: e.target.checked } })} /> {k}</label>))}
