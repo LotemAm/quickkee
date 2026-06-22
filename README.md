@@ -54,9 +54,9 @@ On first use, the popup prompts you to open a `.kdbx` database file from your lo
 
 ### Options & Settings
 Access `chrome://extensions → QuickKee → Details → Extension options` to configure:
-- **Auto-close hours**: How long before the vault locks automatically (default: 1 hour). Set to `0` to disable.
-- **Clipboard auto-clear**: Seconds before copied passwords are cleared (default: 60)
-- **Default password generator**: Length, character sets, exclusions
+- **Auto-close hours**: How long before the vault locks automatically. Options: 1 / 2 / 4 / 8 / 24 hours (default: 8).
+- **Clipboard auto-clear**: Seconds before copied passwords are cleared. Options: never / 15 / 30 / 60 (default: 30).
+- **Default password generator**: Length and character sets (lowercase, uppercase, digits, symbols)
 - **Dark/Light theme**: UI appearance preference
 
 All settings are persisted in `chrome.storage.local`.
