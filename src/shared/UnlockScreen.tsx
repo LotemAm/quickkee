@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { sendToSW } from './messages';
 import { pickAndStoreDb, readKeyFile } from './pickFile';
-import { loadHandle } from '../background/fileHandle';
+import { loadHandle, ensurePermission } from '../background/fileHandle';
 
 export function UnlockScreen({ onUnlocked }: { onUnlocked: () => void }) {
   const [dbName, setDbName] = useState<string | null>(null);
@@ -14,6 +14,11 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: () => void }) {
   const canUnlock = (pwd.length > 0) || (useKey && keyFile);
   async function unlock() {
     setErr('');
+    // Ensure file permission in the page (this click is a user gesture) before
+    // asking the SW to open — the SW cannot show the permission prompt itself.
+    const h = await loadHandle();
+    if (!h) { setErr('Pick a database file first'); return; }
+    if (!(await ensurePermission(h, 'readwrite'))) { setErr('Grant file access to continue'); return; }
     const r = await sendToSW({ type: 'unlock', password: pwd || null, keyFile: useKey ? keyFile : null });
     if (r.ok) onUnlocked();
     else setErr({ badCredentials: 'Wrong password or key file', permission: 'Grant file access to continue',
