@@ -128,3 +128,30 @@ The following 7 steps verify end-to-end functionality. Perform these manually af
    - This confirms certificate validation is active
 
 All steps passing indicate MVP readiness.
+
+## Automated E2E (Playwright)
+
+The manual checklist above is mirrored by a Playwright suite that drives the
+real unpacked extension in Chromium. Test-only seams (gated on `VITE_QK_TEST`,
+stripped from `yarn build:chrome`) bypass the native file picker, expose
+service-worker badge/match state, and serve local HTTP + self-signed HTTPS
+fixtures.
+
+```bash
+yarn test:e2e
+```
+
+This builds the seam-enabled extension (`yarn build:chrome:test`) and runs all
+specs (`tests/e2e/specs/`). Notes:
+
+- Runs **headed** — MV3 extensions don't load under legacy headless.
+- Save/persistence is verified by re-reading the `.kdbx` with kdbxweb (the
+  KeePassXC round-trip equivalent); the bad-cert badge is exercised against a
+  local self-signed HTTPS server; auto-close uses the real timer with a
+  sub-second duration.
+- The seam never ships: `yarn build:chrome` strips it, verified in CI-style by
+  asserting `dist_chrome/` contains no `__qkTest`.
+
+Running the suite surfaced one release blocker — Argon2 unlock failed in a real
+browser because the manifest lacked a CSP permitting WebAssembly. Fixed and
+documented in `docs/superpowers/plans/2026-06-22-unlock-csp-wasm-fix.md`.
