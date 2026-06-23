@@ -77,3 +77,39 @@ test('isInvalidKey is false for non-kdbx errors', () => {
   expect(isInvalidKey('not an error')).toBe(false);
   expect(isInvalidKey(null)).toBe(false);
 });
+
+test('mergeRemote unions concurrent edits from a remote clone', async () => {
+  // Base: open fixture, serialize so both sides share identical object UUIDs.
+  const base = new Vault();
+  await base.open(fixture(), 'correct horse', null);
+  const baseBytes = await base.serialize();
+
+  // Local edits one entry's username.
+  const local = new Vault();
+  await local.open(baseBytes, 'correct horse', null);
+  const id = local.entriesForUrl('https://github.com')[0].id;
+  local.updateEntry(id, { UserName: 'local-user' });
+
+  // Remote (another device) creates a NEW entry from the same base.
+  const remote = new Vault();
+  await remote.open(baseBytes, 'correct horse', null);
+  const rootId = remote.getTree().groupId;
+  remote.createEntry(rootId, { Title: 'RemoteOnly', URL: 'https://remote.example', UserName: 'r', Password: 'p' });
+  const remoteBytes = await remote.serialize();
+
+  // Merge remote into local: union, no loss.
+  await local.mergeRemote(remoteBytes);
+  expect(local.dirty).toBe(true);
+
+  // Local edit survives.
+  expect(local.getEntry(id)?.username).toBe('local-user');
+  // Remote-only entry is now present in local.
+  expect(local.entriesForUrl('https://remote.example')).toHaveLength(1);
+
+  // And it round-trips through serialize.
+  const merged = await local.serialize();
+  const check = new Vault();
+  await check.open(merged, 'correct horse', null);
+  expect(check.entriesForUrl('https://remote.example')).toHaveLength(1);
+  expect(check.getEntry(id)?.username).toBe('local-user');
+});

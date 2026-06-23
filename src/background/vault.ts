@@ -15,6 +15,7 @@ const str = (v: unknown): string =>
 
 export class Vault {
   private db: kdbxweb.Kdbx | null = null;
+  private creds: kdbxweb.Credentials | null = null;
   dirty = false;
 
   async open(bytes: ArrayBuffer, password: string | null, keyFile: ArrayBuffer | null): Promise<void> {
@@ -22,11 +23,12 @@ export class Vault {
     const pv = password ? kdbxweb.ProtectedValue.fromString(password) : null;
     const creds = new kdbxweb.Credentials(pv, keyFile);
     this.db = await kdbxweb.Kdbx.load(bytes, creds);
+    this.creds = creds;
     this.dirty = false;
   }
 
   isOpen() { return this.db !== null; }
-  lock() { this.db = null; this.dirty = false; }
+  lock() { this.db = null; this.creds = null; this.dirty = false; }
 
   private get root() { if (!this.db) throw new Error('locked'); return this.db.getDefaultGroup(); }
 
@@ -109,6 +111,15 @@ export class Vault {
       const prot = k === 'Password' || (e.fields.get(k) instanceof kdbxweb.ProtectedValue);
       e.fields.set(k, prot ? kdbxweb.ProtectedValue.fromString(val) : val);
     }
+  }
+
+  /** Load remote bytes with the same credentials and merge them into the
+   *  in-memory DB (KeePass-native union; local.merge(remote)). */
+  async mergeRemote(remoteBytes: ArrayBuffer): Promise<void> {
+    if (!this.db || !this.creds) throw new Error('locked');
+    const remote = await kdbxweb.Kdbx.load(remoteBytes, this.creds);
+    this.db.merge(remote);
+    this.dirty = true;
   }
 
   async serialize(): Promise<ArrayBuffer> {
