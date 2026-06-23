@@ -131,7 +131,11 @@ async function tryRetry() {
   }
 }
 if (typeof self !== 'undefined' && 'addEventListener' in self) self.addEventListener('online', () => void tryRetry());
-chrome.alarms.onAlarm.addListener(a => { if (a.name === 'keepalive') void tryRetry(); });
+chrome.alarms.onAlarm.addListener(a => {
+  if (a.name !== 'keepalive') return;
+  if (vault.isOpen()) void chrome.runtime.getPlatformInfo(); // keepalive heartbeat (preserve MVP behavior)
+  void tryRetry();
+});
 
 // lock on browser close / SW suspend
 chrome.runtime.onSuspend.addListener(doLock);
