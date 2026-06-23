@@ -1,5 +1,7 @@
 import type { EntryView, TreeNode } from './entry';
 import type { PwGenOpts } from './pwgen';
+import type { RemoteFile } from '../background/sources/cloudProvider';
+import type { DbSource } from './dbSource';
 
 export type Request =
   | { type: 'unlock'; password: string | null; keyFile: number[] | null }
@@ -13,7 +15,12 @@ export type Request =
   | { type: 'updateGroup'; groupId: string; fields: Record<string, string> }
   | { type: 'save' }
   | { type: 'generatePassword'; opts?: PwGenOpts }
-  | { type: 'fillRequest'; entryId: string; tabId: number };
+  | { type: 'fillRequest'; entryId: string; tabId: number }
+  | { type: 'connectCloud'; provider: 'dropbox' | 'gdrive' }
+  | { type: 'listRemoteFiles'; provider: 'dropbox' | 'gdrive' }
+  | { type: 'openRemote'; provider: 'dropbox' | 'gdrive'; fileId: string; fileName: string; password: string | null; keyFile: number[] | null }
+  | { type: 'getSyncStatus' }
+  | { type: 'disconnectCloud'; provider: 'dropbox' | 'gdrive' };
 
 export type Ok<T = {}> = { ok: true } & T;
 export type Err = { ok: false; error: string };
@@ -24,7 +31,9 @@ export type Response =
   | Ok<{ entry: EntryView | null }>
   | Ok<{ tree: TreeNode }>
   | Ok<{ entryId: string }>
-  | Ok<{ password: string }>;
+  | Ok<{ password: string }>
+  | Ok<{ files: RemoteFile[] }>
+  | Ok<{ source: DbSource['kind'] | null; provider?: 'dropbox' | 'gdrive'; pendingUpload: boolean; online: boolean; lastSyncedAt?: number }>;
 
 export function sendToSW(req: Request): Promise<Response> {
   return chrome.runtime.sendMessage(req) as Promise<Response>;

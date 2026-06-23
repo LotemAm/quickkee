@@ -6,15 +6,27 @@ import { generatePassword, DEFAULT_PWGEN } from '../../shared/pwgen';
 import { updateIconForTab } from '../../background/icon';
 import { shouldWarnCertError } from '../../background/certwarn';
 import type { Request, Response } from '../../shared/messages';
+import { providerFor } from './cloudRouting';
+import { openCloud, saveCloud, retryPending, type SyncDeps } from '../../background/sync';
+import { getAccessToken, disconnect, DROPBOX_OAUTH, GDRIVE_OAUTH } from '../../background/sources/oauth';
+import { getCache, cacheKey } from '../../background/cache';
+import type { CloudFileSource, DbSource } from '../../shared/dbSource';
 
 const vault = new Vault();
 let handle: FileSystemFileHandle | null = null;
 const autolock = new AutoLock(() => doLock());
 
+let currentSource: DbSource | null = null;
+const onlineNow = () => (typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+function depsFor(src: CloudFileSource): SyncDeps {
+  return { vault, provider: providerFor(src.provider), online: onlineNow };
+}
+
 // Tracks tabs with an active cert-warning badge so match-count updates don't overwrite them.
 const warnedTabs = new Set<number>();
 
-function doLock() { vault.lock(); handle = null; autolock.disarm(); refreshAllIcons(); }
+function doLock() { vault.lock(); handle = null; currentSource = null; autolock.disarm(); refreshAllIcons(); }
 
 async function handle_(req: Request): Promise<Response> {
   autolock.touch();
@@ -49,10 +61,49 @@ async function handle_(req: Request): Promise<Response> {
     case 'updateEntry': vault.updateEntry(req.entryId, req.fields); return { ok: true };
     case 'updateGroup': vault.updateGroup(req.groupId, req.fields); return { ok: true };
     case 'save': {
+      if (currentSource?.kind === 'cloud') {
+        try {
+          const out = await saveCloud(currentSource, depsFor(currentSource));
+          return out.merged ? ({ ok: true, merged: true } as Response) : { ok: true };
+        } catch (e) { return { ok: false, error: 'saveFailed' }; }
+      }
       if (!handle) return { ok: false, error: 'noFile' };
       try { const bytes = await vault.serialize(); await writeBytes(handle, bytes); return { ok: true }; }
       catch (e) { return { ok: false, error: 'saveFailed' }; }
     }
+    case 'connectCloud': {
+      try {
+        await getAccessToken(req.provider === 'dropbox' ? DROPBOX_OAUTH : GDRIVE_OAUTH);
+        return { ok: true };
+      } catch { return { ok: false, error: 'authRequired' }; }
+    }
+    case 'listRemoteFiles': {
+      try { return { ok: true, files: await providerFor(req.provider).listKdbxFiles() }; }
+      catch { return { ok: false, error: 'authRequired' }; }
+    }
+    case 'openRemote': {
+      const src: CloudFileSource = { kind: 'cloud', provider: req.provider, fileId: req.fileId, basedOnRev: '' };
+      try {
+        const keyFile = req.keyFile ? new Uint8Array(req.keyFile).buffer : null;
+        const out = await openCloud(src, depsFor(src), req.password, keyFile);
+        currentSource = src;
+        const s = await loadSettings(); autolock.arm(s.autoCloseHours); refreshAllIcons();
+        return out.merged ? ({ ok: true, merged: true } as Response) : { ok: true };
+      } catch (e) {
+        if (isInvalidKey(e)) return { ok: false, error: 'badCredentials' };
+        return { ok: false, error: `openFailed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+    case 'getSyncStatus': {
+      if (!currentSource || currentSource.kind !== 'cloud')
+        return { ok: true, source: currentSource?.kind ?? null, pendingUpload: false, online: onlineNow() };
+      const rec = await getCache(cacheKey(currentSource.provider, currentSource.fileId));
+      return {
+        ok: true, source: 'cloud', provider: currentSource.provider,
+        pendingUpload: rec?.pendingUpload ?? false, online: onlineNow(), lastSyncedAt: rec?.lastSyncedAt,
+      };
+    }
+    case 'disconnectCloud': { await disconnect(req.provider); return { ok: true }; }
     case 'generatePassword':
       return { ok: true, password: generatePassword(req.opts ?? DEFAULT_PWGEN) };
     case 'fillRequest': {
@@ -72,7 +123,15 @@ chrome.runtime.onMessage.addListener((req: Request, _s, sendResponse) => {
 
 // keepalive: alarm heartbeat keeps the SW from idling out while unlocked
 chrome.alarms.create('keepalive', { periodInMinutes: 0.4 });
-chrome.alarms.onAlarm.addListener(() => { if (vault.isOpen()) void chrome.runtime.getPlatformInfo(); });
+
+// retry deferred cloud uploads when connectivity returns or on the keepalive tick
+async function tryRetry() {
+  if (currentSource?.kind === 'cloud' && onlineNow()) {
+    try { await retryPending(currentSource, depsFor(currentSource)); } catch { /* stays pending */ }
+  }
+}
+if (typeof self !== 'undefined' && 'addEventListener' in self) self.addEventListener('online', () => void tryRetry());
+chrome.alarms.onAlarm.addListener(a => { if (a.name === 'keepalive') void tryRetry(); });
 
 // lock on browser close / SW suspend
 chrome.runtime.onSuspend.addListener(doLock);
