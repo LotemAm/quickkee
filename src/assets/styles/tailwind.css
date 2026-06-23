@@ -248,4 +248,126 @@
     color: var(--text-muted);
     margin-bottom: 8px;
   }
+
+  /* Storage source picker (unlock screen) */
+  .source-picker {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+    background: var(--btn-bg);
+    border-radius: 10px;
+    padding: 4px;
+  }
+  .source-picker button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.2;
+    padding: 9px 4px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  .source-picker button:hover { color: var(--text); }
+  .source-picker button[aria-selected="true"] {
+    background: var(--surface);
+    color: var(--primary-text);
+    box-shadow: var(--shadow);
+  }
+
+  /* Cloud file list */
+  .cloud-file-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  .cloud-file-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    text-align: left;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .cloud-file-item:hover { border-color: var(--primary); background: var(--btn-bg); }
+  .cloud-file-item svg { color: var(--primary-text); flex: none; }
+  .cloud-file-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cloud-file-empty {
+    color: var(--text-muted);
+    font-size: 13px;
+    text-align: center;
+    padding: 14px;
+  }
+
+  /* Selected cloud file chip */
+  .picked-file {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text);
+    background: var(--btn-bg);
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+  .picked-file svg { color: var(--primary-text); flex: none; }
+  .picked-file .picked-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Inline text-style button */
+  .link-btn {
+    border: none;
+    background: transparent;
+    color: var(--primary-text);
+    font-size: inherit;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 0;
+  }
+  .link-btn:hover { text-decoration: underline; }
+
+  /* Options: connected accounts */
+  .account-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .account-row:last-child { border-bottom: none; padding-bottom: 0; }
+  .account-row > span { flex: 1; font-size: 14px; font-weight: 500; }
+
+  .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    background: transparent;
+    color: var(--text-muted);
+    transition: background .15s, color .15s, border-color .15s;
+  }
+  .btn-secondary:hover { color: var(--danger-text); border-color: var(--danger); }
 }

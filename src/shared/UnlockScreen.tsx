@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ShieldCheck, FileKey, KeyRound, Lock } from 'lucide-react';
+import { ShieldCheck, FileKey, KeyRound, Lock, HardDrive, Box, Cloud } from 'lucide-react';
 import { sendToSW } from './messages';
 import { pickAndStoreDb, readKeyFile } from './pickFile';
 import { loadHandle, ensurePermission } from '../background/fileHandle';
@@ -42,10 +42,16 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: () => void }) {
         <div className="app-title justify-center text-base">
           <ShieldCheck size={20} className="app-logo" /> QuickKee
         </div>
-        <div className="source-tabs" role="tablist">
-          <button role="tab" aria-selected={src === 'local'} onClick={() => { setSrc('local'); setPicked(null); }}>Local file</button>
-          <button role="tab" aria-selected={src === 'dropbox'} onClick={() => { setSrc('dropbox'); setPicked(null); }}>Dropbox</button>
-          <button role="tab" aria-selected={src === 'gdrive'} onClick={() => { setSrc('gdrive'); setPicked(null); }}>Google Drive</button>
+        <div className="source-picker" role="tablist">
+          <button role="tab" aria-selected={src === 'local'} onClick={() => { setSrc('local'); setPicked(null); }}>
+            <HardDrive size={17} /> Local file
+          </button>
+          <button role="tab" aria-selected={src === 'dropbox'} onClick={() => { setSrc('dropbox'); setPicked(null); }}>
+            <Box size={17} /> Dropbox
+          </button>
+          <button role="tab" aria-selected={src === 'gdrive'} onClick={() => { setSrc('gdrive'); setPicked(null); }}>
+            <Cloud size={17} /> Google Drive
+          </button>
         </div>
         {src === 'local' && (
           <button className="btn w-full" onClick={async () => { try { setDbName(await pickAndStoreDb()); } catch (e) { if ((e as DOMException).name !== 'AbortError') throw e; } }}>
@@ -56,10 +62,10 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: () => void }) {
           <CloudConnect provider={src} onPicked={setPicked} />
         )}
         {src !== 'local' && picked && (
-          <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            <FileKey size={13} style={{ display: 'inline', marginRight: 4 }} />
-            {picked.name}
-            <button className="link-btn" style={{ marginLeft: 8 }} onClick={() => setPicked(null)}>Change</button>
+          <div className="picked-file">
+            <FileKey size={15} />
+            <span className="picked-name">{picked.name}</span>
+            <button className="link-btn" onClick={() => setPicked(null)}>Change</button>
           </div>
         )}
         <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-muted)' }}>

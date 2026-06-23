@@ -42,7 +42,10 @@ export function Panel() {
   useEffect(() => { loadSettings().then(s => { applyTheme(s.theme); setClearSecs(s.clipboardClearSeconds); }); }, []);
   const reload = () => sendToSW({ type: 'getTree' }).then(r => 'tree' in r && setTree(r.tree));
   useEffect(() => { if (!locked) reload(); }, [locked]);
-  if (locked) return <UnlockScreen onUnlocked={refresh} />;
+  if (locked) return (
+    <div className="min-h-screen flex flex-col justify-center" style={{ background: 'var(--bg)' }}>
+      <UnlockScreen onUnlocked={refresh} />
+    </div>);
   async function save() { const r = await sendToSW({ type: 'save' });
     setSaved(r.ok ? 'Saved' : 'Save failed'); refresh(); setTimeout(() => setSaved(''), 2000); }
   return (

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Cloud, FileKey } from 'lucide-react';
 import { sendToSW } from './messages';
 import type { RemoteFile } from '../background/sources/cloudProvider';
 
@@ -30,20 +31,22 @@ export function CloudConnect({ provider, onPicked }: {
       <ul className="cloud-file-list">
         {files.map(f => (
           <li key={f.fileId}>
-            <button className="link-btn" onClick={() => onPicked(f)}>{f.name}</button>
+            <button className="cloud-file-item" onClick={() => onPicked(f)}>
+              <FileKey size={15} /> <span>{f.name}</span>
+            </button>
           </li>
         ))}
-        {files.length === 0 && <li>No .kdbx files found.</li>}
+        {files.length === 0 && <li className="cloud-file-empty">No .kdbx files found.</li>}
       </ul>
     );
   }
 
   return (
     <div>
-      <button className="btn" onClick={connect} disabled={busy}>
-        {busy ? 'Connecting…' : `Connect ${provider === 'dropbox' ? 'Dropbox' : 'Google Drive'}`}
+      <button className="btn w-full" onClick={connect} disabled={busy}>
+        <Cloud size={15} /> {busy ? 'Connecting…' : `Connect ${provider === 'dropbox' ? 'Dropbox' : 'Google Drive'}`}
       </button>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <p className="alert-error" role="alert">{error}</p>}
     </div>
   );
 }
