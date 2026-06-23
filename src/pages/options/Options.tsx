@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ShieldCheck, Monitor, Sun, Moon } from 'lucide-react';
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, type Settings } from '../../shared/settings';
 import { applyTheme, type ThemeMode } from '../../shared/theme';
+import { sendToSW } from '../../shared/messages';
 
 const THEME_OPTIONS: { value: ThemeMode; label: string; icon: typeof Monitor }[] = [
   { value: 'system', label: 'System', icon: Monitor },
@@ -47,6 +48,17 @@ export function Options() {
               {[0, 15, 30, 60].map(x => <option key={x} value={x}>{x === 0 ? 'never' : `${x}s`}</option>)}
             </select>
           </label>
+        </section>
+
+        <section className="card space-y-3">
+          <div className="section-title">Connected accounts</div>
+          {(['dropbox', 'gdrive'] as const).map(p => (
+            <div key={p} className="account-row">
+              <span>{p === 'dropbox' ? 'Dropbox' : 'Google Drive'}</span>
+              <button className="btn" onClick={() => { void sendToSW({ type: 'connectCloud', provider: p }); }}>Connect</button>
+              <button className="btn-secondary" onClick={() => { void sendToSW({ type: 'disconnectCloud', provider: p }); }}>Sign out</button>
+            </div>
+          ))}
         </section>
 
         <section className="card space-y-3">
