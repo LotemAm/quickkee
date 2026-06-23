@@ -5407,6 +5407,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"lucide-react@npm:^1.21.0":
+  version: 1.21.0
+  resolution: "lucide-react@npm:1.21.0"
+  peerDependencies:
+    react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
+  checksum: 10c0/55f914e3bc06425064efb4d4d77031c2565294910c362ffd1f5b2eaabd8ee31d682b5749dde5e1d3071ecbf625bbce0d810d1a271a27ecc60b50e908a4f6133d
+  languageName: node
+  linkType: hard
+
 "lz-string@npm:^1.5.0":
   version: 1.5.0
   resolution: "lz-string@npm:1.5.0"
@@ -7387,6 +7396,7 @@ __metadata:
     hash-wasm: "npm:^4.12.0"
     jsdom: "npm:^29.1.1"
     kdbxweb: "npm:^2.1.1"
+    lucide-react: "npm:^1.21.0"
     nodemon: "npm:^3.1.10"
     react: "npm:^19.1.0"
     react-dom: "npm:^19.1.0"
