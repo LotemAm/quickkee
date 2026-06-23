@@ -56,7 +56,7 @@ export async function installDb(page: Page, kdbxPath: string = E2E_KDBX): Promis
 }
 
 export async function swCmd(page: Page, msg: Record<string, unknown>): Promise<any> {
-  return page.evaluate((m) => chrome.runtime.sendMessage({ __qk: 'test', ...m }), msg);
+  return page.evaluate((m) => chrome.runtime.sendMessage({ ...m, __qk: 'test' }), msg);
 }
 
 export async function openPopupForTab(

@@ -40,6 +40,15 @@ Add a CSP to `manifest.json` that permits WASM on extension pages and the servic
 1. **Stop swallowing the unlock error.** `src/pages/background/index.ts` unlock handler does `catch { return { ok: false, error: 'badCredentials' } }`. This anti-pattern hid a non-credential failure for the whole project lifetime. Recommend distinguishing credential errors from operational errors (e.g. log the real error and return a distinct `error: 'openFailed'` for non-credential exceptions) so a future runtime failure is diagnosable rather than mislabeled "wrong password." Track as a Minor fast-follow.
 2. **Add a CSP regression guard.** Consider asserting in a test (or the E2E suite README note) that `dist_chrome/manifest.json` contains `wasm-unsafe-eval`, so a future manifest refactor can't silently re-break unlock.
 
+## Tracked follow-ups (from final whole-branch review, 2026-06-23)
+
+Final review verdict: **Ready to merge** — no Critical/Important; seam-strip and CSP minimality empirically re-verified against a real `yarn build:chrome`. Two substantive fast-follows are tracked here (not done on this branch, since #1 is a product-behavior change):
+
+1. **Stop swallowing the unlock error** (`src/pages/background/index.ts:30`). The bare `catch { return badCredentials }` masked the WASM `CompileError` as "wrong password" for the project's lifetime. Distinguish credential failures (kdbxweb credential error) from operational failures — e.g. return a distinct `openFailed` code for non-credential exceptions and log the underlying error — with matching UI copy in `UnlockScreen.tsx`.
+2. **Add a CSP regression guard.** Nothing asserts the built `dist_chrome/manifest.json` still contains `wasm-unsafe-eval`; a future manifest refactor could silently re-break unlock. Add a cheap check (unit test on the built manifest, or fold into the seam-strip check).
+
+Deferred Minor (test-only, harmless): `saveTestBytes` exported unguarded (tree-shaken from prod); `servers.spec.ts` uses `input[type=password]` vs `input#password`. The `swCmd` spread-override footgun was hardened in-branch (`{ ...m, __qk: 'test' }`).
+
 ## Verification record
 
 - `npx playwright test tests/e2e/specs/unlock.spec.ts` → pass (was failing pre-fix).
