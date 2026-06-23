@@ -88,7 +88,12 @@ function ensureArgon() {
 export async function reReadKdbx(page: Page, password = 'correct horse'): Promise<kdbxweb.Kdbx> {
   ensureArgon();
   const b64: string = await page.evaluate(() => new Promise<string>((res, rej) => {
-    const open = indexedDB.open('quickkee', 1);
+    const open = indexedDB.open('quickkee', 2);
+    open.onupgradeneeded = () => {
+      const db = open.result;
+      if (!db.objectStoreNames.contains('handles')) db.createObjectStore('handles');
+      if (!db.objectStoreNames.contains('cache')) db.createObjectStore('cache');
+    };
     open.onsuccess = () => {
       const req = open.result.transaction('handles', 'readonly').objectStore('handles').get('testBytes');
       req.onsuccess = () => {

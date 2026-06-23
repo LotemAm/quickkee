@@ -6,7 +6,7 @@ import { generatePassword, DEFAULT_PWGEN } from '../../shared/pwgen';
 import { updateIconForTab } from '../../background/icon';
 import { shouldWarnCertError } from '../../background/certwarn';
 import type { Request, Response } from '../../shared/messages';
-import { providerFor } from './cloudRouting';
+import { providerFor, __hasOverride } from './cloudRouting';
 import { openCloud, saveCloud, retryPending, type SyncDeps } from '../../background/sync';
 import { getAccessToken, disconnect, DROPBOX_OAUTH, GDRIVE_OAUTH } from '../../background/sources/oauth';
 import { getCache, cacheKey } from '../../background/cache';
@@ -72,6 +72,8 @@ async function handle_(req: Request): Promise<Response> {
       catch (e) { return { ok: false, error: 'saveFailed' }; }
     }
     case 'connectCloud': {
+      // In test mode with a fake provider installed, skip real OAuth.
+      if (import.meta.env.VITE_QK_TEST === '1' && __hasOverride()) return { ok: true };
       try {
         await getAccessToken(req.provider === 'dropbox' ? DROPBOX_OAUTH : GDRIVE_OAUTH);
         return { ok: true };
@@ -194,6 +196,31 @@ if (import.meta.env.VITE_QK_TEST === '1') {
           break;
         }
         case 'warned': send({ tabs: Array.from(warnedTabs) }); break;
+        case 'cloudInstall': {
+          // Install a fake provider holding the given base64 .kdbx as remote rev "r1".
+          const fake = (await import('./cloudRouting')).__makeFake(req.provider);
+          const bin = atob(req.b64); const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          fake.setFile(req.fileId, req.name, bytes.buffer, 'r1');
+          (await import('./cloudRouting')).__setProviderOverride(fake);
+          (globalThis as any).__qkFake = fake;
+          send({ ok: true });
+          break;
+        }
+        case 'cloudSetRemote': {
+          // Replace remote bytes + bump rev to simulate another device's push.
+          const fake = (globalThis as any).__qkFake as import('../../background/sources/fakeCloudProvider').FakeCloudProvider;
+          const bin = atob(req.b64); const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          fake.setFile(req.fileId, req.name, bytes.buffer, 'r2');
+          send({ ok: true });
+          break;
+        }
+        case 'cloudUploads': {
+          const fake = (globalThis as any).__qkFake as import('../../background/sources/fakeCloudProvider').FakeCloudProvider;
+          send({ count: fake?.uploads.length ?? 0 });
+          break;
+        }
         default: send({});
       }
     })();
