@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import manifest from '../manifest.json';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -19,4 +20,18 @@ function csp(file: string): string {
 // manifest.json, so the base CSP below is what ships in both prod and dev.
 test('manifest.json CSP allows wasm-unsafe-eval for Argon2', () => {
   expect(csp('manifest.json')).toContain('wasm-unsafe-eval');
+});
+
+test('manifest grants identity permission for OAuth', () => {
+  expect(manifest.permissions).toContain('identity');
+});
+
+test('manifest grants host permissions for both cloud providers', () => {
+  const hosts = manifest.host_permissions ?? [];
+  expect(hosts).toEqual(expect.arrayContaining([
+    'https://api.dropboxapi.com/*',
+    'https://content.dropboxapi.com/*',
+    'https://www.googleapis.com/*',
+    'https://oauth2.googleapis.com/*',
+  ]));
 });

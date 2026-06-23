@@ -19,10 +19,15 @@
     "scripting",
     "tabs",
     "sidePanel",
-    "webNavigation"
+    "webNavigation",
+    "identity"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "<all_urls>",
+    "https://api.dropboxapi.com/*",
+    "https://content.dropboxapi.com/*",
+    "https://www.googleapis.com/*",
+    "https://oauth2.googleapis.com/*"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
