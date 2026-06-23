@@ -104,6 +104,7 @@ async function pushOrMerge(src: CloudFileSource, deps: SyncDeps, bytes: ArrayBuf
     }
     // Remote drifted or upload conflicted → download, merge, re-upload.
     const { bytes: remoteBytes, rev } = await provider.download(src.fileId);
+    // vault already holds the local edits in memory; mergeRemote folds in the remote additions. If the vault is locked (cold retry), mergeRemote throws and the catch below keeps pendingUpload=true — no edits lost.
     await vault.mergeRemote(remoteBytes);
     const mergedBytes = await vault.serialize();
     const res = await provider.upload(src.fileId, mergedBytes, rev);

@@ -165,3 +165,20 @@ test('retryPending returns null when nothing is pending', async () => {
     { bytes: remote, basedOnRev: 'r1', lastSyncedAt: 0, pendingUpload: false });
   expect(await retryPending(source('f1', 'r1'), deps(p))).toBeNull();
 });
+
+test('retryPending on a locked vault with drifted remote fails safe (no edits lost)', async () => {
+  const localEdited = await freshRemoteBytes(v => {
+    const id = v.entriesForUrl('https://github.com')[0].id; v.updateEntry(id, { UserName: 'local-user' });
+  });
+  const remoteEdited = await freshRemoteBytes();
+  const p = new FakeCloudProvider(); p.setFile('f1', 'a.kdbx', remoteEdited, 'r2'); // remote drifted to r2
+  await putCache(cacheKey('dropbox', 'f1'),
+    { bytes: localEdited, basedOnRev: 'r1', lastSyncedAt: 0, pendingUpload: true });
+  const d = deps(p); const src = source('f1', 'r1'); // FRESH unopened vault; no openCloud first
+  const out = await retryPending(src, d); // merge path on a locked vault → throws inside, caught
+  expect(out?.pendingUpload).toBe(true);
+  expect(p.uploads).toHaveLength(0);
+  const cache = await getCache(cacheKey('dropbox', 'f1'));
+  expect(cache?.pendingUpload).toBe(true);
+  expect(new Uint8Array(cache!.bytes)).toEqual(new Uint8Array(localEdited));
+});
