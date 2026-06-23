@@ -82,12 +82,19 @@ async function exchangeCode(cfg: ProviderOAuthConfig, code: string, verifier: st
   return res.json() as Promise<TokenResponse>;
 }
 
+/** Refresh token was rejected by the provider (revoked/expired) — re-auth is required. */
+export class AuthRevokedError extends Error {}
+
 async function refreshAccess(cfg: ProviderOAuthConfig, refreshToken: string): Promise<TokenResponse> {
   const body = new URLSearchParams({
     grant_type: 'refresh_token', refresh_token: refreshToken, client_id: cfg.clientId,
   });
+  // A network failure (offline, captive portal) rejects here and propagates as-is — a
+  // deferrable error, NOT a reason to force interactive re-auth.
   const res = await fetch(cfg.tokenUrl, { method: 'POST', body });
-  if (!res.ok) throw new Error('authRequired');
+  // Only a 4xx means the refresh token is genuinely bad. 5xx/transient stays deferrable.
+  if (res.status >= 400 && res.status < 500) throw new AuthRevokedError('authRequired');
+  if (!res.ok) throw new Error('refreshTransient');
   return res.json() as Promise<TokenResponse>;
 }
 
@@ -116,8 +123,10 @@ export async function getAccessToken(cfg: ProviderOAuthConfig): Promise<string> 
       const tok = await refreshAccess(cfg, refresh);
       if (tok.refresh_token) await setRefreshToken(cfg.provider, tok.refresh_token);
       return tok.access_token;
-    } catch {
-      // refresh expired/revoked → fall through to interactive
+    } catch (e) {
+      // Genuinely revoked/expired → re-auth interactively. Network/transient errors
+      // rethrow so the caller (e.g. saveCloud) defers as pending instead of popping OAuth.
+      if (!(e instanceof AuthRevokedError)) throw e;
     }
   }
   return runInteractiveFlow(cfg);

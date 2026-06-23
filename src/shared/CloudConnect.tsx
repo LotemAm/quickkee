@@ -8,14 +8,21 @@ export function CloudConnect({ provider, onPicked }: {
 }) {
   const [files, setFiles] = useState<RemoteFile[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   async function connect() {
+    if (busy) return; // guard against double-click firing two OAuth flows
+    setBusy(true);
     setError(null);
-    const c = await sendToSW({ type: 'connectCloud', provider });
-    if (!c.ok) { setError('Could not connect. Try again.'); return; }
-    const r = await sendToSW({ type: 'listRemoteFiles', provider });
-    if ('files' in r) setFiles(r.files);
-    else setError('Could not list files.');
+    try {
+      const c = await sendToSW({ type: 'connectCloud', provider });
+      if (!c.ok) { setError('Could not connect. Try again.'); return; }
+      const r = await sendToSW({ type: 'listRemoteFiles', provider });
+      if ('files' in r) setFiles(r.files);
+      else setError('Could not list files.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (files) {
@@ -33,8 +40,8 @@ export function CloudConnect({ provider, onPicked }: {
 
   return (
     <div>
-      <button className="btn" onClick={connect}>
-        Connect {provider === 'dropbox' ? 'Dropbox' : 'Google Drive'}
+      <button className="btn" onClick={connect} disabled={busy}>
+        {busy ? 'Connecting…' : `Connect ${provider === 'dropbox' ? 'Dropbox' : 'Google Drive'}`}
       </button>
       {error && <p className="error" role="alert">{error}</p>}
     </div>

@@ -32,6 +32,7 @@ export type Response =
   | Ok<{ tree: TreeNode }>
   | Ok<{ entryId: string }>
   | Ok<{ password: string }>
+  | Ok<{ merged?: boolean }>
   | Ok<{ files: RemoteFile[] }>
   | Ok<{ source: DbSource['kind'] | null; provider?: 'dropbox' | 'gdrive'; pendingUpload: boolean; online: boolean; lastSyncedAt?: number }>;
 

@@ -64,7 +64,7 @@ async function handle_(req: Request): Promise<Response> {
       if (currentSource?.kind === 'cloud') {
         try {
           const out = await saveCloud(currentSource, depsFor(currentSource));
-          return out.merged ? ({ ok: true, merged: true } as Response) : { ok: true };
+          return out.merged ? { ok: true, merged: true } : { ok: true };
         } catch (e) { return { ok: false, error: 'saveFailed' }; }
       }
       if (!handle) return { ok: false, error: 'noFile' };
@@ -90,7 +90,7 @@ async function handle_(req: Request): Promise<Response> {
         const out = await openCloud(src, depsFor(src), req.password, keyFile);
         currentSource = src;
         const s = await loadSettings(); autolock.arm(s.autoCloseHours); refreshAllIcons();
-        return out.merged ? ({ ok: true, merged: true } as Response) : { ok: true };
+        return out.merged ? { ok: true, merged: true } : { ok: true };
       } catch (e) {
         if (isInvalidKey(e)) return { ok: false, error: 'badCredentials' };
         return { ok: false, error: `openFailed: ${e instanceof Error ? e.message : String(e)}` };
@@ -105,7 +105,13 @@ async function handle_(req: Request): Promise<Response> {
         pendingUpload: rec?.pendingUpload ?? false, online: onlineNow(), lastSyncedAt: rec?.lastSyncedAt,
       };
     }
-    case 'disconnectCloud': { await disconnect(req.provider); return { ok: true }; }
+    case 'disconnectCloud': {
+      await disconnect(req.provider);
+      // If the active vault is this provider's, lock so the next save can't route to a
+      // now-credential-less provider (surprise OAuth popup). Local edits stay pendingUpload in cache.
+      if (currentSource?.kind === 'cloud' && currentSource.provider === req.provider) doLock();
+      return { ok: true };
+    }
     case 'generatePassword':
       return { ok: true, password: generatePassword(req.opts ?? DEFAULT_PWGEN) };
     case 'fillRequest': {

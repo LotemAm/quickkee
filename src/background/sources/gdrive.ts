@@ -43,6 +43,9 @@ export class GDriveProvider implements CloudProvider {
 
   async upload(fileId: string, bytes: ArrayBuffer, basedOnRev: string): Promise<UploadResult> {
     // Drive has no conditional-write header; guard by re-checking the head revision.
+    // Residual race: this is check-then-act, not atomic. A remote push landing between
+    // getRevision and the PATCH below is overwritten silently (lost *remote* update, never
+    // local). Inherent to the Drive media API; narrower than Dropbox's server-side update:rev.
     const current = await this.getRevision(fileId);
     if (current !== basedOnRev) return { ok: false, conflict: true };
     const res = await fetch(`${UPLOAD}/files/${fileId}?uploadType=media&fields=headRevisionId`, {
