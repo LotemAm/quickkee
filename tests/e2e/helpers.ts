@@ -18,12 +18,14 @@ export const test = base.extend<{
   context: async ({}, use) => {
     const ctx = await chromium.launchPersistentContext('', {
       headless: false,
+      permissions: ['clipboard-read', 'clipboard-write'],
       args: [
         `--disable-extensions-except=${DIST}`,
         `--load-extension=${DIST}`,
         '--no-first-run',
       ],
     });
+    await ctx.grantPermissions(['clipboard-read', 'clipboard-write']);
     await use(ctx);
     await ctx.close();
   },
