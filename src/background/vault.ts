@@ -4,6 +4,12 @@ import { urlMatches } from './matcher';
 import type { EntryView, EntryField, TreeNode } from '../shared/entry';
 
 const STD = new Set(['Title', 'UserName', 'Password', 'URL', 'Notes']);
+
+/** True only when an error means the password/key file was wrong — not when load
+ *  failed for another reason (corrupt file, missing Argon2/WASM, runtime fault). */
+export function isInvalidKey(e: unknown): boolean {
+  return e instanceof kdbxweb.KdbxError && e.code === kdbxweb.Consts.ErrorCodes.InvalidKey;
+}
 const str = (v: unknown): string =>
   v == null ? '' : v instanceof kdbxweb.ProtectedValue ? v.getText() : String(v);
 

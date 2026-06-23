@@ -1,4 +1,4 @@
-import { Vault } from '../../background/vault';
+import { Vault, isInvalidKey } from '../../background/vault';
 import { AutoLock } from '../../background/autolock';
 import { loadHandle, ensurePermission, readBytes, writeBytes } from '../../background/fileHandle';
 import { loadSettings } from '../../shared/settings';
@@ -27,7 +27,11 @@ async function handle_(req: Request): Promise<Response> {
         const bytes = await readBytes(handle);
         const keyFile = req.keyFile ? new Uint8Array(req.keyFile).buffer : null;
         await vault.open(bytes, req.password, keyFile);
-      } catch { return { ok: false, error: 'badCredentials' }; }
+      } catch (e) {
+        if (isInvalidKey(e)) return { ok: false, error: 'badCredentials' };
+        // Surface non-credential failures (corrupt file, missing WASM/CSP, runtime) instead of masking them.
+        return { ok: false, error: `unlockFailed: ${e instanceof Error ? e.message : String(e)}` };
+      }
       const s = await loadSettings(); autolock.arm(s.autoCloseHours); refreshAllIcons();
       return { ok: true };
     }

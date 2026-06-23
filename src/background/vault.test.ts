@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Vault } from './vault';
+import { Vault, isInvalidKey } from './vault';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -55,4 +55,25 @@ test('create entry appears in url matches', async () => {
 test('createEntry throws on unknown groupId', async () => {
   const v = new Vault(); await v.open(fixture(), 'correct horse', null);
   expect(() => v.createEntry('does-not-exist', { Title: 'x' })).toThrow('no group');
+});
+
+test('isInvalidKey is true for wrong password', async () => {
+  const v = new Vault();
+  const err = await v.open(fixture(), 'wrong password', null).then(() => null, e => e);
+  expect(err).not.toBeNull();
+  expect(isInvalidKey(err)).toBe(true);
+});
+
+test('isInvalidKey is false for a corrupt/unreadable file', async () => {
+  const v = new Vault();
+  const garbage = new ArrayBuffer(64); // not a valid kdbx container
+  const err = await v.open(garbage, 'correct horse', null).then(() => null, e => e);
+  expect(err).not.toBeNull();
+  expect(isInvalidKey(err)).toBe(false);
+});
+
+test('isInvalidKey is false for non-kdbx errors', () => {
+  expect(isInvalidKey(new Error('CSP blocked wasm'))).toBe(false);
+  expect(isInvalidKey('not an error')).toBe(false);
+  expect(isInvalidKey(null)).toBe(false);
 });
