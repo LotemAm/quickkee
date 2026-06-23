@@ -12,8 +12,7 @@ export function CreateForm({ url, groupId, onCreated }: { url: string; groupId: 
   }
   return (
     <div className="card space-y-2">
-      <div className="section-title">New entry</div>
-      <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{url}</p>
+      <p className="text-sm font-medium" style={{ color: 'var(--text)' }}>New entry for <span className="break-all font-normal" style={{ color: 'var(--text-muted)' }}>{url}</span></p>
       <input className="input" placeholder="Title" value={title} onChange={e => setTitle(e.target.value)} />
       <input className="input" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} />
       <input className="input" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} />
