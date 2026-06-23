@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ShieldCheck, Save, FolderClosed, FileText } from 'lucide-react';
 import { useStatus } from '../../shared/useStatus';
 import { UnlockScreen } from '../../shared/UnlockScreen';
 import { sendToSW } from '../../shared/messages';
@@ -7,15 +8,30 @@ import { applyTheme } from '../../shared/theme';
 import type { TreeNode } from '../../shared/entry';
 import { EntryEditor } from './EntryEditor';
 
-function TreeView({ node, onPick }: { node: TreeNode; onPick: (id: string) => void }) {
-  return (<div className="ml-2">
-    <div className="font-medium text-sm mt-1">{node.name}</div>
-    {node.entries.map(e => (
-      <button key={e.id} className="block text-left text-sm hover:underline" onClick={() => onPick(e.id)}>
-        {e.title} {e.expired && <span className="text-red-600">(expired)</span>}
-      </button>))}
-    {node.children.map(c => <TreeView key={c.groupId} node={c} onPick={onPick} />)}
-  </div>);
+function TreeView({ node, sel, onPick, depth = 0 }: { node: TreeNode; sel: string | null; onPick: (id: string) => void; depth?: number }) {
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 px-2 py-1 text-sm font-medium"
+        style={{ color: 'var(--text-muted)', paddingLeft: `${8 + depth * 12}px` }}>
+        <FolderClosed size={13} /> {node.name}
+      </div>
+      {node.entries.map(e => (
+        <button key={e.id} onClick={() => onPick(e.id)}
+          className="flex items-center gap-1.5 w-full text-left text-sm rounded-md py-1 pr-2 transition-colors"
+          style={{
+            paddingLeft: `${20 + depth * 12}px`,
+            color: 'var(--text)',
+            background: sel === e.id ? 'var(--primary-tint)' : 'transparent',
+          }}
+          onMouseEnter={ev => { if (sel !== e.id) ev.currentTarget.style.background = 'var(--btn-bg)'; }}
+          onMouseLeave={ev => { if (sel !== e.id) ev.currentTarget.style.background = 'transparent'; }}>
+          <FileText size={13} style={{ color: 'var(--text-muted)' }} />
+          <span className="truncate">{e.title}</span>
+          {e.expired && <span className="badge-danger badge ml-auto">expired</span>}
+        </button>))}
+      {node.children.map(c => <TreeView key={c.groupId} node={c} sel={sel} onPick={onPick} depth={depth + 1} />)}
+    </div>
+  );
 }
 
 export function Panel() {
@@ -30,17 +46,22 @@ export function Panel() {
   async function save() { const r = await sendToSW({ type: 'save' });
     setSaved(r.ok ? 'Saved' : 'Save failed'); refresh(); setTimeout(() => setSaved(''), 2000); }
   return (
-    <div className="flex h-screen">
-      <div className="w-1/2 overflow-auto border-r">
-        <div className="p-2 flex justify-between items-center border-b">
-          <span className="font-semibold">QuickKee</span>
-          <button className="btn-primary" disabled={!dirty} onClick={save}>
-            {dirty ? 'Save *' : 'Saved'} {saved && `· ${saved}`}</button>
+    <div className="flex h-screen" style={{ background: 'var(--bg)' }}>
+      <div className="w-1/2 max-w-sm flex flex-col" style={{ borderRight: '1px solid var(--border)' }}>
+        <header className="app-header">
+          <span className="app-title"><ShieldCheck size={18} className="app-logo" /> QuickKee</span>
+          <button className="btn-primary btn-xs" disabled={!dirty} onClick={save}>
+            <Save size={13} /> {dirty ? 'Save *' : 'Saved'}{saved && ` · ${saved}`}
+          </button>
+        </header>
+        <div className="overflow-auto py-2 flex-1">
+          {tree && <TreeView node={tree} sel={sel} onPick={setSel} />}
         </div>
-        {tree && <TreeView node={tree} onPick={setSel} />}
       </div>
-      <div className="w-1/2 overflow-auto">
-        {sel && <EntryEditor entryId={sel} clearSecs={clearSecs} onChanged={() => { refresh(); reload(); }} />}
+      <div className="flex-1 overflow-auto">
+        {sel
+          ? <EntryEditor entryId={sel} clearSecs={clearSecs} onChanged={() => { refresh(); reload(); }} />
+          : <div className="empty-state mt-12">Select an entry to view and edit its details.</div>}
       </div>
     </div>);
 }
