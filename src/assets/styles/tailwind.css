@@ -185,6 +185,32 @@
   }
   .icon-btn:hover { background: var(--btn-bg); color: var(--primary-text); }
 
+  .icon-btn-xs {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    background: transparent;
+    color: var(--text-muted);
+    transition: background .15s, color .15s;
+  }
+  .icon-btn-xs:hover { background: var(--surface); color: var(--primary-text); }
+
+  .input-sm {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 3px 7px;
+    font-size: 13px;
+    outline: none;
+  }
+  .input-sm:focus { border-color: var(--primary); box-shadow: 0 0 0 2px var(--ring); }
+
   .badge {
     display: inline-flex;
     align-items: center;

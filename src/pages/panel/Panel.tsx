@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ShieldCheck, Save, FolderClosed, FolderOpen, FileText, X, Lock } from 'lucide-react';
+import { ShieldCheck, Save, FolderClosed, FolderOpen, FileText, X, Lock,
+  ChevronRight, ChevronDown, Plus, Pencil, Trash2, Check } from 'lucide-react';
 import { useStatus } from '../../shared/useStatus';
 import { UnlockScreen } from '../../shared/UnlockScreen';
 import { sendToSW } from '../../shared/messages';
@@ -15,24 +16,78 @@ function findGroup(node: TreeNode, id: string): TreeNode | null {
   return null;
 }
 
-function GroupTree({ node, sel, onPick, depth = 0 }: { node: TreeNode; sel: string | null; onPick: (id: string) => void; depth?: number }) {
-  const active = sel === node.groupId;
+interface GroupOps {
+  sel: string | null;
+  expanded: Set<string>;
+  editing: string | null;
+  onPick: (id: string) => void;
+  onToggle: (id: string) => void;
+  onAdd: (parentId: string) => void;
+  onRename: (id: string, name: string) => void;
+  onStartEdit: (id: string) => void;
+  onCancelEdit: () => void;
+  onDelete: (node: TreeNode) => void;
+}
+
+function GroupTree({ node, ops, depth = 0 }: { node: TreeNode; ops: GroupOps; depth?: number }) {
+  const active = ops.sel === node.groupId;
+  const hasChildren = node.children.length > 0;
+  const open = ops.expanded.has(node.groupId);
+  const isEditing = ops.editing === node.groupId;
+  const isRoot = depth === 0;
+  const [draft, setDraft] = useState(node.name);
+  useEffect(() => { if (isEditing) setDraft(node.name); }, [isEditing, node.name]);
+
   return (
     <div>
-      <button onClick={() => onPick(node.groupId)}
-        className="flex items-center gap-1.5 w-full text-left text-sm rounded-md py-1 pr-2 transition-colors"
+      <div className="group flex items-center rounded-md pr-1 transition-colors"
         style={{
-          paddingLeft: `${8 + depth * 12}px`,
+          paddingLeft: `${4 + depth * 12}px`,
           fontWeight: active ? 600 : 500,
           color: active ? 'var(--primary)' : 'var(--text)',
           background: active ? 'var(--primary-tint)' : 'transparent',
         }}
         onMouseEnter={ev => { if (!active) ev.currentTarget.style.background = 'var(--btn-bg)'; }}
         onMouseLeave={ev => { if (!active) ev.currentTarget.style.background = 'transparent'; }}>
-        {active ? <FolderOpen size={14} /> : <FolderClosed size={14} />}
-        <span className="truncate">{node.name}</span>
-      </button>
-      {node.children.map(c => <GroupTree key={c.groupId} node={c} sel={sel} onPick={onPick} depth={depth + 1} />)}
+        <button className="shrink-0 p-0.5" aria-label={open ? 'Collapse' : 'Expand'}
+          style={{ visibility: hasChildren ? 'visible' : 'hidden' }}
+          onClick={() => ops.onToggle(node.groupId)}>
+          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        </button>
+        {isEditing ? (
+          <input autoFocus value={draft} className="input-sm flex-1 min-w-0 mr-1"
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') ops.onRename(node.groupId, draft.trim());
+              else if (e.key === 'Escape') ops.onCancelEdit();
+            }} />
+        ) : (
+          <button onClick={() => ops.onPick(node.groupId)}
+            className="flex items-center gap-1.5 flex-1 min-w-0 text-left text-sm py-1">
+            {active ? <FolderOpen size={14} /> : <FolderClosed size={14} />}
+            <span className="truncate">{node.name}</span>
+          </button>
+        )}
+        {isEditing ? (
+          <>
+            <button className="icon-btn-xs" aria-label="Save name" title="Save name"
+              onClick={() => ops.onRename(node.groupId, draft.trim())}><Check size={13} /></button>
+            <button className="icon-btn-xs" aria-label="Cancel" title="Cancel"
+              onClick={ops.onCancelEdit}><X size={13} /></button>
+          </>
+        ) : (
+          <span className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <button className="icon-btn-xs" aria-label="Add subgroup" title="Add subgroup"
+              onClick={() => ops.onAdd(node.groupId)}><Plus size={13} /></button>
+            <button className="icon-btn-xs" aria-label="Rename group" title="Rename group"
+              onClick={() => ops.onStartEdit(node.groupId)}><Pencil size={13} /></button>
+            {!isRoot && (
+              <button className="icon-btn-xs" aria-label="Delete group" title="Delete group"
+                onClick={() => ops.onDelete(node)}><Trash2 size={13} /></button>)}
+          </span>
+        )}
+      </div>
+      {open && node.children.map(c => <GroupTree key={c.groupId} node={c} ops={ops} depth={depth + 1} />)}
     </div>
   );
 }
@@ -43,12 +98,39 @@ export function Panel() {
   const [selGroup, setSelGroup] = useState<string | null>(null);
   const [selEntry, setSelEntry] = useState<string | null>(null);
   const [clearSecs, setClearSecs] = useState(30); const [saved, setSaved] = useState('');
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [editing, setEditing] = useState<string | null>(null);
   useEffect(() => { loadSettings().then(s => { applyTheme(s.theme); setClearSecs(s.clipboardClearSeconds); }); }, []);
   const reload = () => sendToSW({ type: 'getTree' }).then(r => {
     if (!('tree' in r)) return;
     setTree(r.tree);
     setSelGroup(g => g ?? r.tree.groupId);
+    setExpanded(e => e.size ? e : new Set([r.tree.groupId]));
   });
+
+  const toggle = (id: string) => setExpanded(e => {
+    const n = new Set(e); n.has(id) ? n.delete(id) : n.add(id); return n;
+  });
+  async function addGroup(parentId: string) {
+    const r = await sendToSW({ type: 'createGroup', parentId, name: 'New Group' });
+    setExpanded(e => new Set(e).add(parentId));
+    await reload(); refresh();
+    if ('groupId' in r) { setSelGroup(r.groupId); setSelEntry(null); setEditing(r.groupId); }
+  }
+  async function renameGroup(id: string, name: string) {
+    if (name) await sendToSW({ type: 'updateGroup', groupId: id, fields: { Name: name } });
+    setEditing(null); await reload(); refresh();
+  }
+  async function deleteGroup(node: TreeNode) {
+    const label = node.children.length || node.entries.length
+      ? `Delete "${node.name}" and everything inside it?`
+      : `Delete "${node.name}"?`;
+    if (!confirm(label)) return;
+    await sendToSW({ type: 'deleteGroup', groupId: node.groupId });
+    setSelGroup(g => g === node.groupId ? (tree ? tree.groupId : null) : g);
+    setSelEntry(null);
+    await reload(); refresh();
+  }
   useEffect(() => { if (!locked) reload(); }, [locked]);
   if (locked) return (
     <div className="min-h-screen flex flex-col justify-center" style={{ background: 'var(--bg)' }}>
@@ -76,7 +158,16 @@ export function Panel() {
       <div className="flex flex-1 min-h-0">
         {/* Left: groups only */}
         <div className="w-56 shrink-0 overflow-auto py-2" style={{ borderRight: '1px solid var(--border)' }}>
-          {tree && <GroupTree node={tree} sel={selGroup} onPick={id => { setSelGroup(id); setSelEntry(null); }} />}
+          {tree && <GroupTree node={tree} ops={{
+            sel: selGroup, expanded, editing,
+            onPick: id => { setSelGroup(id); setSelEntry(null); },
+            onToggle: toggle,
+            onAdd: addGroup,
+            onRename: renameGroup,
+            onStartEdit: setEditing,
+            onCancelEdit: () => setEditing(null),
+            onDelete: deleteGroup,
+          }} />}
         </div>
 
         {/* Right: entries of selected group */}

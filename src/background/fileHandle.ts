@@ -19,6 +19,29 @@ export async function loadHandle(): Promise<FileSystemFileHandle | null> {
 
 export async function clearHandle(): Promise<void> { await tx('handles', 'readwrite', s => s.delete(KEY)); }
 
+// --- Key-file handle (reference only; bytes re-read on demand, never cached) ---
+const KEYFILE_KEY = 'keyfile';
+
+export async function saveKeyHandle(h: FileSystemFileHandle): Promise<void> {
+  await tx('handles', 'readwrite', s => s.put(h, KEYFILE_KEY));
+}
+export async function loadKeyHandle(): Promise<FileSystemFileHandle | null> {
+  return (await tx<FileSystemFileHandle | undefined>('handles', 'readonly', s => s.get(KEYFILE_KEY))) ?? null;
+}
+export async function clearKeyHandle(): Promise<void> { await tx('handles', 'readwrite', s => s.delete(KEYFILE_KEY)); }
+
+// --- Last loaded cloud database (provider + file id/name; auto-selected on next unlock) ---
+const LAST_CLOUD_KEY = 'lastCloud';
+export interface LastCloud { provider: 'dropbox' | 'gdrive'; fileId: string; fileName: string }
+
+export async function saveLastCloud(rec: LastCloud): Promise<void> {
+  await tx('handles', 'readwrite', s => s.put(rec, LAST_CLOUD_KEY));
+}
+export async function loadLastCloud(): Promise<LastCloud | null> {
+  return (await tx<LastCloud | undefined>('handles', 'readonly', s => s.get(LAST_CLOUD_KEY))) ?? null;
+}
+export async function clearLastCloud(): Promise<void> { await tx('handles', 'readwrite', s => s.delete(LAST_CLOUD_KEY)); }
+
 export async function saveTestBytes(name: string, bytes: ArrayBuffer): Promise<void> {
   await tx('handles', 'readwrite', s => s.put(bytes, BYTES_KEY));
   await tx('handles', 'readwrite', s => s.put(name, NAME_KEY));

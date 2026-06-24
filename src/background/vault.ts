@@ -114,6 +114,20 @@ export class Vault {
     if (fields.Name != null) g.name = fields.Name; this.dirty = true;
   }
 
+  createGroup(parentId: string, name: string): string {
+    if (!this.db) throw new Error('locked');
+    const parent = this.findGroup(parentId); if (!parent) throw new Error('no group');
+    const g = this.db.createGroup(parent, name);
+    this.dirty = true; return g.uuid.id;
+  }
+
+  deleteGroup(id: string): void {
+    if (!this.db) throw new Error('locked');
+    if (id === this.root.uuid.id) throw new Error('cannot delete root');
+    const g = this.findGroup(id); if (!g) throw new Error('no group');
+    this.db.remove(g); this.dirty = true;
+  }
+
   private applyFields(e: kdbxweb.KdbxEntry, fields: Record<string, string>) {
     for (const [k, val] of Object.entries(fields)) {
       const prot = k === 'Password' || (e.fields.get(k) instanceof kdbxweb.ProtectedValue);

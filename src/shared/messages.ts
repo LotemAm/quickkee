@@ -13,6 +13,8 @@ export type Request =
   | { type: 'createEntry'; groupId: string; fields: Record<string, string> }
   | { type: 'updateEntry'; entryId: string; fields: Record<string, string>; expires?: number | null; removeKeys?: string[] }
   | { type: 'updateGroup'; groupId: string; fields: Record<string, string> }
+  | { type: 'createGroup'; parentId: string; name: string }
+  | { type: 'deleteGroup'; groupId: string }
   | { type: 'save' }
   | { type: 'generatePassword'; opts?: PwGenOpts }
   | { type: 'fillRequest'; entryId: string; tabId: number }
@@ -31,6 +33,7 @@ export type Response =
   | Ok<{ entry: EntryView | null }>
   | Ok<{ tree: TreeNode }>
   | Ok<{ entryId: string }>
+  | Ok<{ groupId: string }>
   | Ok<{ password: string }>
   | Ok<{ merged?: boolean }>
   | Ok<{ files: RemoteFile[] }>
