@@ -155,4 +155,3 @@ Built via `kdbxweb.Credentials(ProtectedValue?, keyFileBytes?)` — both argumen
 - Offline local cache of cloud databases
 - Conflict reconciliation across devices (compare against local cache on open)
 - Firefox build (File System Access API alternative or download-to-save fallback)
-- Optional: YubiKey challenge-response via native-messaging host

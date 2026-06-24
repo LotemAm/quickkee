@@ -10,7 +10,7 @@ Spec 2 adds **cloud sync** to QuickKee: open and save `.kdbx` databases from
 Dropbox and Google Drive, with an offline local cache and cross-device conflict
 reconciliation. It is the cohesive subsystem deferred from Spec 1.
 
-The Firefox build and the optional YubiKey/native-messaging factor remain
+The Firefox build remain
 deferred to their own future specs — they are orthogonal to cloud sync and are
 **out of scope here**.
 
