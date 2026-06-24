@@ -67,7 +67,7 @@ export function Panel() {
           <button className="btn-primary btn-xs" disabled={!dirty} onClick={save}>
             <Save size={13} /> {dirty ? 'Save *' : 'Saved'}{saved && ` · ${saved}`}
           </button>
-          <button className="icon-btn" aria-label="Lock database" onClick={() => lockVault(dirty).then(refresh)}>
+          <button className="icon-btn" aria-label="Lock database" title="Lock database" onClick={() => lockVault(dirty).then(refresh)}>
             <Lock size={16} />
           </button>
         </div>
@@ -107,7 +107,7 @@ export function Panel() {
         <div className="flex flex-col shrink-0" style={{ height: '45vh', borderTop: '1px solid var(--border)', background: 'var(--bg)' }}>
           <div className="flex items-center justify-between px-4 py-2" style={{ borderBottom: '1px solid var(--border)' }}>
             <span className="section-title">Entry details</span>
-            <button className="icon-btn" aria-label="Close details" onClick={() => setSelEntry(null)}>
+            <button className="icon-btn" aria-label="Close details" title="Close details" onClick={() => setSelEntry(null)}>
               <X size={15} />
             </button>
           </div>

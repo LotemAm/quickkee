@@ -30,11 +30,11 @@ export function EntryEditor({ entryId, clearSecs, onChanged }: { entryId: string
       <div className="flex gap-2 items-center">
         <input className="input flex-1" type={secret && !showPass ? 'password' : 'text'} value={e[key]} onChange={ev => setE({ ...e, [key]: ev.target.value })} />
         {secret && (
-          <button className="icon-btn" aria-label={showPass ? 'Hide password' : 'Show password'} onClick={() => setShowPass(s => !s)}>
+          <button className="icon-btn" aria-label={showPass ? 'Hide password' : 'Show password'} title={showPass ? 'Hide password' : 'Show password'} onClick={() => setShowPass(s => !s)}>
             {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
           </button>
         )}
-        <button className="icon-btn" aria-label={`Copy ${label}`} onClick={() => copyWithClear(e[key], clearSecs)}>
+        <button className="icon-btn" aria-label={`Copy ${label}`} title={`Copy ${label}`} onClick={() => copyWithClear(e[key], clearSecs)}>
           <Copy size={15} />
         </button>
       </div>
@@ -58,7 +58,7 @@ export function EntryEditor({ entryId, clearSecs, onChanged }: { entryId: string
             <label className="section-title block">{f.key}</label>
             <div className="flex gap-2 items-center">
               <span className="flex-1 text-sm" style={{ color: 'var(--text-muted)' }}>{f.value}</span>
-              <button className="icon-btn" aria-label={`Copy ${f.key}`} onClick={() => copyWithClear(f.value, clearSecs)}>
+              <button className="icon-btn" aria-label={`Copy ${f.key}`} title={`Copy ${f.key}`} onClick={() => copyWithClear(f.value, clearSecs)}>
                 <Copy size={15} />
               </button>
             </div>
@@ -74,7 +74,7 @@ export function EntryEditor({ entryId, clearSecs, onChanged }: { entryId: string
                 setExpires(v ? new Date(v).getTime() : null);
               }} />
             {expires != null && (
-              <button className="icon-btn" aria-label="Clear expiry" onClick={() => setExpires(null)}>
+              <button className="icon-btn" aria-label="Clear expiry" title="Clear expiry" onClick={() => setExpires(null)}>
                 <X size={15} />
               </button>)}
           </div>

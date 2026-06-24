@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { ShieldCheck, Search, Settings, Cloud, CloudOff, RefreshCw } from 'lucide-react';
+import { ShieldCheck, Search, Settings, Cloud, CloudOff, RefreshCw, PanelRight, Lock } from 'lucide-react';
 import { useStatus } from '../../shared/useStatus';
 import { UnlockScreen } from '../../shared/UnlockScreen';
 import { sendToSW } from '../../shared/messages';
+import { lockVault } from '../../shared/lockVault';
 import { loadSettings } from '../../shared/settings';
 import { applyTheme } from '../../shared/theme';
 import type { EntryView } from '../../shared/entry';
@@ -10,7 +11,7 @@ import { EntryCard } from './EntryCard';
 import { CreateForm } from './CreateForm';
 
 export function Popup() {
-  const { locked, refresh } = useStatus();
+  const { locked, dirty, refresh } = useStatus();
   const [entries, setEntries] = useState<EntryView[]>([]);
   const [q, setQ] = useState(''); const [tab, setTab] = useState<{ id: number; url: string } | null>(null);
   const [rootGroup, setRootGroup] = useState(''); const [clearSecs, setClearSecs] = useState(30);
@@ -53,7 +54,13 @@ export function Popup() {
               {!sync.online ? <CloudOff size={15} /> : sync.pendingUpload ? <RefreshCw size={15} /> : <Cloud size={15} />}
             </span>
           )}
-          <button className="icon-btn" aria-label="Open settings" onClick={() => chrome.runtime.openOptionsPage()}>
+          <button className="icon-btn" aria-label="Lock database" title="Lock database" onClick={() => lockVault(dirty).then(refresh)}>
+            <Lock size={16} />
+          </button>
+          <button className="icon-btn" aria-label="Open side panel" title="Open side panel" onClick={() => tab && chrome.sidePanel.open({ tabId: tab.id })}>
+            <PanelRight size={16} />
+          </button>
+          <button className="icon-btn" aria-label="Open settings" title="Open settings" onClick={() => chrome.runtime.openOptionsPage()}>
             <Settings size={16} />
           </button>
         </div>
