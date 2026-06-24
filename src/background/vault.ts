@@ -97,8 +97,9 @@ export class Vault {
     this.applyFields(e, fields); this.dirty = true; return e.uuid.id;
   }
 
-  updateEntry(id: string, fields: Record<string, string>, expires?: number | null): void {
+  updateEntry(id: string, fields: Record<string, string>, expires?: number | null, removeKeys?: string[]): void {
     const e = this.findEntry(id); if (!e) throw new Error('no entry');
+    if (removeKeys) for (const k of removeKeys) if (!STD.has(k)) e.fields.delete(k);
     this.applyFields(e, fields);
     if (expires !== undefined) {
       if (expires === null) { e.times.expires = false; }

@@ -11,7 +11,7 @@ export type Request =
   | { type: 'getEntry'; entryId: string }
   | { type: 'getTree' }
   | { type: 'createEntry'; groupId: string; fields: Record<string, string> }
-  | { type: 'updateEntry'; entryId: string; fields: Record<string, string>; expires?: number | null }
+  | { type: 'updateEntry'; entryId: string; fields: Record<string, string>; expires?: number | null; removeKeys?: string[] }
   | { type: 'updateGroup'; groupId: string; fields: Record<string, string> }
   | { type: 'save' }
   | { type: 'generatePassword'; opts?: PwGenOpts }
