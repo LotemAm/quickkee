@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ShieldCheck, Save, FolderClosed, FolderOpen, FileText, X, Lock,
-  ChevronRight, ChevronDown, Plus, Pencil, Trash2, Check } from 'lucide-react';
+  ChevronRight, ChevronDown, Plus, Pencil, Trash2, Check, Search } from 'lucide-react';
 import { useStatus } from '../../shared/useStatus';
 import { UnlockScreen } from '../../shared/UnlockScreen';
 import { sendToSW } from '../../shared/messages';
@@ -14,6 +14,14 @@ function findGroup(node: TreeNode, id: string): TreeNode | null {
   if (node.groupId === id) return node;
   for (const c of node.children) { const f = findGroup(c, id); if (f) return f; }
   return null;
+}
+
+type FlatEntry = TreeNode['entries'][number];
+
+function collectEntries(node: TreeNode, acc: FlatEntry[] = []): FlatEntry[] {
+  for (const e of node.entries) acc.push(e);
+  for (const c of node.children) collectEntries(c, acc);
+  return acc;
 }
 
 interface GroupOps {
@@ -100,6 +108,7 @@ export function Panel() {
   const [clearSecs, setClearSecs] = useState(30); const [saved, setSaved] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
   useEffect(() => { loadSettings().then(s => { applyTheme(s.theme); setClearSecs(s.clipboardClearSeconds); }); }, []);
   const reload = () => sendToSW({ type: 'getTree' }).then(r => {
     if (!('tree' in r)) return;
@@ -140,6 +149,12 @@ export function Panel() {
     setSaved(r.ok ? 'Saved' : 'Save failed'); refresh(); setTimeout(() => setSaved(''), 2000); }
 
   const group = tree && selGroup ? findGroup(tree, selGroup) : null;
+  const q = query.trim().toLowerCase();
+  const searching = q.length > 0;
+  const shown = searching && tree
+    ? collectEntries(tree).filter(e =>
+        `${e.title} ${e.username} ${e.url}`.toLowerCase().includes(q))
+    : group ? group.entries : [];
 
   return (
     <div className="flex flex-col h-screen" style={{ background: 'var(--bg)' }}>
@@ -170,26 +185,37 @@ export function Panel() {
           }} />}
         </div>
 
-        {/* Right: entries of selected group */}
-        <div className="flex-1 overflow-auto py-2">
-          {group && group.entries.length > 0
-            ? group.entries.map(e => (
-              <button key={e.id} onClick={() => setSelEntry(e.id)}
-                className="flex items-center gap-2 w-full text-left text-sm rounded-md py-1.5 px-3 transition-colors"
-                style={{
-                  color: 'var(--text)',
-                  background: selEntry === e.id ? 'var(--primary-tint)' : 'transparent',
-                }}
-                onMouseEnter={ev => { if (selEntry !== e.id) ev.currentTarget.style.background = 'var(--btn-bg)'; }}
-                onMouseLeave={ev => { if (selEntry !== e.id) ev.currentTarget.style.background = 'transparent'; }}>
-                <FileText size={14} style={{ color: 'var(--text-muted)' }} />
-                <span className="flex flex-col min-w-0">
-                  <span className="truncate">{e.title}</span>
-                  {e.username && <span className="truncate text-xs" style={{ color: 'var(--text-muted)' }}>{e.username}</span>}
-                </span>
-                {e.expired && <span className="badge-danger badge ml-auto">expired</span>}
-              </button>))
-            : <div className="empty-state mt-12">{group ? 'This group has no entries.' : 'Select a group.'}</div>}
+        {/* Right: entries of selected group, or search results */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="shrink-0 p-2" style={{ borderBottom: '1px solid var(--border)' }}>
+            <div className="relative">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+              <input className="input pl-9" placeholder="Search all entries…" value={query}
+                onChange={e => setQuery(e.target.value)} />
+            </div>
+          </div>
+          <div className="flex-1 overflow-auto py-2">
+            {shown.length > 0
+              ? shown.map(e => (
+                <button key={e.id} onClick={() => setSelEntry(e.id)}
+                  className="flex items-center gap-2 w-full text-left text-sm rounded-md py-1.5 px-3 transition-colors"
+                  style={{
+                    color: 'var(--text)',
+                    background: selEntry === e.id ? 'var(--primary-tint)' : 'transparent',
+                  }}
+                  onMouseEnter={ev => { if (selEntry !== e.id) ev.currentTarget.style.background = 'var(--btn-bg)'; }}
+                  onMouseLeave={ev => { if (selEntry !== e.id) ev.currentTarget.style.background = 'transparent'; }}>
+                  <FileText size={14} style={{ color: 'var(--text-muted)' }} />
+                  <span className="flex flex-col min-w-0">
+                    <span className="truncate">{e.title}</span>
+                    {e.username && <span className="truncate text-xs" style={{ color: 'var(--text-muted)' }}>{e.username}</span>}
+                  </span>
+                  {e.expired && <span className="badge-danger badge ml-auto">expired</span>}
+                </button>))
+              : <div className="empty-state mt-12">
+                  {searching ? 'No entries match your search.' : group ? 'This group has no entries.' : 'Select a group.'}
+                </div>}
+          </div>
         </div>
       </div>
 

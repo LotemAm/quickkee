@@ -4,7 +4,7 @@ import type { EntryView } from '../../shared/entry';
 import { sendToSW } from '../../shared/messages';
 import { copyWithClear } from '../../shared/clipboard';
 
-export function EntryCard({ entry, tabId, clearSecs }: { entry: EntryView; tabId: number; clearSecs: number }) {
+export function EntryCard({ entry, tabId, clearSecs, groupName }: { entry: EntryView; tabId: number; clearSecs: number; groupName?: string }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="card mb-2">
@@ -13,7 +13,10 @@ export function EntryCard({ entry, tabId, clearSecs }: { entry: EntryView; tabId
           <div className="font-medium truncate" style={{ color: 'var(--text)' }}>{entry.title}</div>
           <div className="text-sm truncate" style={{ color: 'var(--text-muted)' }}>{entry.username}</div>
         </div>
-        {entry.expired && <span className="badge-danger badge">EXPIRED</span>}
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          {entry.expired && <span className="badge-danger badge">EXPIRED</span>}
+          {groupName && <span className="badge max-w-[120px]"><span className="truncate">{groupName}</span></span>}
+        </div>
       </div>
       <div className="flex flex-wrap gap-1.5 mt-2">
         <button className="btn-xs" aria-label="Copy user" onClick={() => copyWithClear(entry.username, clearSecs)}>

@@ -11,6 +11,7 @@ import { openCloud, saveCloud, retryPending, type SyncDeps } from '../../backgro
 import { getAccessToken, disconnect, DROPBOX_OAUTH, GDRIVE_OAUTH } from '../../background/sources/oauth';
 import { getCache, cacheKey } from '../../background/cache';
 import type { CloudFileSource, DbSource } from '../../shared/dbSource';
+import { clearAllDrafts } from '../../shared/createDraft';
 
 const vault = new Vault();
 let handle: FileSystemFileHandle | null = null;
@@ -26,7 +27,7 @@ function depsFor(src: CloudFileSource): SyncDeps {
 // Tracks tabs with an active cert-warning badge so match-count updates don't overwrite them.
 const warnedTabs = new Set<number>();
 
-function doLock() { vault.lock(); handle = null; currentSource = null; autolock.disarm(); refreshAllIcons(); }
+function doLock() { vault.lock(); handle = null; currentSource = null; autolock.disarm(); void clearAllDrafts(); refreshAllIcons(); }
 
 async function handle_(req: Request): Promise<Response> {
   autolock.touch();
