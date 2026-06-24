@@ -65,6 +65,8 @@ export class Vault {
       password: str(e.fields.get('Password')),
       fields,
       expired: exp,
+      created: e.times.creationTime ? e.times.creationTime.getTime() : null,
+      expires: e.times.expires === true && e.times.expiryTime ? e.times.expiryTime.getTime() : null,
     };
   }
 
@@ -95,9 +97,14 @@ export class Vault {
     this.applyFields(e, fields); this.dirty = true; return e.uuid.id;
   }
 
-  updateEntry(id: string, fields: Record<string, string>): void {
+  updateEntry(id: string, fields: Record<string, string>, expires?: number | null): void {
     const e = this.findEntry(id); if (!e) throw new Error('no entry');
-    this.applyFields(e, fields); e.times.update(); this.dirty = true;
+    this.applyFields(e, fields);
+    if (expires !== undefined) {
+      if (expires === null) { e.times.expires = false; }
+      else { e.times.expires = true; e.times.expiryTime = new Date(expires); }
+    }
+    e.times.update(); this.dirty = true;
   }
 
   updateGroup(id: string, fields: Record<string, string>): void {

@@ -58,7 +58,7 @@ async function handle_(req: Request): Promise<Response> {
       return vault.isOpen() ? { ok: true, tree: vault.getTree() } : { ok: false, error: 'locked' };
     case 'createEntry':
       return { ok: true, entryId: vault.createEntry(req.groupId, req.fields) };
-    case 'updateEntry': vault.updateEntry(req.entryId, req.fields); return { ok: true };
+    case 'updateEntry': vault.updateEntry(req.entryId, req.fields, req.expires); return { ok: true };
     case 'updateGroup': vault.updateGroup(req.groupId, req.fields); return { ok: true };
     case 'save': {
       if (currentSource?.kind === 'cloud') {
