@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Copy, Check, Eye, EyeOff, X, Plus, Trash2 } from 'lucide-react';
 import { sendToSW } from '../../shared/messages';
-import { copyWithClear } from '../../shared/clipboard';
 import type { EntryView } from '../../shared/entry';
+import { useClipboardTimer } from '../../shared/useClipboardTimer';
+import { ClipboardBar } from '../../shared/ClipboardBar';
 
 // epoch ms -> 'YYYY-MM-DDTHH:mm' (local) for <input type="datetime-local">
 const toLocalInput = (ms: number) => {
@@ -18,6 +19,7 @@ export function EntryEditor({ entryId, clearSecs, onChanged }: { entryId: string
   // editable additional fields + the original keys (to compute deletions/renames on save)
   const [custom, setCustom] = useState<{ key: string; value: string }[]>([]);
   const [origKeys, setOrigKeys] = useState<string[]>([]);
+  const { copy, state: clipState, cancel } = useClipboardTimer(clearSecs);
   useEffect(() => {
     setShowPass(false);
     sendToSW({ type: 'getEntry', entryId }).then(r => {
@@ -35,15 +37,15 @@ export function EntryEditor({ entryId, clearSecs, onChanged }: { entryId: string
       const inputFocused = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
       if (ev.key === 'c' && !inputFocused && !window.getSelection()?.toString()) {
         ev.preventDefault();
-        copyWithClear(e.password, clearSecs);
+        copy(e.password, 'Password');
       } else if (ev.key === 'b' && !inputFocused) {
         ev.preventDefault();
-        copyWithClear(e.username, clearSecs);
+        copy(e.username, 'Username');
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [e, clearSecs]);
+  }, [e, copy]);
 
   if (!e) return null;
   const field = (label: string, key: 'title' | 'username' | 'url' | 'password') => {
@@ -61,7 +63,7 @@ export function EntryEditor({ entryId, clearSecs, onChanged }: { entryId: string
         <button className="icon-btn"
           aria-label={`Copy ${label}`}
           title={key === 'password' ? `Copy ${label} (Ctrl+C)` : key === 'username' ? `Copy ${label} (Ctrl+B)` : `Copy ${label}`}
-          onClick={() => copyWithClear(e[key], clearSecs)}>
+          onClick={() => copy(e[key], label)}>
           <Copy size={15} />
         </button>
       </div>
@@ -79,6 +81,8 @@ export function EntryEditor({ entryId, clearSecs, onChanged }: { entryId: string
     onChanged();
   }
   return (
+  <div>
+    {clipState && <ClipboardBar state={clipState} onCancel={cancel} />}
     <div className="p-4">
       <div className="card">
         {field('Title', 'title')}
@@ -92,7 +96,7 @@ export function EntryEditor({ entryId, clearSecs, onChanged }: { entryId: string
               onChange={ev => setCustom(c => c.map((x, j) => j === i ? { ...x, key: ev.target.value } : x))} />
             <input className="input flex-1" placeholder="Value" value={f.value}
               onChange={ev => setCustom(c => c.map((x, j) => j === i ? { ...x, value: ev.target.value } : x))} />
-            <button className="icon-btn" aria-label={`Copy ${f.key}`} title={`Copy ${f.key}`} onClick={() => copyWithClear(f.value, clearSecs)}>
+            <button className="icon-btn" aria-label={`Copy ${f.key}`} title={`Copy ${f.key}`} onClick={() => copy(f.value, f.key || 'Field')}>
               <Copy size={15} />
             </button>
             <button className="icon-btn" aria-label="Remove field" title="Remove field" onClick={() => setCustom(c => c.filter((_, j) => j !== i))}>
@@ -130,5 +134,6 @@ export function EntryEditor({ entryId, clearSecs, onChanged }: { entryId: string
           <Check size={15} /> Apply changes
         </button>
       </div>
-    </div>);
+    </div>
+  </div>);
 }
