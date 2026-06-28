@@ -28,6 +28,23 @@ export function EntryEditor({ entryId, clearSecs, onChanged }: { entryId: string
       }
     });
   }, [entryId]);
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      if (!e || !ev.ctrlKey) return;
+      const active = document.activeElement;
+      const inputFocused = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
+      if (ev.key === 'c' && !inputFocused && !window.getSelection()?.toString()) {
+        ev.preventDefault();
+        copyWithClear(e.password, clearSecs);
+      } else if (ev.key === 'b' && !inputFocused) {
+        ev.preventDefault();
+        copyWithClear(e.username, clearSecs);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [e, clearSecs]);
+
   if (!e) return null;
   const field = (label: string, key: 'title' | 'username' | 'url' | 'password') => {
     const secret = key === 'password';
@@ -41,7 +58,10 @@ export function EntryEditor({ entryId, clearSecs, onChanged }: { entryId: string
             {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
           </button>
         )}
-        <button className="icon-btn" aria-label={`Copy ${label}`} title={`Copy ${label}`} onClick={() => copyWithClear(e[key], clearSecs)}>
+        <button className="icon-btn"
+          aria-label={`Copy ${label}`}
+          title={key === 'password' ? `Copy ${label} (Ctrl+C)` : key === 'username' ? `Copy ${label} (Ctrl+B)` : `Copy ${label}`}
+          onClick={() => copyWithClear(e[key], clearSecs)}>
           <Copy size={15} />
         </button>
       </div>
