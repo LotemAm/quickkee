@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ShieldCheck, Search, Settings, Cloud, CloudOff, RefreshCw, PanelRight, Lock } from 'lucide-react';
+import { Search, Settings, Cloud, CloudOff, RefreshCw, PanelRight, Lock } from 'lucide-react';
 import { useStatus } from '../../shared/useStatus';
 import { UnlockScreen } from '../../shared/UnlockScreen';
 import { sendToSW } from '../../shared/messages';
@@ -10,6 +10,8 @@ import { DEFAULT_PWGEN, type PwGenOpts } from '../../shared/pwgen';
 import type { EntryView, TreeNode } from '../../shared/entry';
 import { EntryCard } from './EntryCard';
 import { CreateForm } from './CreateForm';
+import { useClipboardTimer } from '../../shared/useClipboardTimer';
+import { ClipboardBar } from '../../shared/ClipboardBar';
 
 function collectEntries(node: TreeNode, acc: { id: string; title: string; username: string; url: string }[] = []) {
   for (const e of node.entries) acc.push(e);
@@ -75,6 +77,8 @@ export function Popup() {
     return () => clearInterval(iv);
   }, [locked]);
 
+  const { copy, state: clipState, cancel } = useClipboardTimer(clearSecs);
+
   if (locked) return <UnlockScreen onUnlocked={refresh} />;
   const searching = q.trim().length > 0;
   const shown = searching ? searchResults : entries;
@@ -82,7 +86,7 @@ export function Popup() {
   return (
     <div>
       <header className="app-header">
-        <span className="app-title"><ShieldCheck size={18} className="app-logo" /> QuickKee</span>
+        <span className="app-title"><img src={chrome.runtime.getURL('icon-32.png')} alt="" className="app-logo" width={18} height={18} /> QuickKee</span>
         <div className="flex items-center gap-1">
           {sync?.source === 'cloud' && (
             <span className="sync-badge" title={
@@ -103,12 +107,13 @@ export function Popup() {
           </button>
         </div>
       </header>
+      {clipState && <ClipboardBar state={clipState} onCancel={cancel} />}
       <div className="p-3">
         <div className="relative mb-2">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
           <input className="input pl-9" placeholder="Search…" value={q} onChange={e => setQ(e.target.value)} />
         </div>
-        {shown.map(e => tab && <EntryCard key={e.id} entry={e} tabId={tab.id} clearSecs={clearSecs} groupName={groupNames.get(e.id)} />)}
+        {shown.map(e => tab && <EntryCard key={e.id} entry={e} tabId={tab.id} onCopy={copy} groupName={groupNames.get(e.id)} />)}
         {searching && shown.length === 0 &&
           <div className="empty-state mt-6">No entries match your search.</div>}
         {!searching && entries.length === 0 && tab && rootGroup && tree &&

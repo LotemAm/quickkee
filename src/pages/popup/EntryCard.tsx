@@ -2,9 +2,13 @@ import { useState } from 'react';
 import { Copy, LogIn, ChevronDown, ChevronUp } from 'lucide-react';
 import type { EntryView } from '../../shared/entry';
 import { sendToSW } from '../../shared/messages';
-import { copyWithClear } from '../../shared/clipboard';
 
-export function EntryCard({ entry, tabId, clearSecs, groupName }: { entry: EntryView; tabId: number; clearSecs: number; groupName?: string }) {
+export function EntryCard({ entry, tabId, onCopy, groupName }: {
+  entry: EntryView;
+  tabId: number;
+  onCopy: (text: string, label: string) => void;
+  groupName?: string;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <div className="card mb-2">
@@ -19,10 +23,10 @@ export function EntryCard({ entry, tabId, clearSecs, groupName }: { entry: Entry
         </div>
       </div>
       <div className="flex flex-wrap gap-1.5 mt-2">
-        <button className="btn-xs" aria-label="Copy user" onClick={() => copyWithClear(entry.username, clearSecs)}>
+        <button className="btn-xs" aria-label="Copy user" onClick={() => onCopy(entry.username, 'Username')}>
           <Copy size={12} /> User
         </button>
-        <button className="btn-xs" aria-label="Copy pass" onClick={() => copyWithClear(entry.password, clearSecs)}>
+        <button className="btn-xs" aria-label="Copy pass" onClick={() => onCopy(entry.password, 'Password')}>
           <Copy size={12} /> Pass
         </button>
         <button className="btn-xs" aria-label="Autofill" onClick={() => sendToSW({ type: 'fillRequest', entryId: entry.id, tabId })}>
@@ -36,7 +40,7 @@ export function EntryCard({ entry, tabId, clearSecs, groupName }: { entry: Entry
         {entry.fields.map(f => (
           <div key={f.key} className="flex justify-between items-center text-sm">
             <span style={{ color: 'var(--text-muted)' }}>{f.key}</span>
-            <button className="btn-xs" onClick={() => copyWithClear(f.value, clearSecs)}>
+            <button className="btn-xs" onClick={() => onCopy(f.value, f.key)}>
               <Copy size={12} /> Copy
             </button>
           </div>))}
