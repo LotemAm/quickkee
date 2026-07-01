@@ -1,4 +1,10 @@
 import { findLoginFields, fillFields } from './detect';
+test('finds email-only field when no password present (single-step flow)', () => {
+  document.body.innerHTML = `<form><input type="email" id="u" autocomplete="email"></form>`;
+  const f = findLoginFields(document);
+  expect(f.username?.id).toBe('u');
+  expect(f.password).toBeNull();
+});
 test('finds password input and preceding text/email field', () => {
   document.body.innerHTML = `<form>
     <input type="email" id="u"><input type="password" id="p"></form>`;

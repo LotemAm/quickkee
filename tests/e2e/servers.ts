@@ -12,10 +12,19 @@ const LOGIN_PAGE = `<!doctype html><html><body>
 </form>
 </body></html>`;
 
+const SINGLE_STEP_PAGE = `<!doctype html><html><body>
+<h1>Login</h1>
+<form>
+  <input id="email" name="resolvingInput" type="email" autocomplete="email" placeholder="username@example.com" />
+  <button type="submit">Next</button>
+</form>
+</body></html>`;
+
 export async function startHttpFixture() {
-  const server = http.createServer((_req, res) => {
+  const server = http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'text/html' });
-    res.end(LOGIN_PAGE);
+    if (req.url === '/single') res.end(SINGLE_STEP_PAGE);
+    else res.end(LOGIN_PAGE);
   });
   await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
   const port = (server.address() as AddressInfo).port;
@@ -23,6 +32,7 @@ export async function startHttpFixture() {
     port,
     url: `http://localhost:${port}/`,
     altUrl: `http://127.0.0.1:${port}/`,
+    singleUrl: `http://localhost:${port}/single`,
     close: () => { server.closeAllConnections(); return new Promise<void>(r => server.close(() => r())); },
   };
 }
