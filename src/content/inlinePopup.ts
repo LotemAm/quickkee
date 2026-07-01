@@ -1,13 +1,37 @@
 import type { EntryView } from '../shared/entry';
 import { loadSettings } from '../shared/settings';
+import tailwindCss from '../assets/styles/tailwind.css?raw';
 
 type EntryStub = Pick<EntryView, 'id' | 'title' | 'username'>;
+type Palette = { bg: string; border: string; text: string; muted: string; hover: string; shadow: string };
 
-// Same palette as src/assets/styles/tailwind.css :root / .dark — duplicated here
-// because CSS custom properties on the extension's own document don't reach a
-// shadow root injected into a host page's document.
-const LIGHT = { bg: '#ffffff', border: '#e4edf3', text: '#1e293b', muted: '#64748b', hover: '#eef6fb', shadow: '0 2px 6px rgba(12,74,110,.10)' };
-const DARK = { bg: '#16202f', border: '#1f3346', text: '#d8eaf7', muted: '#7a96ad', hover: '#1d2b3d', shadow: '0 2px 8px rgba(0,0,0,.45)' };
+// CSS custom properties on the extension's own document don't reach a shadow
+// root injected into a host page's document, so the :root/.dark palette from
+// tailwind.css is read out of the source file at build time (via Vite's ?raw
+// import) instead of being hand-copied here.
+function cssVars(block: string): Record<string, string> {
+  const vars: Record<string, string> = {};
+  for (const m of block.matchAll(/--([\w-]+):\s*([^;]+);/g)) vars[m[1]] = m[2].trim();
+  return vars;
+}
+
+function palette(selector: string, fallback: Palette): Palette {
+  const block = new RegExp(`${selector}\\s*\\{([^}]*)\\}`).exec(tailwindCss)?.[1] ?? '';
+  const vars = cssVars(block);
+  return {
+    bg: vars['surface-raised'] ?? fallback.bg,
+    border: vars['border'] ?? fallback.border,
+    text: vars['text'] ?? fallback.text,
+    muted: vars['text-muted'] ?? fallback.muted,
+    hover: vars['btn-bg'] ?? fallback.hover,
+    shadow: vars['shadow'] ?? fallback.shadow,
+  };
+}
+
+// Fallbacks only guard against tailwind.css being restructured unexpectedly —
+// tailwind.css is the source of truth, these values are not meant to be edited here.
+const LIGHT = palette(':root', { bg: '#ffffff', border: '#e4edf3', text: '#1e293b', muted: '#64748b', hover: '#eef6fb', shadow: '0 2px 6px rgba(12,74,110,.10)' });
+const DARK = palette('\\.dark', { bg: '#16202f', border: '#1f3346', text: '#d8eaf7', muted: '#7a96ad', hover: '#1d2b3d', shadow: '0 2px 8px rgba(0,0,0,.45)' });
 
 let host: HTMLElement | null = null;
 let activeIndex = 0;
