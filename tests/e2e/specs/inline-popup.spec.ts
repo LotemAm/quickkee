@@ -18,6 +18,7 @@ test('inline popup: focus login field shows credential picker and fills on selec
 
   await expect(site.locator('#username')).toHaveValue('e2e-user');
   await expect(site.locator('#password')).toHaveValue('e2e-pass');
+  await expect(site.locator('[data-quickkee-popup]')).toBeHidden();
 });
 
 test('inline popup: single-step login field also shows picker', async ({ context, extensionId, http }) => {
