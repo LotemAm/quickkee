@@ -1,4 +1,4 @@
-import { findLoginFields, fillFields } from './detect';
+import { findLoginFields, fillFields, isLoginField } from './detect';
 test('finds email-only field when no password present (single-step flow)', () => {
   document.body.innerHTML = `<form><input type="email" id="u" autocomplete="email"></form>`;
   const f = findLoginFields(document);
@@ -23,4 +23,14 @@ test('fillFields sets values and fires input events', () => {
   expect(inputFired).toBe(true);
   expect(changeFired).toBe(true);
   expect(bubbleInput).toBe(true);
+});
+test('isLoginField true for username or password field, false otherwise', () => {
+  document.body.innerHTML = `<input type="email" id="u"><input type="password" id="p"><input type="text" id="other">`;
+  const fields = findLoginFields(document);
+  const u = document.getElementById('u') as HTMLInputElement;
+  const p = document.getElementById('p') as HTMLInputElement;
+  const other = document.getElementById('other') as HTMLInputElement;
+  expect(isLoginField(u, fields)).toBe(true);
+  expect(isLoginField(p, fields)).toBe(true);
+  expect(isLoginField(other, fields)).toBe(false);
 });

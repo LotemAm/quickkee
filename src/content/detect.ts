@@ -20,6 +20,10 @@ export function findLoginFields(doc: Document): LoginFields {
   return { username, password };
 }
 
+export function isLoginField(el: HTMLElement, fields: LoginFields): boolean {
+  return el === fields.username || el === fields.password;
+}
+
 function nativeInputSetter(el: HTMLInputElement) {
   // React overwrites input.value via a descriptor on HTMLInputElement.prototype.
   // To trigger React's onChange, we must call the original setter so React's fiber
