@@ -9,6 +9,7 @@ chrome.runtime.onMessage.addListener((msg: { type: string; username?: string; pa
 let hideTimer: ReturnType<typeof setTimeout> | null = null;
 
 document.addEventListener('focusin', ev => {
+  if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
   const el = ev.target;
   if (!(el instanceof HTMLInputElement)) return;
   const fields = findLoginFields(document);
