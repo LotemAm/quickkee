@@ -1,6 +1,13 @@
 import type { EntryView } from '../shared/entry';
+import { loadSettings } from '../shared/settings';
 
 type EntryStub = Pick<EntryView, 'id' | 'title' | 'username'>;
+
+// Same palette as src/assets/styles/tailwind.css :root / .dark — duplicated here
+// because CSS custom properties on the extension's own document don't reach a
+// shadow root injected into a host page's document.
+const LIGHT = { bg: '#ffffff', border: '#e4edf3', text: '#1e293b', muted: '#64748b', hover: '#eef6fb', shadow: '0 2px 6px rgba(12,74,110,.10)' };
+const DARK = { bg: '#16202f', border: '#1f3346', text: '#d8eaf7', muted: '#7a96ad', hover: '#1d2b3d', shadow: '0 2px 8px rgba(0,0,0,.45)' };
 
 let host: HTMLElement | null = null;
 let activeIndex = 0;
@@ -8,6 +15,13 @@ let currentEntries: EntryStub[] = [];
 let currentField: HTMLElement | null = null;
 let currentOnSelect: ((e: EntryStub) => void) | null = null;
 let keydownBound = false;
+let dark = false;
+
+void loadSettings().then(s => {
+  dark = s.theme === 'dark' || (s.theme === 'system'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-color-scheme: dark)').matches);
+});
 
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -25,16 +39,17 @@ function ensureHost(): ShadowRoot {
 }
 
 function render(shadow: ShadowRoot): void {
+  const c = dark ? DARK : LIGHT;
   shadow.innerHTML = `<style>
-    .p{background:#1e1e2e;border:1px solid #363654;border-radius:6px;
-       box-shadow:0 4px 16px rgba(0,0,0,.45);overflow:hidden;
-       font:13px/1.4 system-ui,-apple-system,sans-serif;color:#cdd6f4}
-    .h{padding:5px 10px;font-size:11px;color:#888;border-bottom:1px solid #2a2a3e}
-    .e{padding:7px 10px;cursor:pointer;border-bottom:1px solid #2a2a3e}
+    .p{background:${c.bg};border:1px solid ${c.border};border-radius:6px;
+       box-shadow:${c.shadow};overflow:hidden;
+       font:13px/1.4 system-ui,-apple-system,sans-serif;color:${c.text}}
+    .h{padding:5px 10px;font-size:11px;color:${c.muted};border-bottom:1px solid ${c.border}}
+    .e{padding:7px 10px;cursor:pointer;border-bottom:1px solid ${c.border}}
     .e:last-child{border-bottom:none}
-    .e:hover,.e.active{background:#2a2a3e}
+    .e:hover,.e.active{background:${c.hover}}
     .t{font-weight:500}
-    .u{font-size:11px;color:#888;margin-top:1px}
+    .u{font-size:11px;color:${c.muted};margin-top:1px}
   </style>
   <div class="p">
     <div class="h">QuickKee</div>
