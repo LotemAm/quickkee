@@ -146,6 +146,6 @@ export class Vault {
 
   async serialize(): Promise<ArrayBuffer> {
     if (!this.db) throw new Error('locked');
-    const buf = await this.db.save(); this.dirty = false; return buf;
+    return this.db.save();
   }
 }

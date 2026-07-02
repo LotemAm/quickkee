@@ -39,7 +39,8 @@ test('edit marks dirty and round-trips through serialize', async () => {
   v.updateEntry(id, { UserName: 'newuser' });
   expect(v.dirty).toBe(true);
   const bytes = await v.serialize();
-  expect(v.dirty).toBe(false);
+  expect(v.dirty).toBe(true);
+  v.dirty = false;
   const v2 = new Vault(); await v2.open(bytes, 'correct horse', null);
   expect(v2.getEntry(id)?.username).toBe('newuser');
 });
@@ -112,4 +113,13 @@ test('mergeRemote unions concurrent edits from a remote clone', async () => {
   await check.open(merged, 'correct horse', null);
   expect(check.entriesForUrl('https://remote.example')).toHaveLength(1);
   expect(check.getEntry(id)?.username).toBe('local-user');
+});
+
+test('serialize does not clear dirty', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  v.updateEntry(id, { UserName: 'newuser' });
+  expect(v.dirty).toBe(true);
+  await v.serialize();
+  expect(v.dirty).toBe(true);
 });
