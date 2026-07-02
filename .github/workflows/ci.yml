@@ -1,33 +1,38 @@
-name: Build and Zip Chrome Extension
-
+name: CI
 on:
+  push:
+  pull_request:
   workflow_dispatch:
 
 jobs:
-  build:
-    name: Build
+  verify:
+    name: Typecheck & Test
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          fetch-depth: 2
- 
-      - name: Setup Node.js environment
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18
+          node-version: 22
           cache: 'yarn'
- 
-      - name: Install dependencies
-        run: yarn
- 
-      - name: Build Chrome
-        run: yarn build:chrome
+      - run: yarn --frozen-lockfile
+      - run: yarn typecheck
+      - run: yarn test
 
-      - name: Upload Chrome extension artifacts
-        uses: actions/upload-artifact@v3
+  build:
+    name: Build Chrome Extension
+    needs: verify
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          name: vite-web-extension-chrome
+          node-version: 22
+          cache: 'yarn'
+      - run: yarn --frozen-lockfile
+      - run: yarn build:chrome
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quickkee-chrome
           path: dist_chrome
