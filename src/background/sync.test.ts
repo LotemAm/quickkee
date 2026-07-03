@@ -5,7 +5,6 @@ import { FakeCloudProvider } from './sources/fakeCloudProvider';
 import { cacheKey, getCache, putCache } from './cache';
 import { openCloud, saveCloud, retryPending, type SyncDeps } from './sync';
 import type { CloudFileSource } from '../shared/dbSource';
-import * as kdbxweb from 'kdbxweb';
 import { registerArgon2 } from './crypto';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';

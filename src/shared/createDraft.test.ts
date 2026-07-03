@@ -19,7 +19,7 @@ function draft(url: string, overrides: Partial<CreateDraft> = {}): CreateDraft {
 
 beforeEach(() => {
   vi.useRealTimers();
-  let store: any = {};
+  const store: any = {};
   (globalThis as any).chrome = { storage: { session: {
     get: (k: string) => Promise.resolve({ [k]: store[k] }),
     set: (o: any) => { Object.assign(store, o); return Promise.resolve(); },

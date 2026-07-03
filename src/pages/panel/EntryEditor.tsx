@@ -89,7 +89,7 @@ export function EntryEditor({ entryId, clearSecs, onChanged }: { entryId: string
         {field('Username', 'username')}
         {field('Password', 'password')}
         {field('URL', 'url')}
-        <label className="section-title block">Additional fields</label>
+        <div className="section-title block">Additional fields</div>
         {custom.map((f, i) => (
           <div key={i} className="flex gap-2 items-center mb-2">
             <input className="input" style={{ flex: '0 0 35%' }} placeholder="Name" value={f.key}
@@ -108,7 +108,7 @@ export function EntryEditor({ entryId, clearSecs, onChanged }: { entryId: string
         </button>
 
         <div className="mb-3">
-          <label className="section-title block">Expiry date</label>
+          <div className="section-title block">Expiry date</div>
           <div className="flex gap-2 items-center">
             <input className="input flex-1" type="datetime-local"
               value={expires != null ? toLocalInput(expires) : ''}
@@ -124,7 +124,7 @@ export function EntryEditor({ entryId, clearSecs, onChanged }: { entryId: string
         </div>
 
         <div className="mb-3">
-          <label className="section-title block">Created</label>
+          <div className="section-title block">Created</div>
           <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
             {e.created != null ? new Date(e.created).toLocaleString() : '—'}
           </span>

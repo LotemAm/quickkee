@@ -1,7 +1,7 @@
 import { loadSettings, saveSettings, DEFAULT_SETTINGS } from './settings';
 
 beforeEach(() => {
-  let store: any = {};
+  const store: any = {};
   (globalThis as any).chrome = { storage: { local: {
     get: (k: string) => Promise.resolve({ [k]: store[k] }),
     set: (o: any) => { Object.assign(store, o); return Promise.resolve(); } } } };

@@ -68,11 +68,11 @@ async function handle_(req: Request): Promise<Response> {
         try {
           const out = await saveCloud(currentSource, depsFor(currentSource));
           return out.merged ? { ok: true, merged: true } : { ok: true };
-        } catch (e) { return { ok: false, error: 'saveFailed' }; }
+        } catch { return { ok: false, error: 'saveFailed' }; }
       }
       if (!handle) return { ok: false, error: 'noFile' };
       try { const bytes = await vault.serialize(); await writeBytes(handle, bytes); return { ok: true }; }
-      catch (e) { return { ok: false, error: 'saveFailed' }; }
+      catch { return { ok: false, error: 'saveFailed' }; }
     }
     case 'connectCloud': {
       // In test mode with a fake provider installed, skip real OAuth.
