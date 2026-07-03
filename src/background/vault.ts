@@ -45,7 +45,17 @@ export class Vault {
     return null;
   }
 
+  // True for the Recycle Bin group itself: kdbxweb's db.remove() moves deleted
+  // entries/groups there rather than purging them, but a "deleted" item must
+  // not stay visible to lookups, listings, or autofill. Recycle-bin management
+  // UI (view/restore/empty) is explicitly out of scope.
+  private isRecycleBin(g: kdbxweb.KdbxGroup): boolean {
+    return !!this.db?.meta.recycleBinUuid && g.uuid.id === this.db.meta.recycleBinUuid.id;
+  }
+
+  // Skips the Recycle Bin group and its descendants (see isRecycleBin above).
   private *allGroups(g: kdbxweb.KdbxGroup): Generator<kdbxweb.KdbxGroup> {
+    if (this.isRecycleBin(g)) return;
     yield g; for (const c of g.groups) yield* this.allGroups(c);
   }
 
@@ -80,11 +90,14 @@ export class Vault {
   }
 
   getTree(): TreeNode {
+    // Mirrors allGroups()'s exclusion so the Recycle Bin subtree never shows
+    // up in the panel's tree/search, consistent with findEntry/findGroup/
+    // entriesForUrl (see isRecycleBin above).
     const build = (g: kdbxweb.KdbxGroup): TreeNode => ({
       groupId: g.uuid.id, name: str(g.name),
       entries: g.entries.map(e => { const v = this.toView(e);
         return { id: v.id, title: v.title, username: v.username, url: v.url, expired: v.expired }; }),
-      children: g.groups.map(build),
+      children: g.groups.filter(c => !this.isRecycleBin(c)).map(build),
     });
     return build(this.root);
   }
@@ -126,6 +139,12 @@ export class Vault {
     if (id === this.root.uuid.id) throw new Error('cannot delete root');
     const g = this.findGroup(id); if (!g) throw new Error('no group');
     this.db.remove(g); this.dirty = true;
+  }
+
+  deleteEntry(id: string): void {
+    if (!this.db) throw new Error('locked');
+    const e = this.findEntry(id); if (!e) throw new Error('no entry');
+    this.db.remove(e); this.dirty = true;
   }
 
   private applyFields(e: kdbxweb.KdbxEntry, fields: Record<string, string>) {

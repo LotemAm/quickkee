@@ -63,6 +63,7 @@ async function handle_(req: Request): Promise<Response> {
     case 'updateGroup': vault.updateGroup(req.groupId, req.fields); return { ok: true };
     case 'createGroup': return { ok: true, groupId: vault.createGroup(req.parentId, req.name) };
     case 'deleteGroup': vault.deleteGroup(req.groupId); return { ok: true };
+    case 'deleteEntry': vault.deleteEntry(req.entryId); return { ok: true };
     case 'save': {
       if (currentSource?.kind === 'cloud') {
         try {
