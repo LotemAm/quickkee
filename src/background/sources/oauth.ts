@@ -37,12 +37,18 @@ export function generateVerifier(): string {
   return b64url(bytes);
 }
 
+export function generateState(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return b64url(bytes);
+}
+
 export async function challengeFromVerifier(verifier: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
   return b64url(digest);
 }
 
-export function buildAuthUrl(cfg: ProviderOAuthConfig, redirectUri: string, challenge: string): string {
+export function buildAuthUrl(cfg: ProviderOAuthConfig, redirectUri: string, challenge: string, state: string): string {
   const u = new URL(cfg.authUrl);
   u.searchParams.set('client_id', cfg.clientId);
   u.searchParams.set('response_type', 'code');
@@ -53,7 +59,23 @@ export function buildAuthUrl(cfg: ProviderOAuthConfig, redirectUri: string, chal
   u.searchParams.set('token_access_type', 'offline'); // Dropbox: ask for a refresh token
   u.searchParams.set('access_type', 'offline');        // Google: ask for a refresh token
   u.searchParams.set('prompt', 'consent');
+  u.searchParams.set('state', state);
   return u.toString();
+}
+
+/**
+ * Parse the redirect URL returned by `launchWebAuthFlow`, verifying the `state`
+ * echoed back matches the one we sent (CSRF / auth-response-mix-up defense) and
+ * extracting the authorization `code`. Throws `authRequired` on any mismatch or
+ * missing code — same failure path as a user-cancelled flow, so callers need no
+ * special-casing.
+ */
+export function parseAuthRedirect(redirect: string, expectedState: string): string {
+  const params = new URL(redirect).searchParams;
+  if (params.get('state') !== expectedState) throw new Error('authRequired');
+  const code = params.get('code');
+  if (!code) throw new Error('authRequired');
+  return code;
 }
 
 function refreshKey(provider: string): string { return `oauth_refresh_${provider}`; }
@@ -103,12 +125,12 @@ async function runInteractiveFlow(cfg: ProviderOAuthConfig): Promise<string> {
   const redirectUri = chrome.identity.getRedirectURL();
   const verifier = generateVerifier();
   const challenge = await challengeFromVerifier(verifier);
-  const authUrl = buildAuthUrl(cfg, redirectUri, challenge);
+  const state = generateState();
+  const authUrl = buildAuthUrl(cfg, redirectUri, challenge, state);
 
   const redirect = await chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true });
   if (!redirect) throw new Error('authRequired');
-  const code = new URL(redirect).searchParams.get('code');
-  if (!code) throw new Error('authRequired');
+  const code = parseAuthRedirect(redirect, state);
 
   const tok = await exchangeCode(cfg, code, verifier, redirectUri);
   if (tok.refresh_token) await setRefreshToken(cfg.provider, tok.refresh_token);
