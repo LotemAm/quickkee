@@ -44,11 +44,23 @@ test('open from cloud, edit, save; remote change merges and uploads both edits',
 
   // Edit locally via the panel, then Save → triggers download+merge+upload.
   const panel = await openExtensionPage(context, extensionId, 'src/pages/panel/index.html');
+
+  // The panel's master-detail group tree only lists entries for the currently
+  // selected group; it defaults to the root group, but the fixture entry lives
+  // in the "Sites" subgroup, so select it before looking for the entry button.
+  const sitesGroup = panel.getByRole('button', { name: 'Sites' });
+  await expect(sitesGroup).toBeVisible();
+  await sitesGroup.click();
+
   const entryBtn = panel.getByRole('button', { name: 'Cloud Login' });
   await expect(entryBtn).toBeVisible();
   await entryBtn.click();
   await panel.getByRole('button', { name: 'Apply changes' }).waitFor();
-  const pwInput = panel.locator('input').nth(2);
+  // A plain positional locator (input.nth(2)) is fragile: the panel's own
+  // search box is the first <input> on the page, ahead of EntryEditor's
+  // Title/Username/Password/URL fields, so nth(2) actually lands on Username.
+  // Scope to the field wrapper that contains the "Password" label instead.
+  const pwInput = panel.locator('div.mb-3', { hasText: 'Password' }).locator('input');
   await expect(pwInput).not.toHaveValue('');
   await pwInput.fill('locally-edited');
   await panel.getByRole('button', { name: 'Apply changes' }).click();
