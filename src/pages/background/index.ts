@@ -53,6 +53,8 @@ async function handle_(req: Request): Promise<Response> {
       return { ok: true, locked: !vault.isOpen(), dbName: handle?.name, dirty: vault.dirty };
     case 'getEntriesForUrl':
       return vault.isOpen() ? { ok: true, entries: vault.entriesForUrl(req.url) } : { ok: false, error: 'locked' };
+    case 'getEntrySummariesForUrl':
+      return vault.isOpen() ? { ok: true, summaries: vault.entrySummariesForUrl(req.url) } : { ok: false, error: 'locked' };
     case 'getEntry':
       return { ok: true, entry: vault.getEntry(req.entryId) };
     case 'getTree':
@@ -195,7 +197,7 @@ if (import.meta.env.VITE_QK_TEST === '1') {
           break;
         }
         case 'match':
-          send({ count: vault.isOpen() ? vault.entriesForUrl(req.url).length : 0, cert: warnedTabs.has(req.tabId) });
+          send({ count: vault.isOpen() ? vault.countForUrl(req.url) : 0, cert: warnedTabs.has(req.tabId) });
           break;
         case 'lock': doLock(); send({ ok: true }); break;
         case 'armShort': autolock.arm(req.hours); send({ ok: true }); break;

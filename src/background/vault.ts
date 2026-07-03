@@ -1,7 +1,7 @@
 import * as kdbxweb from 'kdbxweb';
 import { registerArgon2 } from './crypto';
 import { urlMatches } from './matcher';
-import type { EntryView, EntryField, TreeNode } from '../shared/entry';
+import type { EntryView, EntryField, TreeNode, EntrySummary } from '../shared/entry';
 
 const STD = new Set(['Title', 'UserName', 'Password', 'URL', 'Notes']);
 
@@ -49,14 +49,27 @@ export class Vault {
     yield g; for (const c of g.groups) yield* this.allGroups(c);
   }
 
+  private isExpired(e: kdbxweb.KdbxEntry): boolean {
+    return e.times.expires === true && e.times.expiryTime
+      ? e.times.expiryTime.getTime() < Date.now()
+      : false;
+  }
+
+  private toSummary(e: kdbxweb.KdbxEntry): EntrySummary {
+    return {
+      id: e.uuid.id,
+      title: str(e.fields.get('Title')),
+      username: str(e.fields.get('UserName')),
+      url: str(e.fields.get('URL')),
+      expired: this.isExpired(e),
+    };
+  }
+
   private toView(e: kdbxweb.KdbxEntry): EntryView {
     const fields: EntryField[] = [];
     e.fields.forEach((v, k) => {
       if (!STD.has(k)) fields.push({ key: k, value: str(v), protected: v instanceof kdbxweb.ProtectedValue });
     });
-    const exp = e.times.expires === true && e.times.expiryTime
-      ? e.times.expiryTime.getTime() < Date.now()
-      : false;
     return {
       id: e.uuid.id,
       title: str(e.fields.get('Title')),
@@ -64,7 +77,7 @@ export class Vault {
       url: str(e.fields.get('URL')),
       password: str(e.fields.get('Password')),
       fields,
-      expired: exp,
+      expired: this.isExpired(e),
       created: e.times.creationTime ? e.times.creationTime.getTime() : null,
       expires: e.times.expires === true && e.times.expiryTime ? e.times.expiryTime.getTime() : null,
     };
@@ -77,6 +90,20 @@ export class Vault {
     for (const g of this.allGroups(this.root)) for (const e of g.entries)
       if (urlMatches(str(e.fields.get('URL')), pageUrl)) out.push(this.toView(e));
     return out;
+  }
+
+  entrySummariesForUrl(pageUrl: string): EntrySummary[] {
+    const out: EntrySummary[] = [];
+    for (const g of this.allGroups(this.root)) for (const e of g.entries)
+      if (urlMatches(str(e.fields.get('URL')), pageUrl)) out.push(this.toSummary(e));
+    return out;
+  }
+
+  countForUrl(pageUrl: string): number {
+    let n = 0;
+    for (const g of this.allGroups(this.root)) for (const e of g.entries)
+      if (urlMatches(str(e.fields.get('URL')), pageUrl)) n++;
+    return n;
   }
 
   getTree(): TreeNode {

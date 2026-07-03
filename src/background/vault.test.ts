@@ -113,3 +113,23 @@ test('mergeRemote unions concurrent edits from a remote clone', async () => {
   expect(check.entriesForUrl('https://remote.example')).toHaveLength(1);
   expect(check.getEntry(id)?.username).toBe('local-user');
 });
+
+test('entrySummariesForUrl returns matches without passwords or custom fields', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const summaries = v.entrySummariesForUrl('https://github.com/login');
+  expect(summaries).toHaveLength(1);
+  expect(summaries[0].title).toBe('GitHub');
+  expect(summaries[0].username).toBe('octocat');
+  expect(Object.keys(summaries[0])).not.toContain('password');
+  expect(Object.keys(summaries[0])).not.toContain('fields');
+});
+
+test('countForUrl equals entriesForUrl length for matching URL and 0 for non-matching', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const count = v.countForUrl('https://github.com/login');
+  const entries = v.entriesForUrl('https://github.com/login');
+  expect(count).toBe(entries.length);
+  expect(count).toBe(1);
+  const noMatch = v.countForUrl('https://nonexistent.example');
+  expect(noMatch).toBe(0);
+});

@@ -4,8 +4,9 @@ export interface EntryView {
   password: string; fields: EntryField[]; expired: boolean;
   created: number | null; expires: number | null
 }
+export interface EntrySummary { id: string; title: string; username: string; url: string; expired: boolean }
 export interface TreeNode {
   groupId: string; name: string;
-  entries: { id: string; title: string; username: string; url: string; expired: boolean }[];
+  entries: EntrySummary[];
   children: TreeNode[]
 }
