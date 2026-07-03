@@ -20,7 +20,10 @@
     "tabs",
     "sidePanel",
     "webNavigation",
-    "identity"
+    "identity",
+    "offscreen",
+    "clipboardRead",
+    "clipboardWrite"
   ],
   "host_permissions": [
     "<all_urls>",

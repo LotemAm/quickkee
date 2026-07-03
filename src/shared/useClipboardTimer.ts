@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { copyWithClear } from './clipboard';
+import { sendToSW } from './messages';
 
 export interface ClipboardTimerState {
   label: string;
@@ -23,6 +24,7 @@ export function useClipboardTimer(clearSecs: number) {
     stopInterval();
     setState(null);
     navigator.clipboard.writeText('').catch(() => {});
+    void sendToSW({ type: 'cancelClipboardClear' });
   }, [stopInterval]);
 
   const copy = useCallback((text: string, label: string) => {
