@@ -99,7 +99,6 @@ async function pushOrMerge(src: CloudFileSource, deps: SyncDeps, bytes: ArrayBuf
       const res = await provider.upload(src.fileId, bytes, src.basedOnRev);
       if (res.ok) {
         await writeCache(src, bytes, res.rev, false);
-        vault.dirty = false;
         src.basedOnRev = res.rev;
         return { basedOnRev: res.rev, merged: false, pendingUpload: false };
       }

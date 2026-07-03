@@ -227,3 +227,21 @@ test('dirty cleared even when upload conflicts after cache write', async () => {
   expect(out.merged).toBe(true);
   expect(out.pendingUpload).toBe(false);
 });
+
+test('dirty stays cleared and pendingUpload is true when upload throws after cache write', async () => {
+  const remote = await freshRemoteBytes();
+  const p = new FakeCloudProvider(); p.setFile('f1', 'a.kdbx', remote, 'r1');
+  await putCache(cacheKey('dropbox', 'f1'),
+    { bytes: remote, basedOnRev: 'r1', lastSyncedAt: 0, pendingUpload: false });
+  const d = deps(p); const src = source('f1', 'r1');
+  await openCloud(src, d, PW, null);
+  d.vault.updateEntry(d.vault.entriesForUrl('https://github.com')[0].id, { UserName: 'changed' });
+  expect(d.vault.dirty).toBe(true);
+  // Cache write succeeds (saveCloud clears dirty), but the provider then throws on the
+  // network call inside pushOrMerge — deps.online() lies true so saveCloud attempts the
+  // upload; the provider itself is offline and throws.
+  p.setOffline(true);
+  const out = await saveCloud(src, { ...d, online: () => true });
+  expect(d.vault.dirty).toBe(false);
+  expect(out.pendingUpload).toBe(true);
+});
