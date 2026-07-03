@@ -29,15 +29,24 @@ export function tx<T>(
   mode: IDBTransactionMode,
   fn: (s: IDBObjectStore) => IDBRequest<T>,
 ): Promise<T> {
+  return txAttempt(store, mode, fn, /* retried */ false);
+}
+
+function txAttempt<T>(
+  store: string,
+  mode: IDBTransactionMode,
+  fn: (s: IDBObjectStore) => IDBRequest<T>,
+  retried: boolean,
+): Promise<T> {
   return openQuickKeeDb().then(db => new Promise<T>((res, rej) => {
     let req: IDBRequest<T>;
     try {
       req = fn(db.transaction(store, mode).objectStore(store));
     } catch (error) {
-      if ((error as Error)?.name === 'InvalidStateError') {
+      if (!retried && (error as Error)?.name === 'InvalidStateError') {
         // Connection was closed by versionchange between memoization and use, reset and retry once.
         dbPromise = null;
-        return tx(store, mode, fn).then(res, rej);
+        return txAttempt(store, mode, fn, true).then(res, rej);
       }
       return rej(error);
     }
