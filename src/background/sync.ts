@@ -62,6 +62,7 @@ export async function openCloud(
   await vault.mergeRemote(remoteBytes);
   const merged = await vault.serialize();
   await writeCache(src, merged, rev, true); // still pending until uploaded
+  vault.dirty = false;
   src.basedOnRev = rev;
   return { basedOnRev: rev, merged: true, offline: false };
 }
@@ -73,6 +74,7 @@ export async function saveCloud(src: CloudFileSource, deps: SyncDeps): Promise<S
   // 1) Durable local first: serialize and write cache, marked pending.
   const bytes = await vault.serialize();
   await writeCache(src, bytes, src.basedOnRev, true);
+  vault.dirty = false;
 
   if (!online()) return { basedOnRev: src.basedOnRev, merged: false, pendingUpload: true };
 
@@ -110,11 +112,13 @@ async function pushOrMerge(src: CloudFileSource, deps: SyncDeps, bytes: ArrayBuf
     const res = await provider.upload(src.fileId, mergedBytes, rev);
     if (res.ok) {
       await writeCache(src, mergedBytes, res.rev, false);
+      vault.dirty = false;
       src.basedOnRev = res.rev;
       return { basedOnRev: res.rev, merged: true, pendingUpload: false };
     }
     // Still conflicting (race) → defer, keep pending.
     await writeCache(src, mergedBytes, rev, true);
+    vault.dirty = false;
     src.basedOnRev = rev;
     return { basedOnRev: rev, merged: true, pendingUpload: true };
   } catch {

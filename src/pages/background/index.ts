@@ -71,7 +71,7 @@ async function handle_(req: Request): Promise<Response> {
         } catch (e) { return { ok: false, error: 'saveFailed' }; }
       }
       if (!handle) return { ok: false, error: 'noFile' };
-      try { const bytes = await vault.serialize(); await writeBytes(handle, bytes); return { ok: true }; }
+      try { const bytes = await vault.serialize(); await writeBytes(handle, bytes); vault.dirty = false; return { ok: true }; }
       catch (e) { return { ok: false, error: 'saveFailed' }; }
     }
     case 'connectCloud': {
