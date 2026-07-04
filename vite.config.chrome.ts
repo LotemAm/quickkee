@@ -25,7 +25,15 @@ export default mergeConfig(
     ],
     build: {
       ...baseBuildOptions,
-      outDir
+      outDir,
+      rollupOptions: {
+        // Offscreen documents are created at runtime via chrome.offscreen.createDocument
+        // and are not referenced by manifest.json, so @crxjs won't discover this HTML page
+        // on its own; it must be added as an explicit Rollup input.
+        input: {
+          offscreen: resolve(__dirname, 'src/pages/offscreen/index.html'),
+        },
+      },
     },
   })
 )

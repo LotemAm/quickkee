@@ -1,8 +1,10 @@
 import { renderHook, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { useClipboardTimer } from './useClipboardTimer';
+import { sendToSW } from './messages';
 
 vi.mock('./clipboard', () => ({ copyWithClear: vi.fn() }));
+vi.mock('./messages', () => ({ sendToSW: vi.fn().mockResolvedValue({ ok: true }) }));
 
 const writeTextMock = vi.fn().mockResolvedValue(undefined);
 (globalThis as any).navigator = {
@@ -12,6 +14,7 @@ const writeTextMock = vi.fn().mockResolvedValue(undefined);
 beforeEach(() => {
   vi.useFakeTimers();
   writeTextMock.mockClear();
+  vi.mocked(sendToSW).mockClear();
 });
 afterEach(() => { vi.useRealTimers(); });
 
@@ -67,4 +70,11 @@ test('cancel writes empty string to clipboard', () => {
   act(() => { result.current.copy('pass', 'Password'); });
   act(() => { result.current.cancel(); });
   expect(writeTextMock).toHaveBeenCalledWith('');
+});
+
+test('cancel also cancels the background clear', () => {
+  const { result } = renderHook(() => useClipboardTimer(30));
+  act(() => { result.current.copy('pass', 'Password'); });
+  act(() => { result.current.cancel(); });
+  expect(sendToSW).toHaveBeenCalledWith({ type: 'cancelClipboardClear' });
 });

@@ -18,6 +18,48 @@ const vault = new Vault();
 let handle: FileSystemFileHandle | null = null;
 const autolock = new AutoLock(() => doLock());
 
+const CLIPBOARD_CLEAR_ALARM = 'clipboard-clear';
+let pendingClipboardHash: string | null = null;
+
+async function persistPendingClipboardHash(hash: string | null): Promise<void> {
+  pendingClipboardHash = hash;
+  try {
+    if (hash === null) await chrome.storage.session.remove('qkClipHash');
+    else await chrome.storage.session.set({ qkClipHash: hash });
+  } catch { /* storage.session may be unavailable in some test/dev contexts */ }
+}
+
+async function readPendingClipboardHash(): Promise<string | null> {
+  if (pendingClipboardHash !== null) return pendingClipboardHash;
+  try {
+    const { qkClipHash } = await chrome.storage.session.get('qkClipHash');
+    return typeof qkClipHash === 'string' ? qkClipHash : null;
+  } catch { return null; }
+}
+
+async function ensureOffscreen(): Promise<void> {
+  const has = await chrome.offscreen.hasDocument?.();
+  if (has) return;
+  await chrome.offscreen.createDocument({
+    url: chrome.runtime.getURL('src/pages/offscreen/index.html'),
+    reasons: [chrome.offscreen.Reason.CLIPBOARD],
+    justification: 'Clear copied password from the clipboard after the configured timeout',
+  });
+}
+
+async function runClipboardClear(): Promise<void> {
+  const textHash = await readPendingClipboardHash();
+  if (!textHash) return;
+  try {
+    await ensureOffscreen();
+    await chrome.runtime.sendMessage({ __qkOffscreen: true, cmd: 'clearIfMatch', textHash });
+  } catch { /* offscreen document unavailable; nothing more we can do */ }
+  finally {
+    await chrome.offscreen.closeDocument?.().catch(() => {});
+    await persistPendingClipboardHash(null);
+  }
+}
+
 let currentSource: DbSource | null = null;
 const onlineNow = () => (typeof navigator !== 'undefined' ? navigator.onLine : true);
 
@@ -132,11 +174,20 @@ async function handle_(req: Request): Promise<Response> {
       await chrome.tabs.sendMessage(req.tabId, { type: 'fill', username: entry.username, password: entry.password });
       return { ok: true };
     }
+    case 'scheduleClipboardClear':
+      await persistPendingClipboardHash(req.textHash);
+      chrome.alarms.create(CLIPBOARD_CLEAR_ALARM, { when: Date.now() + req.seconds * 1000 });
+      return { ok: true };
+    case 'cancelClipboardClear':
+      await persistPendingClipboardHash(null);
+      chrome.alarms.clear(CLIPBOARD_CLEAR_ALARM);
+      return { ok: true };
   }
 }
 
 chrome.runtime.onMessage.addListener((req: Request, _s, sendResponse) => {
   if ((req as unknown as { __qk?: string }).__qk === 'test') return false;
+  if ((req as unknown as { __qkOffscreen?: boolean }).__qkOffscreen) return false;
   handle_(req).then(sendResponse).catch(e => sendResponse({ ok: false, error: String(e) }));
   return true; // async
 });
@@ -152,9 +203,15 @@ async function tryRetry() {
 }
 if (typeof self !== 'undefined' && 'addEventListener' in self) self.addEventListener('online', () => void tryRetry());
 chrome.alarms.onAlarm.addListener(a => {
-  if (a.name !== 'keepalive') return;
-  if (vault.isOpen()) void chrome.runtime.getPlatformInfo(); // keepalive heartbeat (preserve MVP behavior)
-  void tryRetry();
+  switch (a.name) {
+    case 'keepalive':
+      if (vault.isOpen()) void chrome.runtime.getPlatformInfo(); // keepalive heartbeat (preserve MVP behavior)
+      void tryRetry();
+      break;
+    case CLIPBOARD_CLEAR_ALARM:
+      void runClipboardClear();
+      break;
+  }
 });
 
 // lock on browser close / SW suspend

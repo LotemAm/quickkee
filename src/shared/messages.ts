@@ -23,7 +23,9 @@ export type Request =
   | { type: 'listRemoteFiles'; provider: 'dropbox' | 'gdrive' }
   | { type: 'openRemote'; provider: 'dropbox' | 'gdrive'; fileId: string; fileName: string; password: string | null; keyFile: number[] | null }
   | { type: 'getSyncStatus' }
-  | { type: 'disconnectCloud'; provider: 'dropbox' | 'gdrive' };
+  | { type: 'disconnectCloud'; provider: 'dropbox' | 'gdrive' }
+  | { type: 'scheduleClipboardClear'; textHash: string; seconds: number }
+  | { type: 'cancelClipboardClear' };
 
 // Intentional: `{}` (not `Record<string, never>`) is required so bare `Ok` is excluded from
 // `'prop' in r` narrowing on the `Response` union below; an index-signature type would keep
