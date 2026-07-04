@@ -47,10 +47,6 @@ void loadSettings().then(s => {
     && window.matchMedia('(prefers-color-scheme: dark)').matches);
 });
 
-function esc(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
 function ensureHost(): ShadowRoot {
   if (!host) {
     host = document.createElement('div');
@@ -64,7 +60,11 @@ function ensureHost(): ShadowRoot {
 
 function render(shadow: ShadowRoot): void {
   const c = dark ? DARK : LIGHT;
-  shadow.innerHTML = `<style>
+
+  shadow.replaceChildren();
+
+  const style = document.createElement('style');
+  style.textContent = `
     .p{background:${c.bg};border:1px solid ${c.border};border-radius:6px;
        box-shadow:${c.shadow};overflow:hidden;
        font:13px/1.4 system-ui,-apple-system,sans-serif;color:${c.text}}
@@ -74,15 +74,37 @@ function render(shadow: ShadowRoot): void {
     .e:hover,.e.active{background:${c.hover}}
     .t{font-weight:500}
     .u{font-size:11px;color:${c.muted};margin-top:1px}
-  </style>
-  <div class="p">
-    <div class="h">QuickKee</div>
-    ${currentEntries.map((e, i) => `<div class="e${i === activeIndex ? ' active' : ''}" data-idx="${i}"><div class="t">${esc(e.title)}</div><div class="u">${esc(e.username)}</div></div>`).join('')}
-  </div>`;
+  `;
 
-  shadow.querySelectorAll<HTMLElement>('.e').forEach((el, i) => {
-    el.addEventListener('mousedown', ev => { ev.preventDefault(); select(i); });
+  const panel = document.createElement('div');
+  panel.className = 'p';
+
+  const header = document.createElement('div');
+  header.className = 'h';
+  header.textContent = 'QuickKee';
+  panel.appendChild(header);
+
+  currentEntries.forEach((e, i) => {
+    const row = document.createElement('div');
+    row.className = i === activeIndex ? 'e active' : 'e';
+
+    const title = document.createElement('div');
+    title.className = 't';
+    title.textContent = e.title;
+
+    const username = document.createElement('div');
+    username.className = 'u';
+    username.textContent = e.username;
+
+    row.appendChild(title);
+    row.appendChild(username);
+    row.addEventListener('mousedown', ev => { ev.preventDefault(); select(i); });
+
+    panel.appendChild(row);
   });
+
+  shadow.appendChild(style);
+  shadow.appendChild(panel);
 }
 
 function select(i: number): void {
