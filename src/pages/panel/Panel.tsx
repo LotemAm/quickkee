@@ -230,7 +230,9 @@ export function Panel() {
             </button>
           </div>
           <div className="overflow-auto flex-1">
-            <EntryEditor entryId={selEntry} clearSecs={clearSecs} onChanged={() => { refresh(); reload(); }} />
+            <EntryEditor entryId={selEntry} clearSecs={clearSecs}
+              onChanged={() => { refresh(); reload(); }}
+              onDeleted={() => { setSelEntry(null); refresh(); reload(); }} />
           </div>
         </div>)}
     </div>);

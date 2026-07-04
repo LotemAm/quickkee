@@ -16,6 +16,7 @@ export type Request =
   | { type: 'updateGroup'; groupId: string; fields: Record<string, string> }
   | { type: 'createGroup'; parentId: string; name: string }
   | { type: 'deleteGroup'; groupId: string }
+  | { type: 'deleteEntry'; entryId: string }
   | { type: 'save' }
   | { type: 'generatePassword'; opts?: PwGenOpts }
   | { type: 'fillRequest'; entryId: string; tabId: number }

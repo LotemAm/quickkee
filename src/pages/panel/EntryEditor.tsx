@@ -12,16 +12,18 @@ const toLocalInput = (ms: number) => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 
-export function EntryEditor({ entryId, clearSecs, onChanged }: { entryId: string; clearSecs: number; onChanged: () => void }) {
+export function EntryEditor({ entryId, clearSecs, onChanged, onDeleted }: { entryId: string; clearSecs: number; onChanged: () => void; onDeleted: () => void }) {
   const [e, setE] = useState<EntryView | null>(null);
   const [showPass, setShowPass] = useState(false);
   const [expires, setExpires] = useState<number | null>(null);
   // editable additional fields + the original keys (to compute deletions/renames on save)
   const [custom, setCustom] = useState<{ key: string; value: string }[]>([]);
   const [origKeys, setOrigKeys] = useState<string[]>([]);
+  const [deleteError, setDeleteError] = useState('');
   const { copy, state: clipState, cancel } = useClipboardTimer(clearSecs);
   useEffect(() => {
     setShowPass(false);
+    setDeleteError('');
     sendToSW({ type: 'getEntry', entryId }).then(r => {
       if ('entry' in r && r.entry) {
         setE(r.entry); setExpires(r.entry.expires);
@@ -80,6 +82,12 @@ export function EntryEditor({ entryId, clearSecs, onChanged }: { entryId: string
     await sendToSW({ type: 'updateEntry', entryId, fields, expires, removeKeys });
     onChanged();
   }
+  async function del() {
+    if (!confirm('Delete this entry?')) return;
+    const r = await sendToSW({ type: 'deleteEntry', entryId });
+    if (r.ok) onDeleted();
+    else setDeleteError(r.error);
+  }
   return (
   <div>
     {clipState && <ClipboardBar state={clipState} onCancel={cancel} />}
@@ -130,9 +138,18 @@ export function EntryEditor({ entryId, clearSecs, onChanged }: { entryId: string
           </span>
         </div>
 
-        <button className="btn-primary mt-1" onClick={save}>
-          <Check size={15} /> Apply changes
-        </button>
+        {deleteError && <p className="alert-error mb-3" role="alert">{deleteError}</p>}
+
+        <div className="flex items-center gap-2">
+          <button className="btn-primary mt-1" onClick={save}>
+            <Check size={15} /> Apply changes
+          </button>
+          <button className="btn-xs mt-1" aria-label="Delete entry" title="Delete entry"
+            style={{ color: 'var(--danger-text)', background: 'var(--danger-tint)' }}
+            onClick={del}>
+            <Trash2 size={15} /> Delete
+          </button>
+        </div>
       </div>
     </div>
   </div>);

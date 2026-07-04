@@ -143,3 +143,58 @@ test('countForUrl equals entriesForUrl length for matching URL and 0 for non-mat
   const noMatch = v.countForUrl('https://nonexistent.example');
   expect(noMatch).toBe(0);
 });
+
+test('deleteEntry marks dirty and round-trips through serialize', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  v.deleteEntry(id);
+  expect(v.dirty).toBe(true);
+  expect(v.entriesForUrl('https://github.com')).toHaveLength(0);
+  const bytes = await v.serialize();
+  const v2 = new Vault(); await v2.open(bytes, 'correct horse', null);
+  expect(v2.entriesForUrl('https://github.com')).toHaveLength(0);
+});
+
+test("deleteEntry('nonexistent') throws 'no entry'", async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  expect(() => v.deleteEntry('does-not-exist')).toThrow('no entry');
+});
+
+test('deleteEntry on locked vault throws locked', async () => {
+  const v = new Vault();
+  expect(() => v.deleteEntry('any-id')).toThrow('locked');
+});
+
+test('deleteEntry moves the entry into the recycle bin group (not a permanent purge)', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  v.deleteEntry(id);
+  // Reach into the private db field to assert the underlying kdbxweb placement.
+  const db = v['db'] as import('kdbxweb').Kdbx;
+  const binUuid = db.meta.recycleBinUuid;
+  expect(binUuid).toBeDefined();
+  const bin = db.getGroup(binUuid!);
+  expect(bin).toBeDefined();
+  const found = bin!.entries.find(e => e.uuid.id === id);
+  expect(found).toBeDefined();
+});
+
+test('getTree omits the Recycle Bin group and its entries after a delete', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  v.deleteEntry(id);
+
+  const db = v['db'] as import('kdbxweb').Kdbx;
+  const binUuid = db.meta.recycleBinUuid;
+  expect(binUuid).toBeDefined();
+
+  const tree = v.getTree();
+  const walk = (n: import('../shared/entry').TreeNode): import('../shared/entry').TreeNode[] =>
+    [n, ...n.children.flatMap(walk)];
+  const allNodes = walk(tree);
+
+  // The Recycle Bin group itself must not appear anywhere in the tree.
+  expect(allNodes.some(n => n.groupId === binUuid!.id)).toBe(false);
+  // Nor should the deleted entry appear under any surviving group.
+  expect(allNodes.some(n => n.entries.some(e => e.id === id))).toBe(false);
+});
