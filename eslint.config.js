@@ -29,10 +29,10 @@ export default tseslint.config(
   },
   {
     // Downgrade only: test-seam code (unit test files, e2e specs/helpers, and the
-    // VITE_QK_TEST-gated test harness block in background/index.ts) legitimately deals
-    // with loosely-typed mocks, fixtures, and an ad-hoc wire protocol. Real production
-    // code keeps this rule at 'error' via the block above.
-    files: ['**/*.test.ts', 'tests/e2e/**/*.{ts,mjs}', 'src/pages/background/index.ts'],
+    // VITE_QK_TEST-gated test harness block in background/testCommands.ts) legitimately
+    // deals with loosely-typed mocks, fixtures, and an ad-hoc wire protocol. Real
+    // production code keeps this rule at 'error' via the block above.
+    files: ['**/*.test.ts', 'tests/e2e/**/*.{ts,mjs}', 'src/pages/background/testCommands.ts'],
     rules: {
       '@typescript-eslint/no-explicit-any': 'warn',
     },
