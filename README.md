@@ -14,7 +14,7 @@ yarn install
 yarn build:chrome
 ```
 
-The production build outputs to `dist_chrome/`. To run the full unit test suite (32 tests):
+The production build outputs to `dist_chrome/`. To run the full unit test suite:
 
 ```bash
 yarn test
@@ -61,17 +61,23 @@ Access `chrome://extensions → QuickKee → Details → Extension options` to c
 
 All settings are persisted in `chrome.storage.local`.
 
-## Scope: MVP (Local-Only)
+### Cloud Sync
+Instead of a local file, the vault can be opened from a connected Dropbox or Google Drive account:
+- In **Options**, click **Connect** next to a provider and authorize via OAuth (PKCE); pick a `.kdbx` file from the resulting list to open it
+- The popup shows a sync badge: **Synced**, **Pending upload** (local edits haven't reached the cloud yet), or **Offline** (working from the local cache; changes sync once back online)
+- If a remote change and a local edit both happened since the last sync, they're merged automatically on the next save instead of one overwriting the other
+- Click **Sign out** next to a provider in **Options** to disconnect it and remove its stored tokens
 
-This is a minimal viable product. The vault operates entirely **on your local machine**:
-- **No cloud sync**: Dropbox, Google Drive, OneDrive, etc. are deferred to a future spec
-- **No conflict reconciliation**: Multi-device sync scenarios unsupported
-- **No offline cache**: The `.kdbx` must be accessible from the file system
-- **Chrome only**: Firefox support is deferred
+## Scope
 
-**Security**: Master password and key material are held only in the service worker's memory while unlocked. When you lock the vault or the extension auto-closes, all sensitive data in memory is cleared. Settings in `chrome.storage.local` contain no secrets—only non-sensitive preferences (theme, auto-close duration, etc.). Cloud sync stores OAuth **refresh tokens** in `chrome.storage.local` so reconnecting after a browser restart doesn't require re-authorization. These tokens grant access only to the app-scoped cloud files (the `.kdbx` itself stays encrypted with your master key); use **Disconnect** in the source picker to remove them. They are not encrypted at rest—this is a Chrome extension platform limitation.
+This is a KeePass-compatible password manager for Chrome (Manifest V3). It supports both local `.kdbx` files and cloud-hosted ones (Dropbox, Google Drive) — see [Cloud Sync](#cloud-sync) above.
 
-Future versions ("Spec 2") will add cloud storage, offline cache, and multi-browser support.
+**Not yet supported**:
+- **Firefox**: build config exists (`vite.config.firefox.ts`) but is untested; Chrome is the only supported browser today.
+
+**Security**: Master password and key material are held only in the service worker's memory while unlocked. When you lock the vault or the extension auto-closes, all sensitive data in memory is cleared. Settings in `chrome.storage.local` contain no secrets—only non-sensitive preferences (theme, auto-close duration, etc.). Cloud sync stores OAuth **refresh tokens** in `chrome.storage.local` so reconnecting after a browser restart doesn't require re-authorization. These tokens grant access only to the app-scoped cloud files (the `.kdbx` itself stays encrypted with your master key); use **Sign out** in Options to remove them. They are not encrypted at rest—this is a Chrome extension platform limitation.
+
+Firefox support is the main remaining item from the original spec — see `SPEC.md`.
 
 ## Manual Verification Checklist
 

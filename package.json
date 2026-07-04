@@ -1,12 +1,8 @@
 {
-  "name": "vite-web-extension",
-  "version": "1.4.0",
-  "description": "A simple chrome & firefox extension template with Vite, React, TypeScript and Tailwind CSS.",
+  "name": "quickkee",
+  "version": "0.1.0",
+  "description": "KeePass-compatible password manager browser extension (Chrome MV3) for local and cloud .kdbx databases.",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/JohnBra/vite-web-extension.git"
-  },
   "scripts": {
     "build": "vite build --config vite.config.chrome.ts",
     "build:chrome": "vite build --config vite.config.chrome.ts",
@@ -28,8 +24,7 @@
     "lucide-react": "^1.21.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "tldts": "^7.4.6",
-    "webextension-polyfill": "^0.12.0"
+    "tldts": "^7.4.6"
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.0.3",
@@ -42,7 +37,6 @@
     "@types/node": "^24.9.1",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
-    "@types/webextension-polyfill": "^0.12.3",
     "@vitejs/plugin-react": "^4.7.0",
     "eslint": "^9.32.0",
     "eslint-plugin-import": "^2.32.0",
