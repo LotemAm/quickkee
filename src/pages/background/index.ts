@@ -5,6 +5,7 @@ import { loadSettings } from '../../shared/settings';
 import { generatePassword, DEFAULT_PWGEN } from '../../shared/pwgen';
 import { updateIconForTab } from '../../background/icon';
 import { shouldWarnCertError } from '../../background/certwarn';
+import { urlMatches } from '../../background/matcher';
 import type { Request, Response } from '../../shared/messages';
 import { providerFor, __hasOverride } from './cloudRouting';
 import { openCloud, saveCloud, retryPending, type SyncDeps } from '../../background/sync';
@@ -122,6 +123,12 @@ async function handle_(req: Request): Promise<Response> {
     case 'fillRequest': {
       const entry = vault.getEntry(req.entryId);
       if (!entry) return { ok: false, error: 'noEntry' };
+      let tab: chrome.tabs.Tab;
+      try { tab = await chrome.tabs.get(req.tabId); }
+      catch { return { ok: false, error: 'noTab' }; }
+      // Entries without a URL can't be validated — allow (explicit user action from the popup).
+      if (entry.url && (!tab.url || !urlMatches(entry.url, tab.url)))
+        return { ok: false, error: 'urlMismatch' };
       await chrome.tabs.sendMessage(req.tabId, { type: 'fill', username: entry.username, password: entry.password });
       return { ok: true };
     }

@@ -16,3 +16,21 @@ test('no match different domain', () => {
 test('bare entry value (no scheme) still matches', () => {
   expect(urlMatches('github.com', 'https://github.com/login')).toBe(true);
 });
+test('https entry does not match http page (downgrade blocked)', () => {
+  expect(urlMatches('https://example.com', 'http://example.com/login')).toBe(false);
+});
+test('http entry matches http page', () => {
+  expect(urlMatches('http://example.com', 'http://example.com/login')).toBe(true);
+});
+test('bare entry (defaults to https) does not match http page', () => {
+  expect(urlMatches('example.com', 'http://example.com')).toBe(false);
+});
+test('https entry matches https page', () => {
+  expect(urlMatches('https://example.com', 'https://example.com')).toBe(true);
+});
+test('localhost exemption allows http', () => {
+  expect(urlMatches('localhost:8123', 'http://localhost:8123/form')).toBe(true);
+});
+test('non-web schemes do not match', () => {
+  expect(urlMatches('https://example.com', 'file:///etc/hosts')).toBe(false);
+});
