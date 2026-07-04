@@ -1,8 +1,8 @@
-import type { EntryView } from '../shared/entry';
+import type { EntrySummary } from '../shared/entry';
 import { loadSettings } from '../shared/settings';
 import tailwindCss from '../assets/styles/tailwind.css?raw';
 
-type EntryStub = Pick<EntryView, 'id' | 'title' | 'username'>;
+type EntryStub = Pick<EntrySummary, 'id' | 'title' | 'username'>;
 type Palette = { bg: string; border: string; text: string; muted: string; hover: string; shadow: string };
 
 // CSS custom properties on the extension's own document don't reach a shadow

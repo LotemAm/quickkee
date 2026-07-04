@@ -1,4 +1,4 @@
-import type { EntryView, TreeNode } from './entry';
+import type { EntryView, EntrySummary, TreeNode } from './entry';
 import type { PwGenOpts } from './pwgen';
 import type { RemoteFile } from '../background/sources/cloudProvider';
 import type { DbSource } from './dbSource';
@@ -8,6 +8,7 @@ export type Request =
   | { type: 'lock' }
   | { type: 'getStatus' }
   | { type: 'getEntriesForUrl'; url: string }
+  | { type: 'getEntrySummariesForUrl'; url: string }
   | { type: 'getEntry'; entryId: string }
   | { type: 'getTree' }
   | { type: 'createEntry'; groupId: string; fields: Record<string, string> }
@@ -30,6 +31,7 @@ export type Response =
   | Ok | Err
   | Ok<{ locked: boolean; dbName?: string; dirty: boolean }>
   | Ok<{ entries: EntryView[] }>
+  | Ok<{ summaries: EntrySummary[] }>
   | Ok<{ entry: EntryView | null }>
   | Ok<{ tree: TreeNode }>
   | Ok<{ entryId: string }>
