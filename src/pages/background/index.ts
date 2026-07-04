@@ -193,8 +193,12 @@ chrome.runtime.onMessage.addListener((req: Request, _s, sendResponse) => {
   return true; // async
 });
 
-// keepalive: alarm heartbeat keeps the SW from idling out while unlocked
-chrome.alarms.create('keepalive', { periodInMinutes: 0.4 });
+// keepalive: alarm heartbeat keeps the SW from idling out while unlocked.
+// 0.5 is Chrome's documented floor for periodInMinutes (30s, since Chrome 120); values
+// below it are silently clamped up with a console warning, so state the real value instead
+// of relying on that clamp. Whether this alarm cadence is actually sufficient to outrun the
+// SW's 30s idle-eviction deadline is unconfirmed — see plans/reports/013-keepalive-findings.md.
+chrome.alarms.create('keepalive', { periodInMinutes: 0.5 });
 
 // retry deferred cloud uploads when connectivity returns or on the keepalive tick
 async function tryRetry() {
