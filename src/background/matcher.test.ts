@@ -34,3 +34,27 @@ test('localhost exemption allows http', () => {
 test('non-web schemes do not match', () => {
   expect(urlMatches('https://example.com', 'file:///etc/hosts')).toBe(false);
 });
+test('bare public suffix entry does not match sibling subdomain (github.io)', () => {
+  expect(urlMatches('https://github.io', 'https://attacker.github.io')).toBe(false);
+});
+test('matches same private-domain host under github.io', () => {
+  expect(urlMatches('https://foo.github.io', 'https://foo.github.io/x')).toBe(true);
+});
+test('does not match sibling private-domain host under github.io', () => {
+  expect(urlMatches('https://foo.github.io', 'https://bar.github.io')).toBe(false);
+});
+test('matches subdomain under multi-label public suffix (co.uk)', () => {
+  expect(urlMatches('https://example.co.uk', 'https://login.example.co.uk')).toBe(true);
+});
+test('does not match sibling domain under co.uk', () => {
+  expect(urlMatches('https://example.co.uk', 'https://other.co.uk')).toBe(false);
+});
+test('bare public suffix (co.uk) never matches children', () => {
+  expect(urlMatches('https://co.uk', 'https://example.co.uk')).toBe(false);
+});
+test('localhost with port falls back to exact-host equality', () => {
+  expect(urlMatches('localhost:8123', 'http://localhost:8123/form')).toBe(true);
+});
+test('loopback IP falls back to exact-host equality', () => {
+  expect(urlMatches('http://127.0.0.1', 'http://127.0.0.1/x')).toBe(true);
+});
