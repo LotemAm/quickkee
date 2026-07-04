@@ -21,6 +21,14 @@ test('panel: edit an entry, Save, and verify via kdbxweb re-read', async ({ cont
 
   // Open the panel page. Wait for the tree to appear (status poll → unlocked).
   const panel = await openExtensionPage(context, extensionId, 'src/pages/panel/index.html');
+
+  // The panel's master-detail group tree only lists entries for the currently
+  // selected group; it defaults to the root group, but the fixture entry lives
+  // in the "Sites" subgroup, so select it before looking for the entry button.
+  const sitesGroup = panel.getByRole('button', { name: 'Sites' });
+  await expect(sitesGroup).toBeVisible();
+  await sitesGroup.click();
+
   const entryBtn = panel.getByRole('button', { name: 'Localhost Login' });
   await expect(entryBtn).toBeVisible();
   await entryBtn.click();
@@ -28,10 +36,11 @@ test('panel: edit an entry, Save, and verify via kdbxweb re-read', async ({ cont
   // Wait for the Apply changes button to confirm EntryEditor has mounted.
   await panel.getByRole('button', { name: 'Apply changes' }).waitFor();
 
-  // EntryEditor renders inputs in order: Title(0), Username(1), Password(2), URL(3).
-  // Using nth(2) — the precise positional locator — to avoid ambiguity with the
-  // compound CSS selector in the brief's first draft.
-  const pwInput = panel.locator('input').nth(2);
+  // A plain positional locator (input.nth(2)) is fragile: the panel's own
+  // search box is the first <input> on the page, ahead of EntryEditor's
+  // Title/Username/Password/URL fields, so nth(2) actually lands on Username.
+  // Scope to the field wrapper that contains the "Password" label instead.
+  const pwInput = panel.locator('div.mb-3', { hasText: 'Password' }).locator('input');
 
   // Wait for the entry data to load from the SW (password field will be non-empty).
   await expect(pwInput).not.toHaveValue('');

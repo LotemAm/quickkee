@@ -76,7 +76,7 @@ export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwge
   const isFullUrl = entryUrl === url;
   return (
     <div className="card space-y-2">
-      <p className="text-sm font-medium" style={{ color: 'var(--text)' }}>New entry</p>
+      <p className="text-sm font-medium" style={{ color: 'var(--text)' }}>New entry for <span className="break-all font-normal" style={{ color: 'var(--text-muted)' }}>{url}</span></p>
       {restored && (
         <div className="flex items-center justify-between gap-2 rounded-md p-2 text-sm" style={{ background: 'var(--surface-2, var(--bg))', color: 'var(--text)' }}>
           <span className="flex items-center gap-1.5"><History size={14} /> Draft restored · discarded after 10 min away</span>
