@@ -1,6 +1,6 @@
 # QuickKee
 
-KeePass-compatible browser extension (Chrome MV3) that works with local `.kdbx` databases. Unlock your passwords on demand, autofill login forms, and manage entries directly from the browser.
+KeePass-compatible browser extension (Chrome MV3) that works with local and cloud-hosted (Dropbox, Google Drive) `.kdbx` databases. Unlock your passwords on demand, autofill login forms, and manage entries directly from the browser.
 
 ## Requirements
 
