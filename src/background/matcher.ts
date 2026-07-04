@@ -1,3 +1,5 @@
+import { getDomain } from 'tldts';
+
 function parseHost(value: string): string | null {
   if (!value) return null;
   const withScheme = /^[a-z]+:\/\//i.test(value) ? value : `https://${value}`;
@@ -14,11 +16,18 @@ function isLoopbackOrSingleLabel(host: string): boolean {
   return host === 'localhost' || host === '127.0.0.1' || !host.includes('.');
 }
 
+function registrable(host: string): string | null {
+  return getDomain(host, { allowPrivateDomains: true });
+}
+
 export function siteKey(url: string): string | null { return parseHost(url); }
 export function urlMatches(entryUrl: string, pageUrl: string): boolean {
   const e = parseHost(entryUrl); const p = parseHost(pageUrl);
   if (!e || !p) return false;
-  const hostOk = p === e || p.endsWith(`.${e}`);
+  const re = registrable(e); const rp = registrable(p);
+  // No registrable domain on either side (localhost, IPs, single-label intranet hosts):
+  // fall back to exact-host equality.
+  const hostOk = re && rp ? re === rp : p === e;
   if (!hostOk) return false;
   const pageScheme = parseScheme(pageUrl) ?? 'https';
   if (pageScheme === 'https') return true;
