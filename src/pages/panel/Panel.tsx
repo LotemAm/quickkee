@@ -63,6 +63,7 @@ function GroupTree({ node, ops, depth = 0 }: { node: TreeNode; ops: GroupOps; de
           {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         </button>
         {isEditing ? (
+          // eslint-disable-next-line jsx-a11y/no-autofocus -- intentional: focus the rename input when entering edit mode
           <input autoFocus value={draft} className="input-sm flex-1 min-w-0 mr-1"
             onChange={e => setDraft(e.target.value)}
             onKeyDown={e => {
@@ -118,7 +119,7 @@ export function Panel() {
   });
 
   const toggle = (id: string) => setExpanded(e => {
-    const n = new Set(e); n.has(id) ? n.delete(id) : n.add(id); return n;
+    const n = new Set(e); if (n.has(id)) n.delete(id); else n.add(id); return n;
   });
   async function addGroup(parentId: string) {
     const r = await sendToSW({ type: 'createGroup', parentId, name: 'New Group' });

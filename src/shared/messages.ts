@@ -25,6 +25,10 @@ export type Request =
   | { type: 'getSyncStatus' }
   | { type: 'disconnectCloud'; provider: 'dropbox' | 'gdrive' };
 
+// Intentional: `{}` (not `Record<string, never>`) is required so bare `Ok` is excluded from
+// `'prop' in r` narrowing on the `Response` union below; an index-signature type would keep
+// it in the narrowed union.
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export type Ok<T = {}> = { ok: true } & T;
 export type Err = { ok: false; error: string };
 export type Response =

@@ -15,7 +15,13 @@ export const test = base.extend<{
   http: Awaited<ReturnType<typeof startHttpFixture>>;
   https: Awaited<ReturnType<typeof startHttpsFixture>>;
 }>({
-  context: async ({}, use) => {
+  // Playwright fixture functions take a `use` callback by convention; renamed to `provide`
+  // here so eslint-plugin-react-hooks doesn't mistake it for the React `use()` hook.
+  // The empty `{}` first param is required by Playwright's own fixture machinery (it inspects
+  // the function's source text to see which fixture names are destructured), so it can't be
+  // renamed away like `use` was — disable no-empty-pattern here instead.
+  // eslint-disable-next-line no-empty-pattern
+  context: async ({}, provide) => {
     const ctx = await chromium.launchPersistentContext('', {
       headless: false,
       permissions: ['clipboard-read', 'clipboard-write'],
@@ -26,16 +32,18 @@ export const test = base.extend<{
       ],
     });
     await ctx.grantPermissions(['clipboard-read', 'clipboard-write']);
-    await use(ctx);
+    await provide(ctx);
     await ctx.close();
   },
-  extensionId: async ({ context }, use) => {
+  extensionId: async ({ context }, provide) => {
     let [sw] = context.serviceWorkers();
     if (!sw) sw = await context.waitForEvent('serviceworker');
-    await use(new URL(sw.url()).host);
+    await provide(new URL(sw.url()).host);
   },
-  http: async ({}, use) => { const s = await startHttpFixture(); await use(s); await s.close(); },
-  https: async ({}, use) => { const s = await startHttpsFixture(); await use(s); await s.close(); },
+  // eslint-disable-next-line no-empty-pattern
+  http: async ({}, provide) => { const s = await startHttpFixture(); await provide(s); await s.close(); },
+  // eslint-disable-next-line no-empty-pattern
+  https: async ({}, provide) => { const s = await startHttpsFixture(); await provide(s); await s.close(); },
 });
 
 export const expect = test.expect;
