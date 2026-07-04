@@ -69,7 +69,7 @@ This is a minimal viable product. The vault operates entirely **on your local ma
 - **No offline cache**: The `.kdbx` must be accessible from the file system
 - **Chrome only**: Firefox support is deferred
 
-**Security**: Master password and key material are held only in the service worker's memory while unlocked. When you lock the vault or the extension auto-closes, all sensitive data in memory is cleared. Settings in `chrome.storage.local` contain no secrets—only non-sensitive preferences (theme, auto-close duration, etc.).
+**Security**: Master password and key material are held only in the service worker's memory while unlocked. When you lock the vault or the extension auto-closes, all sensitive data in memory is cleared. Settings in `chrome.storage.local` contain no secrets—only non-sensitive preferences (theme, auto-close duration, etc.). Cloud sync stores OAuth **refresh tokens** in `chrome.storage.local` so reconnecting after a browser restart doesn't require re-authorization. These tokens grant access only to the app-scoped cloud files (the `.kdbx` itself stays encrypted with your master key); use **Disconnect** in the source picker to remove them. They are not encrypted at rest—this is a Chrome extension platform limitation.
 
 Future versions ("Spec 2") will add cloud storage, offline cache, and multi-browser support.
 
