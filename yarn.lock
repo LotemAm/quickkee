@@ -1962,13 +1962,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/webextension-polyfill@npm:^0.12.3":
-  version: 0.12.3
-  resolution: "@types/webextension-polyfill@npm:0.12.3"
-  checksum: 10c0/0f0cea5ab70a3958f7eca61168b8b431288c35ee7e8f052f5b3bf6a6aa101183aa760addd4dcf408027d558731aa8a8f107e47a373bb7c347cb7cba807fe46e6
-  languageName: node
-  linkType: hard
-
 "@typescript-eslint/eslint-plugin@npm:8.62.1":
   version: 8.62.1
   resolution: "@typescript-eslint/eslint-plugin@npm:8.62.1"
@@ -6033,6 +6026,47 @@ __metadata:
   languageName: node
   linkType: hard
 
+"quickkee@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "quickkee@workspace:."
+  dependencies:
+    "@crxjs/vite-plugin": "npm:^2.0.3"
+    "@playwright/test": "npm:^1.61.0"
+    "@tailwindcss/vite": "npm:^4.1.11"
+    "@testing-library/dom": "npm:^10.4.1"
+    "@testing-library/jest-dom": "npm:^6.9.1"
+    "@testing-library/react": "npm:^16.3.2"
+    "@types/chrome": "npm:^0.1.11"
+    "@types/node": "npm:^24.9.1"
+    "@types/react": "npm:^19.1.8"
+    "@types/react-dom": "npm:^19.1.6"
+    "@vitejs/plugin-react": "npm:^4.7.0"
+    eslint: "npm:^9.32.0"
+    eslint-plugin-import: "npm:^2.32.0"
+    eslint-plugin-jsx-a11y: "npm:^6.10.2"
+    eslint-plugin-react: "npm:^7.37.5"
+    eslint-plugin-react-hooks: "npm:^5.2.0"
+    fake-indexeddb: "npm:^6.2.5"
+    fs-extra: "npm:^11.3.2"
+    hash-wasm: "npm:^4.12.0"
+    jsdom: "npm:^29.1.1"
+    kdbxweb: "npm:^2.1.1"
+    lucide-react: "npm:^1.21.0"
+    nodemon: "npm:^3.1.10"
+    react: "npm:^19.1.0"
+    react-dom: "npm:^19.1.0"
+    selfsigned: "npm:^5.5.0"
+    tailwindcss: "npm:^4.1.16"
+    tldts: "npm:^7.4.6"
+    ts-node: "npm:^10.9.2"
+    typescript: "npm:^5.8.3"
+    typescript-eslint: "npm:^8"
+    vite: "npm:^6.3.5"
+    vite-tsconfig-paths: "npm:^5.1.4"
+    vitest: "npm:^4.1.9"
+  languageName: unknown
+  linkType: soft
+
 "react-dom@npm:^19.1.0":
   version: 19.1.0
   resolution: "react-dom@npm:19.1.0"
@@ -7348,49 +7382,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"vite-web-extension@workspace:.":
-  version: 0.0.0-use.local
-  resolution: "vite-web-extension@workspace:."
-  dependencies:
-    "@crxjs/vite-plugin": "npm:^2.0.3"
-    "@playwright/test": "npm:^1.61.0"
-    "@tailwindcss/vite": "npm:^4.1.11"
-    "@testing-library/dom": "npm:^10.4.1"
-    "@testing-library/jest-dom": "npm:^6.9.1"
-    "@testing-library/react": "npm:^16.3.2"
-    "@types/chrome": "npm:^0.1.11"
-    "@types/node": "npm:^24.9.1"
-    "@types/react": "npm:^19.1.8"
-    "@types/react-dom": "npm:^19.1.6"
-    "@types/webextension-polyfill": "npm:^0.12.3"
-    "@vitejs/plugin-react": "npm:^4.7.0"
-    eslint: "npm:^9.32.0"
-    eslint-plugin-import: "npm:^2.32.0"
-    eslint-plugin-jsx-a11y: "npm:^6.10.2"
-    eslint-plugin-react: "npm:^7.37.5"
-    eslint-plugin-react-hooks: "npm:^5.2.0"
-    fake-indexeddb: "npm:^6.2.5"
-    fs-extra: "npm:^11.3.2"
-    hash-wasm: "npm:^4.12.0"
-    jsdom: "npm:^29.1.1"
-    kdbxweb: "npm:^2.1.1"
-    lucide-react: "npm:^1.21.0"
-    nodemon: "npm:^3.1.10"
-    react: "npm:^19.1.0"
-    react-dom: "npm:^19.1.0"
-    selfsigned: "npm:^5.5.0"
-    tailwindcss: "npm:^4.1.16"
-    tldts: "npm:^7.4.6"
-    ts-node: "npm:^10.9.2"
-    typescript: "npm:^5.8.3"
-    typescript-eslint: "npm:^8"
-    vite: "npm:^6.3.5"
-    vite-tsconfig-paths: "npm:^5.1.4"
-    vitest: "npm:^4.1.9"
-    webextension-polyfill: "npm:^0.12.0"
-  languageName: unknown
-  linkType: soft
-
 "vite@npm:^6.0.0 || ^7.0.0 || ^8.0.0":
   version: 8.0.16
   resolution: "vite@npm:8.0.16"
@@ -7577,13 +7568,6 @@ __metadata:
   dependencies:
     xml-name-validator: "npm:^5.0.0"
   checksum: 10c0/8712774c1aeb62dec22928bf1cdfd11426c2c9383a1a63f2bcae18db87ca574165a0fbe96b312b73652149167ac6c7f4cf5409f2eb101d9c805efe0e4bae798b
-  languageName: node
-  linkType: hard
-
-"webextension-polyfill@npm:^0.12.0":
-  version: 0.12.0
-  resolution: "webextension-polyfill@npm:0.12.0"
-  checksum: 10c0/5ace2aaaf6a203515bdd2fb948622f186a5fbb50099b539ce9c0ad54896f9cc1fcc3c0e2a71d1f7071dd7236d7daebba1e0cbcf43bfdfe54361addf0333ee7d1
   languageName: node
   linkType: hard
 
