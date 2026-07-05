@@ -8,6 +8,7 @@ import { lockVault } from '../../shared/lockVault';
 import { loadSettings } from '../../shared/settings';
 import { applyTheme } from '../../shared/theme';
 import type { TreeNode } from '../../shared/entry';
+import { DEFAULT_PWGEN, type PwGenOpts } from '../../shared/pwgen';
 import { EntryEditor } from './EntryEditor';
 
 function findGroup(node: TreeNode, id: string): TreeNode | null {
@@ -107,10 +108,11 @@ export function Panel() {
   const [selGroup, setSelGroup] = useState<string | null>(null);
   const [selEntry, setSelEntry] = useState<string | null>(null);
   const [clearSecs, setClearSecs] = useState(30); const [saved, setSaved] = useState('');
+  const [pwgen, setPwgen] = useState<PwGenOpts>(DEFAULT_PWGEN);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<string | null>(null);
   const [query, setQuery] = useState('');
-  useEffect(() => { loadSettings().then(s => { applyTheme(s.theme); setClearSecs(s.clipboardClearSeconds); }); }, []);
+  useEffect(() => { loadSettings().then(s => { applyTheme(s.theme); setClearSecs(s.clipboardClearSeconds); setPwgen(s.pwgen); }); }, []);
   const reload = () => sendToSW({ type: 'getTree' }).then(r => {
     if (!('tree' in r)) return;
     setTree(r.tree);
@@ -230,7 +232,7 @@ export function Panel() {
             </button>
           </div>
           <div className="overflow-auto flex-1">
-            <EntryEditor entryId={selEntry} clearSecs={clearSecs}
+            <EntryEditor entryId={selEntry} clearSecs={clearSecs} pwgen={pwgen}
               onChanged={() => { refresh(); reload(); }}
               onDeleted={() => { setSelEntry(null); refresh(); reload(); }} />
           </div>
