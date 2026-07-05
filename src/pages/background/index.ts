@@ -1,24 +1,18 @@
-import { Vault, isInvalidKey } from '../../background/vault';
+import { Vault } from '../../background/vault';
 import { AutoLock } from '../../background/autolock';
-import { loadHandle, ensurePermission, readBytes, writeBytes } from '../../background/fileHandle';
-import { loadSettings } from '../../shared/settings';
-import { generatePassword, DEFAULT_PWGEN } from '../../shared/pwgen';
 import { updateIconForTab } from '../../background/icon';
 import { shouldWarnCertError } from '../../background/certwarn';
-import { urlMatches } from '../../background/matcher';
-import type { Request, Response } from '../../shared/messages';
-import { providerFor, __hasOverride } from './cloudRouting';
-import { openCloud, saveCloud, retryPending, type SyncDeps } from '../../background/sync';
-import { getAccessToken, disconnect, DROPBOX_OAUTH, GDRIVE_OAUTH } from '../../background/sources/oauth';
-import { getCache, cacheKey } from '../../background/cache';
-import type { CloudFileSource, DbSource } from '../../shared/dbSource';
+import type { Request } from '../../shared/messages';
+import { retryPending } from '../../background/sync';
+import type { DbSource } from '../../shared/dbSource';
 import { clearAllDrafts } from '../../shared/createDraft';
+import { makeRouter, depsFor, CLIPBOARD_CLEAR_ALARM, type SwContext } from './router';
+import { registerTestCommands } from './testCommands';
 
 const vault = new Vault();
 let handle: FileSystemFileHandle | null = null;
 const autolock = new AutoLock(() => doLock());
 
-const CLIPBOARD_CLEAR_ALARM = 'clipboard-clear';
 let pendingClipboardHash: string | null = null;
 
 async function persistPendingClipboardHash(hash: string | null): Promise<void> {
@@ -63,128 +57,25 @@ async function runClipboardClear(): Promise<void> {
 let currentSource: DbSource | null = null;
 const onlineNow = () => (typeof navigator !== 'undefined' ? navigator.onLine : true);
 
-function depsFor(src: CloudFileSource): SyncDeps {
-  return { vault, provider: providerFor(src.provider), online: onlineNow };
-}
-
 // Tracks tabs with an active cert-warning badge so match-count updates don't overwrite them.
 const warnedTabs = new Set<number>();
 
 function doLock() { vault.lock(); handle = null; currentSource = null; autolock.disarm(); void clearAllDrafts(); refreshAllIcons(); }
 
-async function handle_(req: Request): Promise<Response> {
-  autolock.touch();
-  switch (req.type) {
-    case 'unlock': {
-      handle = await loadHandle();
-      if (!handle) return { ok: false, error: 'noFile' };
-      if (!(await ensurePermission(handle, 'readwrite'))) return { ok: false, error: 'permission' };
-      try {
-        const bytes = await readBytes(handle);
-        const keyFile = req.keyFile ? new Uint8Array(req.keyFile).buffer : null;
-        await vault.open(bytes, req.password, keyFile);
-      } catch (e) {
-        if (isInvalidKey(e)) return { ok: false, error: 'badCredentials' };
-        // Surface non-credential failures (corrupt file, missing WASM/CSP, runtime) instead of masking them.
-        return { ok: false, error: `unlockFailed: ${e instanceof Error ? e.message : String(e)}` };
-      }
-      const s = await loadSettings(); autolock.arm(s.autoCloseHours); refreshAllIcons();
-      return { ok: true };
-    }
-    case 'lock': doLock(); return { ok: true };
-    case 'getStatus':
-      return { ok: true, locked: !vault.isOpen(), dbName: handle?.name, dirty: vault.dirty };
-    case 'getEntriesForUrl':
-      return vault.isOpen() ? { ok: true, entries: vault.entriesForUrl(req.url) } : { ok: false, error: 'locked' };
-    case 'getEntrySummariesForUrl':
-      return vault.isOpen() ? { ok: true, summaries: vault.entrySummariesForUrl(req.url) } : { ok: false, error: 'locked' };
-    case 'getEntry':
-      return { ok: true, entry: vault.getEntry(req.entryId) };
-    case 'getTree':
-      return vault.isOpen() ? { ok: true, tree: vault.getTree() } : { ok: false, error: 'locked' };
-    case 'createEntry':
-      return { ok: true, entryId: vault.createEntry(req.groupId, req.fields) };
-    case 'updateEntry': vault.updateEntry(req.entryId, req.fields, req.expires, req.removeKeys); return { ok: true };
-    case 'updateGroup': vault.updateGroup(req.groupId, req.fields); return { ok: true };
-    case 'createGroup': return { ok: true, groupId: vault.createGroup(req.parentId, req.name) };
-    case 'deleteGroup': vault.deleteGroup(req.groupId); return { ok: true };
-    case 'deleteEntry': vault.deleteEntry(req.entryId); return { ok: true };
-    case 'save': {
-      if (currentSource?.kind === 'cloud') {
-        try {
-          const out = await saveCloud(currentSource, depsFor(currentSource));
-          return out.merged ? { ok: true, merged: true } : { ok: true };
-        } catch { return { ok: false, error: 'saveFailed' }; }
-      }
-      if (!handle) return { ok: false, error: 'noFile' };
-      try { const bytes = await vault.serialize(); await writeBytes(handle, bytes); vault.dirty = false; return { ok: true }; }
-      catch { return { ok: false, error: 'saveFailed' }; }
-    }
-    case 'connectCloud': {
-      // In test mode with a fake provider installed, skip real OAuth.
-      if (import.meta.env.VITE_QK_TEST === '1' && __hasOverride()) return { ok: true };
-      try {
-        await getAccessToken(req.provider === 'dropbox' ? DROPBOX_OAUTH : GDRIVE_OAUTH);
-        return { ok: true };
-      } catch { return { ok: false, error: 'authRequired' }; }
-    }
-    case 'listRemoteFiles': {
-      try { return { ok: true, files: await providerFor(req.provider).listKdbxFiles() }; }
-      catch { return { ok: false, error: 'authRequired' }; }
-    }
-    case 'openRemote': {
-      const src: CloudFileSource = { kind: 'cloud', provider: req.provider, fileId: req.fileId, basedOnRev: '' };
-      try {
-        const keyFile = req.keyFile ? new Uint8Array(req.keyFile).buffer : null;
-        const out = await openCloud(src, depsFor(src), req.password, keyFile);
-        currentSource = src;
-        const s = await loadSettings(); autolock.arm(s.autoCloseHours); refreshAllIcons();
-        return out.merged ? { ok: true, merged: true } : { ok: true };
-      } catch (e) {
-        if (isInvalidKey(e)) return { ok: false, error: 'badCredentials' };
-        return { ok: false, error: `openFailed: ${e instanceof Error ? e.message : String(e)}` };
-      }
-    }
-    case 'getSyncStatus': {
-      if (!currentSource || currentSource.kind !== 'cloud')
-        return { ok: true, source: currentSource?.kind ?? null, pendingUpload: false, online: onlineNow() };
-      const rec = await getCache(cacheKey(currentSource.provider, currentSource.fileId));
-      return {
-        ok: true, source: 'cloud', provider: currentSource.provider,
-        pendingUpload: rec?.pendingUpload ?? false, online: onlineNow(), lastSyncedAt: rec?.lastSyncedAt,
-      };
-    }
-    case 'disconnectCloud': {
-      await disconnect(req.provider);
-      // If the active vault is this provider's, lock so the next save can't route to a
-      // now-credential-less provider (surprise OAuth popup). Local edits stay pendingUpload in cache.
-      if (currentSource?.kind === 'cloud' && currentSource.provider === req.provider) doLock();
-      return { ok: true };
-    }
-    case 'generatePassword':
-      return { ok: true, password: generatePassword(req.opts ?? DEFAULT_PWGEN) };
-    case 'fillRequest': {
-      const entry = vault.getEntry(req.entryId);
-      if (!entry) return { ok: false, error: 'noEntry' };
-      let tab: chrome.tabs.Tab;
-      try { tab = await chrome.tabs.get(req.tabId); }
-      catch { return { ok: false, error: 'noTab' }; }
-      // Entries without a URL can't be validated — allow (explicit user action from the popup).
-      if (entry.url && (!tab.url || !urlMatches(entry.url, tab.url)))
-        return { ok: false, error: 'urlMismatch' };
-      await chrome.tabs.sendMessage(req.tabId, { type: 'fill', username: entry.username, password: entry.password });
-      return { ok: true };
-    }
-    case 'scheduleClipboardClear':
-      await persistPendingClipboardHash(req.textHash);
-      chrome.alarms.create(CLIPBOARD_CLEAR_ALARM, { when: Date.now() + req.seconds * 1000 });
-      return { ok: true };
-    case 'cancelClipboardClear':
-      await persistPendingClipboardHash(null);
-      chrome.alarms.clear(CLIPBOARD_CLEAR_ALARM);
-      return { ok: true };
-  }
-}
+const ctx: SwContext = {
+  vault,
+  autolock,
+  getHandle: () => handle,
+  setHandle: h => { handle = h; },
+  getCurrentSource: () => currentSource,
+  setCurrentSource: s => { currentSource = s; },
+  doLock,
+  refreshAllIcons,
+  online: onlineNow,
+  persistPendingClipboardHash,
+};
+
+const handle_ = makeRouter(ctx);
 
 chrome.runtime.onMessage.addListener((req: Request, _s, sendResponse) => {
   if ((req as unknown as { __qk?: string }).__qk === 'test') return false;
@@ -203,7 +94,7 @@ chrome.alarms.create('keepalive', { periodInMinutes: 0.5 });
 // retry deferred cloud uploads when connectivity returns or on the keepalive tick
 async function tryRetry() {
   if (currentSource?.kind === 'cloud' && onlineNow()) {
-    try { await retryPending(currentSource, depsFor(currentSource)); } catch { /* stays pending */ }
+    try { await retryPending(currentSource, depsFor(ctx, currentSource)); } catch { /* stays pending */ }
   }
 }
 if (typeof self !== 'undefined' && 'addEventListener' in self) self.addEventListener('online', () => void tryRetry());
@@ -254,56 +145,12 @@ chrome.webNavigation.onErrorOccurred.addListener(details => {
   void chrome.action.setTitle({ tabId: details.tabId, title: 'Warning: certificate error on this site' });
 });
 
+// Registered synchronously (not via dynamic import) so the test-command listener is live
+// before the E2E harness can send its first `__qk: 'test'` message; a dynamic import here
+// raced the harness and dropped early messages. The `if` stays a statically analyzable
+// `import.meta.env.VITE_QK_TEST === '1'` check so production builds still dead-code-eliminate
+// this branch (and, since it becomes the only reference to `registerTestCommands`, the
+// unused import + the whole testCommands module get tree-shaken out too).
 if (import.meta.env.VITE_QK_TEST === '1') {
-  chrome.runtime.onMessage.addListener((req: any, _s, send) => {
-    if (!req || req.__qk !== 'test') return false;
-    (async () => {
-      switch (req.cmd) {
-        case 'badge': {
-          const text = await chrome.action.getBadgeText({ tabId: req.tabId });
-          const color = await chrome.action.getBadgeBackgroundColor({ tabId: req.tabId });
-          send({ text, color });
-          break;
-        }
-        case 'match':
-          send({ count: vault.isOpen() ? vault.countForUrl(req.url) : 0, cert: warnedTabs.has(req.tabId) });
-          break;
-        case 'lock': doLock(); send({ ok: true }); break;
-        case 'armShort': autolock.arm(req.hours); send({ ok: true }); break;
-        case 'tabId': {
-          const tabs = await chrome.tabs.query({});
-          send({ id: tabs.find(t => t.url?.startsWith(req.url))?.id });
-          break;
-        }
-        case 'warned': send({ tabs: Array.from(warnedTabs) }); break;
-        case 'cloudInstall': {
-          // Install a fake provider holding the given base64 .kdbx as remote rev "r1".
-          const fake = (await import('./cloudRouting')).__makeFake(req.provider);
-          const bin = atob(req.b64); const bytes = new Uint8Array(bin.length);
-          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-          fake.setFile(req.fileId, req.name, bytes.buffer, 'r1');
-          (await import('./cloudRouting')).__setProviderOverride(fake);
-          (globalThis as any).__qkFake = fake;
-          send({ ok: true });
-          break;
-        }
-        case 'cloudSetRemote': {
-          // Replace remote bytes + bump rev to simulate another device's push.
-          const fake = (globalThis as any).__qkFake as import('../../background/sources/fakeCloudProvider').FakeCloudProvider;
-          const bin = atob(req.b64); const bytes = new Uint8Array(bin.length);
-          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-          fake.setFile(req.fileId, req.name, bytes.buffer, 'r2');
-          send({ ok: true });
-          break;
-        }
-        case 'cloudUploads': {
-          const fake = (globalThis as any).__qkFake as import('../../background/sources/fakeCloudProvider').FakeCloudProvider;
-          send({ count: fake?.uploads.length ?? 0 });
-          break;
-        }
-        default: send({});
-      }
-    })();
-    return true;
-  });
+  registerTestCommands({ ...ctx, warnedTabs });
 }
