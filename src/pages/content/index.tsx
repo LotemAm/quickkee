@@ -25,10 +25,10 @@ document.addEventListener('focusin', ev => {
   const fields = findLoginFields(document);
   if (!isLoginField(el, fields)) return;
   void sendToSW({ type: 'getEntrySummariesForUrl', url: location.href }).then(res => {
-    if (!('summaries' in res) || res.summaries.length === 0) return;
+    if (!res.ok || res.summaries.length === 0) return;
     showPopup(el, res.summaries, entry => {
       void sendToSW({ type: 'getEntry', entryId: entry.id }).then(full => {
-        if ('entry' in full && full.entry) fillAndHide(fields, full.entry.username, full.entry.password);
+        if (full.ok && full.entry) fillAndHide(fields, full.entry.username, full.entry.password);
       });
     });
   });

@@ -29,7 +29,7 @@ export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwge
   const noClass = !opts.lower && !opts.upper && !opts.digits && !opts.symbols;
   function regenerate(o: PwGenOpts) {
     if (!o.lower && !o.upper && !o.digits && !o.symbols) return;
-    sendToSW({ type: 'generatePassword', opts: o }).then(r => 'password' in r && setPassword(r.password));
+    sendToSW({ type: 'generatePassword', opts: o }).then(r => r.ok && setPassword(r.password));
   }
   // Restore a persisted draft (the popup unmounts whenever it loses focus), or
   // start fresh — generating the first password only when there is no draft.
@@ -59,7 +59,7 @@ export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwge
     await sendToSW({ type: 'save' });
     await clearDraft(url);
     setRestored(false);
-    return 'entryId' in r ? r.entryId : null;
+    return r.ok ? r.entryId : null;
   }
   async function discardDraft() {
     await clearDraft(url);
