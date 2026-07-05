@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Copy, Check, Eye, EyeOff, X, Plus, Trash2 } from 'lucide-react';
+import { Copy, Check, Eye, EyeOff, X, Plus, Trash2, RefreshCw } from 'lucide-react';
 import { sendToSW } from '../../shared/messages';
 import type { EntryView } from '../../shared/entry';
+import type { PwGenOpts } from '../../shared/pwgen';
 import { useClipboardTimer } from '../../shared/useClipboardTimer';
 import { ClipboardBar } from '../../shared/ClipboardBar';
 
@@ -12,7 +13,7 @@ const toLocalInput = (ms: number) => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 
-export function EntryEditor({ entryId, clearSecs, onChanged, onDeleted }: { entryId: string; clearSecs: number; onChanged: () => void; onDeleted: () => void }) {
+export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }: { entryId: string; clearSecs: number; pwgen: PwGenOpts; onChanged: () => void; onDeleted: () => void }) {
   const [e, setE] = useState<EntryView | null>(null);
   const [showPass, setShowPass] = useState(false);
   const [expires, setExpires] = useState<number | null>(null);
@@ -60,6 +61,14 @@ export function EntryEditor({ entryId, clearSecs, onChanged, onDeleted }: { entr
         {secret && (
           <button className="icon-btn" aria-label={showPass ? 'Hide password' : 'Show password'} title={showPass ? 'Hide password' : 'Show password'} onClick={() => setShowPass(s => !s)}>
             {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
+          </button>
+        )}
+        {secret && (
+          <button className="icon-btn" aria-label="Generate password" title="Generate password"
+            onClick={() => sendToSW({ type: 'generatePassword', opts: pwgen }).then(r => {
+              if ('password' in r) { setE({ ...e, password: r.password }); setShowPass(true); }
+            })}>
+            <RefreshCw size={14} />
           </button>
         )}
         <button className="icon-btn"
