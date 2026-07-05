@@ -114,7 +114,7 @@ export function Panel() {
   const [query, setQuery] = useState('');
   useEffect(() => { loadSettings().then(s => { applyTheme(s.theme); setClearSecs(s.clipboardClearSeconds); setPwgen(s.pwgen); }); }, []);
   const reload = () => sendToSW({ type: 'getTree' }).then(r => {
-    if (!('tree' in r)) return;
+    if (!r.ok) return;
     setTree(r.tree);
     setSelGroup(g => g ?? r.tree.groupId);
     setExpanded(e => e.size ? e : new Set([r.tree.groupId]));
@@ -127,7 +127,7 @@ export function Panel() {
     const r = await sendToSW({ type: 'createGroup', parentId, name: 'New Group' });
     setExpanded(e => new Set(e).add(parentId));
     await reload(); refresh();
-    if ('groupId' in r) { setSelGroup(r.groupId); setSelEntry(null); setEditing(r.groupId); }
+    if (r.ok) { setSelGroup(r.groupId); setSelEntry(null); setEditing(r.groupId); }
   }
   async function renameGroup(id: string, name: string) {
     if (name) await sendToSW({ type: 'updateGroup', groupId: id, fields: { Name: name } });

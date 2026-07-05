@@ -19,7 +19,7 @@ export function CloudConnect({ provider, onPicked }: {
       const c = await sendToSW({ type: 'connectCloud', provider });
       if (!c.ok) { setError('Could not connect. Try again.'); return; }
       const r = await sendToSW({ type: 'listRemoteFiles', provider });
-      if ('files' in r) setFiles(r.files);
+      if (r.ok) setFiles(r.files);
       else setError('Could not list files.');
     } finally {
       setBusy(false);

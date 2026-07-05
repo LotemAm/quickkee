@@ -34,20 +34,42 @@ export type Request =
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export type Ok<T = {}> = { ok: true } & T;
 export type Err = { ok: false; error: string };
-export type Response =
-  | Ok | Err
-  | Ok<{ locked: boolean; dbName?: string; dirty: boolean }>
-  | Ok<{ entries: EntryView[] }>
-  | Ok<{ summaries: EntrySummary[] }>
-  | Ok<{ entry: EntryView | null }>
-  | Ok<{ tree: TreeNode }>
-  | Ok<{ entryId: string }>
-  | Ok<{ groupId: string }>
-  | Ok<{ password: string }>
-  | Ok<{ merged?: boolean }>
-  | Ok<{ files: RemoteFile[] }>
-  | Ok<{ source: DbSource['kind'] | null; provider?: 'dropbox' | 'gdrive'; pendingUpload: boolean; online: boolean; lastSyncedAt?: number }>;
 
-export function sendToSW(req: Request): Promise<Response> {
-  return chrome.runtime.sendMessage(req) as Promise<Response>;
+// Request-keyed response map: each Request['type'] maps to the exact success
+// payload shape the router returns for it (see plans/010 for the source table).
+type OkFor = {
+  unlock: Ok;
+  lock: Ok;
+  updateEntry: Ok;
+  updateGroup: Ok;
+  deleteGroup: Ok;
+  deleteEntry: Ok;
+  connectCloud: Ok;
+  disconnectCloud: Ok;
+  fillRequest: Ok;
+  scheduleClipboardClear: Ok;
+  cancelClipboardClear: Ok;
+  getStatus: Ok<{ locked: boolean; dbName?: string; dirty: boolean }>;
+  getEntriesForUrl: Ok<{ entries: EntryView[] }>;
+  getEntrySummariesForUrl: Ok<{ summaries: EntrySummary[] }>;
+  getEntry: Ok<{ entry: EntryView | null }>;
+  getTree: Ok<{ tree: TreeNode }>;
+  createEntry: Ok<{ entryId: string }>;
+  createGroup: Ok<{ groupId: string }>;
+  save: Ok<{ merged?: boolean }>;
+  openRemote: Ok<{ merged?: boolean }>;
+  generatePassword: Ok<{ password: string }>;
+  listRemoteFiles: Ok<{ files: RemoteFile[] }>;
+  getSyncStatus: Ok<{ source: DbSource['kind'] | null; provider?: 'dropbox' | 'gdrive'; pendingUpload: boolean; online: boolean; lastSyncedAt?: number }>;
+};
+// Compile-time exhaustiveness: every Request type must appear in OkFor.
+type _AssertExhaustive = Request['type'] extends keyof OkFor ? true : never;
+const _assertExhaustive: _AssertExhaustive = true;
+void _assertExhaustive;
+
+export type ResponseFor<T extends Request['type']> = OkFor[T] | Err;
+export type Response = ResponseFor<Request['type']>; // keep the old name for the router
+
+export function sendToSW<R extends Request>(req: R): Promise<ResponseFor<R['type']>> {
+  return chrome.runtime.sendMessage(req) as Promise<ResponseFor<R['type']>>;
 }

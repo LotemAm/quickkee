@@ -52,8 +52,8 @@ export function Popup() {
       .then(([t]) => t?.id && t.url && setTab({ id: t.id, url: t.url }));
   }, []);
   useEffect(() => { if (locked || !tab) return;
-    sendToSW({ type: 'getEntriesForUrl', url: tab.url }).then(r => 'entries' in r && setEntries(r.entries));
-    sendToSW({ type: 'getTree' }).then(r => { if ('tree' in r) { setTree(r.tree); setRootGroup(r.tree.groupId); } });
+    sendToSW({ type: 'getEntriesForUrl', url: tab.url }).then(r => r.ok && setEntries(r.entries));
+    sendToSW({ type: 'getTree' }).then(r => { if (r.ok) { setTree(r.tree); setRootGroup(r.tree.groupId); } });
   }, [locked, tab]);
   useEffect(() => {
     const query = q.trim().toLowerCase();
@@ -65,13 +65,13 @@ export function Popup() {
     Promise.all(ids.map(id => sendToSW({ type: 'getEntry', entryId: id })))
       .then(rs => {
         if (ignore) return;
-        setSearchResults(rs.flatMap(r => ('entry' in r && r.entry) ? [r.entry] : []));
+        setSearchResults(rs.flatMap(r => (r.ok && r.entry) ? [r.entry] : []));
       });
     return () => { ignore = true; };
   }, [q, tree]);
   useEffect(() => {
     if (locked) return;
-    const tick = () => sendToSW({ type: 'getSyncStatus' }).then(r => 'pendingUpload' in r && setSync(r));
+    const tick = () => sendToSW({ type: 'getSyncStatus' }).then(r => r.ok && setSync(r));
     void tick();
     const iv = setInterval(tick, 4000);
     return () => clearInterval(iv);
@@ -119,7 +119,7 @@ export function Popup() {
         {!searching && entries.length === 0 && tab && rootGroup && tree &&
           <CreateForm url={tab.url} tabId={tab.id} groups={flattenGroups(tree)} defaultGroupId={rootGroup}
             clearSecs={clearSecs} pwgen={pwgen} onCreated={() =>
-            sendToSW({ type: 'getEntriesForUrl', url: tab.url }).then(r => 'entries' in r && setEntries(r.entries))} />}
+            sendToSW({ type: 'getEntriesForUrl', url: tab.url }).then(r => r.ok && setEntries(r.entries))} />}
       </div>
     </div>
   );

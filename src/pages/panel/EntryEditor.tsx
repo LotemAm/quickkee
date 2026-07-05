@@ -26,7 +26,7 @@ export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }:
     setShowPass(false);
     setDeleteError('');
     sendToSW({ type: 'getEntry', entryId }).then(r => {
-      if ('entry' in r && r.entry) {
+      if (r.ok && r.entry) {
         setE(r.entry); setExpires(r.entry.expires);
         setCustom(r.entry.fields.map(f => ({ key: f.key, value: f.value })));
         setOrigKeys(r.entry.fields.map(f => f.key));
@@ -66,7 +66,7 @@ export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }:
         {secret && (
           <button className="icon-btn" aria-label="Generate password" title="Generate password"
             onClick={() => sendToSW({ type: 'generatePassword', opts: pwgen }).then(r => {
-              if ('password' in r) { setE({ ...e, password: r.password }); setShowPass(true); }
+              if (r.ok) { setE({ ...e, password: r.password }); setShowPass(true); }
             })}>
             <RefreshCw size={14} />
           </button>
