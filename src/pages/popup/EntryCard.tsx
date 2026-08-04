@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Copy, LogIn, ChevronDown, ChevronUp } from 'lucide-react';
+import { Copy, LogIn, ChevronDown, ChevronUp, PanelRight } from 'lucide-react';
 import type { EntryView } from '../../shared/entry';
 import { sendToSW } from '../../shared/messages';
+import { requestOpenEntry } from '../../shared/openEntry';
 
 export function EntryCard({ entry, tabId, onCopy, groupName }: {
   entry: EntryView;
@@ -23,6 +24,10 @@ export function EntryCard({ entry, tabId, onCopy, groupName }: {
         </div>
       </div>
       <div className="flex flex-wrap gap-1.5 mt-2">
+        <button className="icon-btn-xs" aria-label="Open in sidebar" title="Open in sidebar"
+          onClick={() => { requestOpenEntry(entry.id); chrome.sidePanel.open({ tabId }); }}>
+          <PanelRight size={12} />
+        </button>
         <button className="btn-xs" aria-label="Copy user" onClick={() => onCopy(entry.username, 'Username')}>
           <Copy size={12} /> User
         </button>

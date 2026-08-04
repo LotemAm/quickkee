@@ -90,7 +90,7 @@
     font-weight: 600;
     color: var(--text);
   }
-  .app-logo { color: var(--primary); }
+  .app-logo { color: var(--primary); display: block; border-radius: 4px; }
 
   .card {
     background: var(--surface);

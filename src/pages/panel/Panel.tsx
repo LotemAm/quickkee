@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ShieldCheck, Save, FolderClosed, FolderOpen, FileText, X, Lock,
+import { Save, FolderClosed, FolderOpen, FileText, X, Lock,
   ChevronRight, ChevronDown, Plus, Pencil, Trash2, Check, Search } from 'lucide-react';
 import { useStatus } from '../../shared/useStatus';
 import { UnlockScreen } from '../../shared/UnlockScreen';
@@ -7,6 +7,7 @@ import { sendToSW } from '../../shared/messages';
 import { lockVault } from '../../shared/lockVault';
 import { loadSettings } from '../../shared/settings';
 import { applyTheme } from '../../shared/theme';
+import { consumeOpenEntry, watchOpenEntry } from '../../shared/openEntry';
 import type { TreeNode } from '../../shared/entry';
 import { DEFAULT_PWGEN, type PwGenOpts } from '../../shared/pwgen';
 import { EntryEditor } from './EntryEditor';
@@ -144,6 +145,11 @@ export function Panel() {
     await reload(); refresh();
   }
   useEffect(() => { if (!locked) reload(); }, [locked]);
+  useEffect(() => {
+    if (locked) return;
+    consumeOpenEntry().then(id => { if (id) setSelEntry(id); });
+    return watchOpenEntry(id => setSelEntry(id));
+  }, [locked]);
   if (locked) return (
     <div className="min-h-screen flex flex-col justify-center" style={{ background: 'var(--bg)' }}>
       <UnlockScreen onUnlocked={refresh} />
@@ -162,7 +168,7 @@ export function Panel() {
   return (
     <div className="flex flex-col h-screen" style={{ background: 'var(--bg)' }}>
       <header className="app-header">
-        <span className="app-title"><ShieldCheck size={18} className="app-logo" /> QuickKee</span>
+        <span className="app-title"><img src={chrome.runtime.getURL('icon-32.png')} alt="" className="app-logo" width={18} height={18} /> QuickKee</span>
         <div className="flex items-center gap-1">
           <button className="btn-primary btn-xs" disabled={!dirty} onClick={save}>
             <Save size={13} /> {dirty ? 'Save *' : 'Saved'}{saved && ` · ${saved}`}
