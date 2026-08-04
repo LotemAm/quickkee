@@ -2,8 +2,9 @@ import * as kdbxweb from 'kdbxweb';
 import { registerArgon2 } from './crypto';
 import { urlMatches } from './matcher';
 import type { EntryView, EntryField, TreeNode, EntrySummary } from '../shared/entry';
+import { CARD_FLAG_KEY } from '../shared/entry';
 
-const STD = new Set(['Title', 'UserName', 'Password', 'URL', 'Notes']);
+const STD = new Set(['Title', 'UserName', 'Password', 'URL', 'Notes', CARD_FLAG_KEY]);
 
 /** True only when an error means the password/key file was wrong — not when load
  *  failed for another reason (corrupt file, missing Argon2/WASM, runtime fault). */
@@ -72,6 +73,7 @@ export class Vault {
       username: str(e.fields.get('UserName')),
       url: str(e.fields.get('URL')),
       expired: this.isExpired(e),
+      isCard: str(e.fields.get(CARD_FLAG_KEY)) === '1',
     };
   }
 
@@ -90,6 +92,7 @@ export class Vault {
       expired: this.isExpired(e),
       created: e.times.creationTime ? e.times.creationTime.getTime() : null,
       expires: e.times.expires === true && e.times.expiryTime ? e.times.expiryTime.getTime() : null,
+      isCard: str(e.fields.get(CARD_FLAG_KEY)) === '1',
     };
   }
 
@@ -123,7 +126,7 @@ export class Vault {
     const build = (g: kdbxweb.KdbxGroup): TreeNode => ({
       groupId: g.uuid.id, name: str(g.name),
       entries: g.entries.map(e => { const v = this.toView(e);
-        return { id: v.id, title: v.title, username: v.username, url: v.url, expired: v.expired }; }),
+        return { id: v.id, title: v.title, username: v.username, url: v.url, expired: v.expired, isCard: v.isCard }; }),
       children: g.groups.filter(c => !this.isRecycleBin(c)).map(build),
     });
     return build(this.root);

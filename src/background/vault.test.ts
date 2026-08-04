@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Vault, isInvalidKey } from './vault';
+import { CARD_FLAG_KEY } from '../shared/entry';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -197,4 +198,46 @@ test('getTree omits the Recycle Bin group and its entries after a delete', async
   expect(allNodes.some(n => n.groupId === binUuid!.id)).toBe(false);
   // Nor should the deleted entry appear under any surviving group.
   expect(allNodes.some(n => n.entries.some(e => e.id === id))).toBe(false);
+});
+
+test('setting the card flag round-trips through serialize and is excluded from fields[]', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  v.updateEntry(id, { [CARD_FLAG_KEY]: '1' });
+
+  const view = v.getEntry(id)!;
+  expect(view.isCard).toBe(true);
+  expect(view.fields.find(f => f.key === CARD_FLAG_KEY)).toBeUndefined();
+
+  const bytes = await v.serialize();
+  const v2 = new Vault(); await v2.open(bytes, 'correct horse', null);
+  expect(v2.getEntry(id)?.isCard).toBe(true);
+});
+
+test('entries without the card flag default to isCard false', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const view = v.entriesForUrl('https://github.com/login')[0];
+  expect(view.isCard).toBe(false);
+});
+
+test('clearing the card flag reverts isCard to false', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  v.updateEntry(id, { [CARD_FLAG_KEY]: '1' });
+  expect(v.getEntry(id)?.isCard).toBe(true);
+  v.updateEntry(id, { [CARD_FLAG_KEY]: '' });
+  expect(v.getEntry(id)?.isCard).toBe(false);
+});
+
+test('entrySummariesForUrl and getTree both expose isCard', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  v.updateEntry(id, { [CARD_FLAG_KEY]: '1' });
+
+  const summaries = v.entrySummariesForUrl('https://github.com/login');
+  expect(summaries[0].isCard).toBe(true);
+
+  const tree = v.getTree();
+  const sites = tree.children.find(c => c.name === 'Sites');
+  expect(sites?.entries.find(e => e.id === id)?.isCard).toBe(true);
 });
