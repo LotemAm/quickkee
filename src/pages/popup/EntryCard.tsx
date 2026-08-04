@@ -23,11 +23,7 @@ export function EntryCard({ entry, tabId, onCopy, groupName }: {
           {groupName && <span className="badge max-w-[120px]"><span className="truncate">{groupName}</span></span>}
         </div>
       </div>
-      <div className="flex flex-wrap gap-1.5 mt-2">
-        <button className="icon-btn-xs" aria-label="Open in sidebar" title="Open in sidebar"
-          onClick={() => { requestOpenEntry(entry.id); chrome.sidePanel.open({ tabId }); }}>
-          <PanelRight size={12} />
-        </button>
+      <div className="flex flex-wrap items-center gap-1.5 mt-2">
         <button className="btn-xs" aria-label="Copy user" onClick={() => onCopy(entry.username, 'Username')}>
           <Copy size={12} /> User
         </button>
@@ -39,6 +35,10 @@ export function EntryCard({ entry, tabId, onCopy, groupName }: {
         </button>
         <button className="btn-xs" aria-label="Toggle fields" onClick={() => setOpen(o => !o)}>
           {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />} Fields
+        </button>
+        <button className="icon-btn-xs ml-auto" aria-label="Open in sidebar" title="Open in sidebar"
+          onClick={() => { requestOpenEntry(entry.id); chrome.sidePanel.open({ tabId }); }}>
+          <PanelRight size={12} />
         </button>
       </div>
       {open && <div className="mt-2 space-y-1">

@@ -18,6 +18,15 @@ function findGroup(node: TreeNode, id: string): TreeNode | null {
   return null;
 }
 
+function findEntryGroup(node: TreeNode, entryId: string, ancestors: string[] = []): { groupId: string; ancestors: string[] } | null {
+  if (node.entries.some(e => e.id === entryId)) return { groupId: node.groupId, ancestors };
+  for (const c of node.children) {
+    const found = findEntryGroup(c, entryId, [...ancestors, node.groupId]);
+    if (found) return found;
+  }
+  return null;
+}
+
 type FlatEntry = TreeNode['entries'][number];
 
 function collectEntries(node: TreeNode, acc: FlatEntry[] = []): FlatEntry[] {
@@ -113,6 +122,7 @@ export function Panel() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [pendingOpenEntry, setPendingOpenEntry] = useState<string | null>(null);
   useEffect(() => { loadSettings().then(s => { applyTheme(s.theme); setClearSecs(s.clipboardClearSeconds); setPwgen(s.pwgen); }); }, []);
   const reload = () => sendToSW({ type: 'getTree' }).then(r => {
     if (!r.ok) return;
@@ -147,9 +157,19 @@ export function Panel() {
   useEffect(() => { if (!locked) reload(); }, [locked]);
   useEffect(() => {
     if (locked) return;
-    consumeOpenEntry().then(id => { if (id) setSelEntry(id); });
-    return watchOpenEntry(id => setSelEntry(id));
+    consumeOpenEntry().then(id => { if (id) setPendingOpenEntry(id); });
+    return watchOpenEntry(id => setPendingOpenEntry(id));
   }, [locked]);
+  useEffect(() => {
+    if (!pendingOpenEntry || !tree) return;
+    const found = findEntryGroup(tree, pendingOpenEntry);
+    if (found) {
+      setSelGroup(found.groupId);
+      setExpanded(e => new Set([...e, ...found.ancestors]));
+    }
+    setSelEntry(pendingOpenEntry);
+    setPendingOpenEntry(null);
+  }, [pendingOpenEntry, tree]);
   if (locked) return (
     <div className="min-h-screen flex flex-col justify-center" style={{ background: 'var(--bg)' }}>
       <UnlockScreen onUnlocked={refresh} />
