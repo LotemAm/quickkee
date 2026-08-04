@@ -4,6 +4,7 @@ import { sendToSW } from '../../shared/messages';
 import { copyWithClear } from '../../shared/clipboard';
 import type { PwGenOpts } from '../../shared/pwgen';
 import { loadDraft, saveDraft, clearDraft } from '../../shared/createDraft';
+import { PasswordRulesPanel } from '../../shared/PasswordRulesPanel';
 
 function baseUrl(url: string) {
   try { return new URL(url).origin + '/'; } catch { return url; }
@@ -105,23 +106,7 @@ export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwge
           <Copy size={15} />
         </button>
       </div>
-      {showRules && (
-        <div className="space-y-2 rounded-md p-2" style={{ background: 'var(--surface-2, var(--bg))' }}>
-          <label className="flex items-center justify-between gap-3 text-sm">
-            Length
-            <input type="number" className="input w-20" value={opts.length}
-              onChange={e => setOpts(o => ({ ...o, length: Math.max(1, Number(e.target.value) || 1) }))} />
-          </label>
-          <div className="grid grid-cols-2 gap-2">
-            {(['lower', 'upper', 'digits', 'symbols'] as const).map(k => (
-              <label key={k} className="flex items-center gap-2 text-sm capitalize">
-                <input type="checkbox" checked={opts[k]}
-                  onChange={e => setOpts(o => ({ ...o, [k]: e.target.checked }))} /> {k}
-              </label>))}
-          </div>
-          {noClass && <p className="text-sm" style={{ color: 'var(--danger, #c00)' }}>Enable at least one character set.</p>}
-        </div>
-      )}
+      {showRules && <PasswordRulesPanel opts={opts} onChange={setOpts} />}
       <input className="input" placeholder="URL" value={entryUrl} onChange={e => setEntryUrl(e.target.value)} />
       <button className="btn-secondary w-full" disabled={isFullUrl} onClick={() => setEntryUrl(url)} title="Use the current full page URL">
         <Link size={15} /> Use full page URL

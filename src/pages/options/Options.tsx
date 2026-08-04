@@ -3,6 +3,7 @@ import { ShieldCheck, Monitor, Sun, Moon } from 'lucide-react';
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, type Settings } from '../../shared/settings';
 import { applyTheme, type ThemeMode } from '../../shared/theme';
 import { sendToSW } from '../../shared/messages';
+import { PasswordRulesPanel } from '../../shared/PasswordRulesPanel';
 
 const THEME_OPTIONS: { value: ThemeMode; label: string; icon: typeof Monitor }[] = [
   { value: 'system', label: 'System', icon: Monitor },
@@ -63,18 +64,7 @@ export function Options() {
 
         <section className="card space-y-3">
           <div className="section-title">Default generated password</div>
-          <label className="flex items-center justify-between gap-3 text-sm">
-            Length
-            <input type="number" className="input w-20" value={s.pwgen.length}
-              onChange={e => update({ pwgen: { ...s.pwgen, length: Math.max(1, Number(e.target.value) || 1) } })} />
-          </label>
-          <div className="grid grid-cols-2 gap-2">
-            {(['lower', 'upper', 'digits', 'symbols'] as const).map(k => (
-              <label key={k} className="flex items-center gap-2 text-sm capitalize">
-                <input type="checkbox" checked={s.pwgen[k]}
-                  onChange={e => update({ pwgen: { ...s.pwgen, [k]: e.target.checked } })} /> {k}
-              </label>))}
-          </div>
+          <PasswordRulesPanel opts={s.pwgen} onChange={pwgen => update({ pwgen })} />
         </section>
       </div>
     </div>);

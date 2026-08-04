@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Copy, Check, Eye, EyeOff, X, Plus, Trash2, RefreshCw } from 'lucide-react';
+import { Copy, Check, Eye, EyeOff, X, Plus, Trash2, RefreshCw, SlidersHorizontal } from 'lucide-react';
 import { sendToSW } from '../../shared/messages';
 import type { EntryView } from '../../shared/entry';
 import type { PwGenOpts } from '../../shared/pwgen';
 import { useClipboardTimer } from '../../shared/useClipboardTimer';
 import { ClipboardBar } from '../../shared/ClipboardBar';
+import { PasswordRulesPanel } from '../../shared/PasswordRulesPanel';
 
 // epoch ms -> 'YYYY-MM-DDTHH:mm' (local) for <input type="datetime-local">
 const toLocalInput = (ms: number) => {
@@ -21,10 +22,15 @@ export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }:
   const [custom, setCustom] = useState<{ key: string; value: string }[]>([]);
   const [origKeys, setOrigKeys] = useState<string[]>([]);
   const [deleteError, setDeleteError] = useState('');
+  const [opts, setOpts] = useState<PwGenOpts>(pwgen);
+  const [showRules, setShowRules] = useState(false);
+  const noClass = !opts.lower && !opts.upper && !opts.digits && !opts.symbols;
   const { copy, state: clipState, cancel } = useClipboardTimer(clearSecs);
   useEffect(() => {
     setShowPass(false);
     setDeleteError('');
+    setOpts(pwgen);
+    setShowRules(false);
     sendToSW({ type: 'getEntry', entryId }).then(r => {
       if (r.ok && r.entry) {
         setE(r.entry); setExpires(r.entry.expires);
@@ -32,6 +38,7 @@ export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }:
         setOrigKeys(r.entry.fields.map(f => f.key));
       }
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entryId]);
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
@@ -65,10 +72,17 @@ export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }:
         )}
         {secret && (
           <button className="icon-btn" aria-label="Generate password" title="Generate password"
-            onClick={() => sendToSW({ type: 'generatePassword', opts: pwgen }).then(r => {
+            disabled={noClass}
+            onClick={() => sendToSW({ type: 'generatePassword', opts }).then(r => {
               if (r.ok) { setE({ ...e, password: r.password }); setShowPass(true); }
             })}>
             <RefreshCw size={14} />
+          </button>
+        )}
+        {secret && (
+          <button className="icon-btn" aria-label="Password rules" title="Password rules (this session)"
+            onClick={() => setShowRules(s => !s)}>
+            <SlidersHorizontal size={14} />
           </button>
         )}
         <button className="icon-btn"
@@ -78,6 +92,9 @@ export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }:
           <Copy size={15} />
         </button>
       </div>
+      {secret && showRules && (
+        <div className="mt-2"><PasswordRulesPanel opts={opts} onChange={setOpts} /></div>
+      )}
     </div>);
   };
   async function save() {
