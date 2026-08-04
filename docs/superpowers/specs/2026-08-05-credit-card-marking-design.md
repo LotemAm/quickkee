@@ -25,7 +25,7 @@ QuickKee entries are stored as flat KeePass (KDBX) field maps via `kdbxweb` (`sr
 | Card Number | `username` | relabeled in UI when marked |
 | CVV | `password` | relabeled in UI; already renders masked |
 | Expiry (MM/YY) | native KDBX entry `expires` timestamp | reused/relabeled; existing popup expiration UI unaffected |
-| Cardholder Name | plain Additional Field | user adds manually, no special handling |
+| Cardholder Name | plain Additional Field (key `"Cardholder Name"`) | dedicated input in UI (see below), but stored as a normal Additional Field entry — no new reserved key |
 | `url` | unused when marked | left alone in storage, hidden in UI |
 
 ## UI changes
@@ -39,8 +39,9 @@ When **on**:
 - Password label → "CVV"; password-generator quick-settings button hidden (CVV isn't a generated password)
 - Expiration section label → "Card Expiry"
 - URL field hidden
+- New always-visible "Cardholder Name" text input (dedicated field in the UI, not the generic Additional Fields list). On save: non-empty value upserts an Additional Field entry (key `"Cardholder Name"`) into `fields[]`; empty value removes that Additional Field entry if one exists — never saves/leaves an empty entry.
 
-When **off**: reverts to normal Username/Password/URL labels; flag cleared on save.
+When **off**: reverts to normal Username/Password/URL labels; flag cleared on save. Cardholder Name input is hidden again but the underlying Additional Field entry (if any) is left untouched — unmarking doesn't delete it.
 
 ### Panel entry list (`Panel.tsx:237`)
 
@@ -54,6 +55,7 @@ Small `CreditCard` icon (lucide-react) placed left of the title, shown **only** 
 
 - `vault.ts` unit test: setting the flag round-trips through serialize/reload, and is excluded from the generic `fields[]` custom-field list.
 - `EntryEditor.tsx`: toggle test — checking "mark as card" swaps labels, hides URL and the password-gen button; unchecking reverts.
+- `EntryEditor.tsx`: Cardholder Name save test — non-empty value persists as an Additional Field entry; clearing it to empty and saving removes that entry; unrelated Additional Fields untouched.
 - Existing entry-expiration tests unaffected (native `expires` mechanism untouched, only relabeled in this UI state).
 - Panel and popup list rendering: icon appears only for `isCard` entries.
 
