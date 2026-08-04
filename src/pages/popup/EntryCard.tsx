@@ -37,6 +37,12 @@ export function EntryCard({ entry, tabId, onCopy, groupName }: {
         </button>
       </div>
       {open && <div className="mt-2 space-y-1">
+        {entry.expires != null && (
+          <div className="flex justify-between items-center text-sm">
+            <span style={{ color: 'var(--text-muted)' }}>Expires</span>
+            <span>{new Date(entry.expires).toLocaleDateString()}</span>
+          </div>
+        )}
         {entry.fields.map(f => (
           <div key={f.key} className="flex justify-between items-center text-sm">
             <span style={{ color: 'var(--text-muted)' }}>{f.key}</span>
