@@ -35,3 +35,13 @@ test('manifest grants host permissions for both cloud providers', () => {
     'https://oauth2.googleapis.com/*',
   ]));
 });
+
+// Regression guard: card (and login) forms are frequently rendered inside a
+// cross-origin iframe (e.g. Google Wallet's "Add a payment method" dialog embeds
+// payments.google.com in an <iframe>). Without all_frames, the content script
+// only runs in the top-level document and never sees fields inside such iframes,
+// so the inline popup silently never appears there.
+test('content script injects into all frames, not just the top-level document', () => {
+  const cs = manifest.content_scripts?.[0];
+  expect(cs?.all_frames).toBe(true);
+});

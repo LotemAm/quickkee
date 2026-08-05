@@ -134,3 +134,27 @@ test('a card entry with no URL (not tied to one site) still shows in the inline 
   await site.getByText('Localhost Login').click();
   await expect(site.locator('input[autocomplete="cc-number"]')).toHaveValue('4111111111111111');
 });
+
+test('card form embedded in an <iframe> (e.g. Google Wallet\'s payment dialog) still triggers the inline popup', async ({ context, extensionId, http }) => {
+  const seed = await openExtensionPage(context, extensionId, 'src/pages/popup/index.html');
+  await installDb(seed);
+  await seed.reload();
+  await seed.getByPlaceholder('Master password').fill('correct horse');
+  await seed.getByRole('button', { name: 'Unlock' }).click();
+  await expect(seed.getByPlaceholder('Search…')).toBeVisible();
+
+  await markAsCard(seed, http.url);
+
+  const site = await context.newPage();
+  await site.goto(http.cardIframeUrl);
+  await site.waitForLoadState('load');
+
+  const frame = site.frameLocator('iframe');
+  await frame.locator('input[autocomplete="cc-number"]').click();
+  await expect(frame.getByText('Localhost Login')).toBeVisible();
+  await frame.getByText('Localhost Login').click();
+
+  await expect(frame.locator('input[autocomplete="cc-number"]')).toHaveValue('4111111111111111');
+  await expect(frame.locator('input[autocomplete="cc-name"]')).toHaveValue('Jane Doe');
+  await expect(frame.locator('input[autocomplete="cc-csc"]')).toHaveValue('123');
+});

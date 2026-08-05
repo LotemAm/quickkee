@@ -54,6 +54,15 @@ const CARD_SELECT_PAGE = `<!doctype html><html><body>
 </form>
 </body></html>`;
 
+// Card form embedded in an <iframe>, mirroring real-world payment dialogs (e.g. Google
+// Wallet's "Add a payment method" modal embeds payments.google.com in an iframe). The
+// content script only sees fields inside a sub-frame if the manifest's content_scripts
+// entry has all_frames: true — this fixture exists to catch a regression there.
+const CARD_IFRAME_PAGE = `<!doctype html><html><body>
+<h1>Add a payment method</h1>
+<iframe src="/card" title="payment form"></iframe>
+</body></html>`;
+
 // Two-step (username -> password) fixture for plan 018's spike (shape "a":
 // a plain, full-page GET form navigation from step one to step two).
 // The identifier field is type="text" (not "email"): QuickKee's real
@@ -86,6 +95,7 @@ export async function startHttpFixture() {
     else if (req.url?.startsWith('/step2')) res.end(STEP2_PAGE);
     else if (req.url === '/card') res.end(CARD_PAGE);
     else if (req.url === '/card-select') res.end(CARD_SELECT_PAGE);
+    else if (req.url === '/card-iframe') res.end(CARD_IFRAME_PAGE);
     else res.end(LOGIN_PAGE);
   });
   await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
@@ -98,6 +108,7 @@ export async function startHttpFixture() {
     step1Url: `http://localhost:${port}/step1`,
     cardUrl: `http://localhost:${port}/card`,
     cardSelectUrl: `http://localhost:${port}/card-select`,
+    cardIframeUrl: `http://localhost:${port}/card-iframe`,
     close: () => { server.closeAllConnections(); return new Promise<void>(r => server.close(() => r())); },
   };
 }
