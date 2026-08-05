@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import { startHttpFixture, startHttpsFixture } from './servers';
-import * as kdbxweb from 'kdbxweb';
+import kdbxweb from 'kdbxweb';
 import { argon2id, argon2d } from 'hash-wasm';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

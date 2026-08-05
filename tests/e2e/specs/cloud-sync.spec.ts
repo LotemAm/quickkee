@@ -1,6 +1,6 @@
 import { test, expect, openExtensionPage } from '../helpers';
 import { makeKdbxB64, mutateKdbxB64, cloudInstall, cloudSetRemote, cloudUploadCount, reReadCloudKdbx } from '../cloudSeam';
-import * as kdbxweb from 'kdbxweb';
+import kdbxweb from 'kdbxweb';
 
 function find(db: kdbxweb.Kdbx, title: string): kdbxweb.KdbxEntry | undefined {
   const stack = [...db.groups];

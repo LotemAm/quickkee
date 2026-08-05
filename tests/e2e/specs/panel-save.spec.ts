@@ -1,5 +1,5 @@
 import { test, expect, openExtensionPage, installDb, reReadKdbx } from '../helpers';
-import * as kdbxweb from 'kdbxweb';
+import kdbxweb from 'kdbxweb';
 
 function findEntry(db: kdbxweb.Kdbx, title: string): kdbxweb.KdbxEntry | undefined {
   const stack = [...db.groups];

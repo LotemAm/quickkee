@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import * as kdbxweb from 'kdbxweb';
+import kdbxweb from 'kdbxweb';
 import { argon2id, argon2d } from 'hash-wasm';
 
 let argonReady = false;

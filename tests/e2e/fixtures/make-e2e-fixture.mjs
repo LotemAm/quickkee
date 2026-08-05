@@ -1,4 +1,4 @@
-import * as kdbxweb from 'kdbxweb';
+import kdbxweb from 'kdbxweb';
 import { argon2id, argon2d } from 'hash-wasm';
 import { writeFileSync } from 'node:fs';
 
