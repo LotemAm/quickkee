@@ -5,6 +5,7 @@ import { loadSettings } from '../../shared/settings';
 import { generatePassword, DEFAULT_PWGEN } from '../../shared/pwgen';
 import { urlMatches } from '../../background/matcher';
 import type { Request, Response } from '../../shared/messages';
+import { CARDHOLDER_NAME_KEY } from '../../shared/entry';
 import { providerFor, __hasOverride } from './cloudRouting';
 import { openCloud, saveCloud, type SyncDeps } from '../../background/sync';
 import { getAccessToken, disconnect, DROPBOX_OAUTH, GDRIVE_OAUTH } from '../../background/sources/oauth';
@@ -145,10 +146,17 @@ export function makeRouter(ctx: SwContext) {
         // Entries without a URL can't be validated — allow (explicit user action from the popup).
         if (entry.url && (!tab.url || !urlMatches(entry.url, tab.url)))
           return { ok: false, error: 'urlMismatch' };
-        // Card-marked entries (entry.isCard) are not excluded here — a card's number/CVV can
-        // still be autofilled into a matching site's form. Known, deliberately deferred
-        // limitation (see spec's "Out of scope"), not an oversight.
-        await chrome.tabs.sendMessage(req.tabId, { type: 'fill', username: entry.username, password: entry.password });
+        // Card-marked entries are filled into detected card-form fields (cc-number/cc-csc/
+        // cc-exp/cc-name) rather than generic username/password fields; regular login
+        // entries keep going through the plain 'fill' message.
+        if (entry.isCard) {
+          const cardholderName = entry.fields.find(f => f.key === CARDHOLDER_NAME_KEY)?.value ?? '';
+          await chrome.tabs.sendMessage(req.tabId, {
+            type: 'fillCard', number: entry.username, cvv: entry.password, cardholderName, expires: entry.expires,
+          });
+        } else {
+          await chrome.tabs.sendMessage(req.tabId, { type: 'fill', username: entry.username, password: entry.password });
+        }
         return { ok: true };
       }
       case 'scheduleClipboardClear':

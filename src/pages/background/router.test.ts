@@ -13,6 +13,7 @@ import { Vault } from '../../background/vault';
 import { AutoLock } from '../../background/autolock';
 import { makeRouter, type SwContext } from './router';
 import type { DbSource } from '../../shared/dbSource';
+import { CARD_FLAG_KEY, CARDHOLDER_NAME_KEY } from '../../shared/entry';
 
 // Keep mock factories free of outer-scope references — vi.mock is hoisted above imports
 // and above local `const`/`let` declarations, so factories may only build fresh vi.fn()s.
@@ -215,6 +216,32 @@ describe('fillRequest', () => {
     chromeMock.tabs.get.mockResolvedValue({ url: 'https://evil.example.com' });
     expect(await handle_({ type: 'fillRequest', entryId: entry.id, tabId: 7 })).toEqual({ ok: false, error: 'urlMismatch' });
     expect(chromeMock.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  test('card-marked entry sends fillCard payload (number/cvv/cardholderName/expires) instead of fill', async () => {
+    const { ctx, handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    const entryId = ctx.vault.entriesForUrl('https://github.com')[0].id;
+    const expires = new Date(2029, 4, 1).getTime();
+    ctx.vault.updateEntry(entryId, { [CARD_FLAG_KEY]: '1', [CARDHOLDER_NAME_KEY]: 'Jane Doe' }, expires);
+    chromeMock.tabs.get.mockResolvedValue({ url: 'https://github.com/login' });
+
+    const entry = ctx.vault.getEntry(entryId)!;
+    expect(await handle_({ type: 'fillRequest', entryId, tabId: 7 })).toEqual({ ok: true });
+    expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(7, {
+      type: 'fillCard', number: entry.username, cvv: entry.password, cardholderName: 'Jane Doe', expires,
+    });
+  });
+
+  test('card-marked entry without a Cardholder Name field sends empty cardholderName', async () => {
+    const { ctx, handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    const entryId = ctx.vault.entriesForUrl('https://github.com')[0].id;
+    ctx.vault.updateEntry(entryId, { [CARD_FLAG_KEY]: '1' });
+    chromeMock.tabs.get.mockResolvedValue({ url: 'https://github.com/login' });
+
+    await handle_({ type: 'fillRequest', entryId, tabId: 7 });
+    expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(7, expect.objectContaining({ type: 'fillCard', cardholderName: '' }));
   });
 });
 

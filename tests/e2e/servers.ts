@@ -20,6 +20,19 @@ const SINGLE_STEP_PAGE = `<!doctype html><html><body>
 </form>
 </body></html>`;
 
+// Standard-autocomplete-tagged card form fixture (plan: card-form autofill). Only the
+// autocomplete tokens matter to detect.ts's findCardFields — ids/names are incidental.
+const CARD_PAGE = `<!doctype html><html><body>
+<h1>Payment</h1>
+<form>
+  <input id="cc-number" name="cardnumber" autocomplete="cc-number" />
+  <input id="cc-name" name="cardname" autocomplete="cc-name" />
+  <input id="cc-exp" name="cardexpiry" autocomplete="cc-exp" placeholder="MM/YY" />
+  <input id="cc-csc" name="cardcvc" autocomplete="cc-csc" />
+  <button type="submit">Pay</button>
+</form>
+</body></html>`;
+
 // Two-step (username -> password) fixture for plan 018's spike (shape "a":
 // a plain, full-page GET form navigation from step one to step two).
 // The identifier field is type="text" (not "email"): QuickKee's real
@@ -50,6 +63,7 @@ export async function startHttpFixture() {
     if (req.url === '/single') res.end(SINGLE_STEP_PAGE);
     else if (req.url === '/step1') res.end(STEP1_PAGE);
     else if (req.url?.startsWith('/step2')) res.end(STEP2_PAGE);
+    else if (req.url === '/card') res.end(CARD_PAGE);
     else res.end(LOGIN_PAGE);
   });
   await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
@@ -60,6 +74,7 @@ export async function startHttpFixture() {
     altUrl: `http://127.0.0.1:${port}/`,
     singleUrl: `http://localhost:${port}/single`,
     step1Url: `http://localhost:${port}/step1`,
+    cardUrl: `http://localhost:${port}/card`,
     close: () => { server.closeAllConnections(); return new Promise<void>(r => server.close(() => r())); },
   };
 }
