@@ -112,6 +112,20 @@ export class Vault {
     return out;
   }
 
+  // Card entries aren't inherently tied to one site the way logins are, so an entry
+  // left without a URL is treated as matching every site here (unlike entrySummariesForUrl,
+  // which requires a URL match unconditionally). A card entry that DOES have a URL set is
+  // still restricted to that site, same as a regular login entry.
+  cardSummariesForUrl(pageUrl: string): EntrySummary[] {
+    const out: EntrySummary[] = [];
+    for (const g of this.allGroups(this.root)) for (const e of g.entries) {
+      if (str(e.fields.get(CARD_FLAG_KEY)) !== '1') continue;
+      const url = str(e.fields.get('URL'));
+      if (!url || urlMatches(url, pageUrl)) out.push(this.toSummary(e));
+    }
+    return out;
+  }
+
   countForUrl(pageUrl: string): number {
     let n = 0;
     for (const g of this.allGroups(this.root)) for (const e of g.entries)

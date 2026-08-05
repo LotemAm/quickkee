@@ -278,6 +278,32 @@ describe('getEntrySummariesForUrl (plan 002)', () => {
   });
 });
 
+describe('getCardEntrySummariesForUrl', () => {
+  test('locked -> locked error', async () => {
+    const { handle_ } = makeCtx();
+    expect(await handle_({ type: 'getCardEntrySummariesForUrl', url: 'https://github.com' })).toEqual({ ok: false, error: 'locked' });
+  });
+
+  test('a card entry with no URL is returned for any site', async () => {
+    const { ctx, handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    const id = ctx.vault.entriesForUrl('https://github.com')[0].id;
+    ctx.vault.updateEntry(id, { [CARD_FLAG_KEY]: '1', URL: '' });
+
+    const res = await handle_({ type: 'getCardEntrySummariesForUrl', url: 'https://totally-unrelated.example' });
+    expect(res.ok).toBe(true);
+    expect((res as unknown as { summaries: Array<{ id: string }> }).summaries.map(s => s.id)).toContain(id);
+  });
+
+  test('non-card entries are excluded', async () => {
+    const { handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    const res = await handle_({ type: 'getCardEntrySummariesForUrl', url: 'https://github.com' });
+    expect(res.ok).toBe(true);
+    expect((res as unknown as { summaries: unknown[] }).summaries).toHaveLength(0);
+  });
+});
+
 describe('getSyncStatus', () => {
   test('final response reflects a LIVE re-read of currentSource after the getCache await, not the pre-await snapshot', async () => {
     // Regression guard: pre-extraction index.ts closed directly over the mutable

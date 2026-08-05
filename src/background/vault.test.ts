@@ -241,3 +241,26 @@ test('entrySummariesForUrl and getTree both expose isCard', async () => {
   const sites = tree.children.find(c => c.name === 'Sites');
   expect(sites?.entries.find(e => e.id === id)?.isCard).toBe(true);
 });
+
+test('cardSummariesForUrl: a card entry with no URL matches every site', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  v.updateEntry(id, { [CARD_FLAG_KEY]: '1', URL: '' });
+
+  expect(v.cardSummariesForUrl('https://github.com').map(s => s.id)).toContain(id);
+  expect(v.cardSummariesForUrl('https://totally-unrelated.example').map(s => s.id)).toContain(id);
+});
+
+test('cardSummariesForUrl: a card entry WITH a URL is still restricted to matching sites', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  v.updateEntry(id, { [CARD_FLAG_KEY]: '1', URL: 'https://github.com' });
+
+  expect(v.cardSummariesForUrl('https://github.com').map(s => s.id)).toContain(id);
+  expect(v.cardSummariesForUrl('https://totally-unrelated.example').map(s => s.id)).not.toContain(id);
+});
+
+test('cardSummariesForUrl excludes non-card entries regardless of URL match', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  expect(v.cardSummariesForUrl('https://github.com/login')).toHaveLength(0);
+});

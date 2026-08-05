@@ -38,10 +38,9 @@ document.addEventListener('focusin', ev => {
   // (e.g. a `type="password"` CVV input) is treated as a card field, not a login one.
   const cardFields = findCardFields(document);
   if (hasCardFields(cardFields) && isCardField(el, cardFields)) {
-    void sendToSW({ type: 'getEntrySummariesForUrl', url: location.href }).then(res => {
-      if (!res.ok) return;
-      const cardEntries = res.summaries.filter(s => s.isCard).map(s => ({ ...s, username: maskCardNumber(s.username) }));
-      if (cardEntries.length === 0) return;
+    void sendToSW({ type: 'getCardEntrySummariesForUrl', url: location.href }).then(res => {
+      if (!res.ok || res.summaries.length === 0) return;
+      const cardEntries = res.summaries.map(s => ({ ...s, username: maskCardNumber(s.username) }));
       showPopup(el, cardEntries, entry => {
         void sendToSW({ type: 'getEntry', entryId: entry.id }).then(full => {
           if (!full.ok || !full.entry) return;

@@ -9,6 +9,7 @@ export type Request =
   | { type: 'getStatus' }
   | { type: 'getEntriesForUrl'; url: string }
   | { type: 'getEntrySummariesForUrl'; url: string }
+  | { type: 'getCardEntrySummariesForUrl'; url: string }
   | { type: 'getEntry'; entryId: string }
   | { type: 'getTree' }
   | { type: 'createEntry'; groupId: string; fields: Record<string, string> }
@@ -52,6 +53,7 @@ type OkFor = {
   getStatus: Ok<{ locked: boolean; dbName?: string; dirty: boolean }>;
   getEntriesForUrl: Ok<{ entries: EntryView[] }>;
   getEntrySummariesForUrl: Ok<{ summaries: EntrySummary[] }>;
+  getCardEntrySummariesForUrl: Ok<{ summaries: EntrySummary[] }>;
   getEntry: Ok<{ entry: EntryView | null }>;
   getTree: Ok<{ tree: TreeNode }>;
   createEntry: Ok<{ entryId: string }>;

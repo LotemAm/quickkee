@@ -107,3 +107,30 @@ test('card form with <select>-based expiry (real-world shape, e.g. fill.dev) fil
   await expect(site.locator('select[autocomplete="cc-exp-month"]')).toHaveValue('5');
   await expect(site.locator('select[autocomplete="cc-exp-year"]')).toHaveValue('2027');
 });
+
+test('a card entry with no URL (not tied to one site) still shows in the inline card popup', async ({ context, extensionId, http }) => {
+  const seed = await openExtensionPage(context, extensionId, 'src/pages/popup/index.html');
+  await installDb(seed);
+  await seed.reload();
+  await seed.getByPlaceholder('Master password').fill('correct horse');
+  await seed.getByRole('button', { name: 'Unlock' }).click();
+  await expect(seed.getByPlaceholder('Search…')).toBeVisible();
+
+  await markAsCard(seed, http.url);
+  // Clear the URL entirely: a card isn't tied to one site, so it should still surface
+  // in the inline card popup even though its URL no longer matches the page.
+  await seed.evaluate(async (pageUrl) => {
+    const res = await chrome.runtime.sendMessage({ type: 'getEntriesForUrl', url: pageUrl }) as
+      { ok: boolean; entries?: Array<{ id: string }> };
+    await chrome.runtime.sendMessage({ type: 'updateEntry', entryId: res.entries![0].id, fields: { URL: '' } });
+  }, http.url);
+
+  const site = await context.newPage();
+  await site.goto(http.cardUrl);
+  await site.waitForLoadState('load');
+
+  await site.locator('input[autocomplete="cc-number"]').click();
+  await expect(site.getByText('Localhost Login')).toBeVisible();
+  await site.getByText('Localhost Login').click();
+  await expect(site.locator('input[autocomplete="cc-number"]')).toHaveValue('4111111111111111');
+});

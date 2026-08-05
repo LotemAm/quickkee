@@ -62,6 +62,8 @@ export function makeRouter(ctx: SwContext) {
         return ctx.vault.isOpen() ? { ok: true, entries: ctx.vault.entriesForUrl(req.url) } : { ok: false, error: 'locked' };
       case 'getEntrySummariesForUrl':
         return ctx.vault.isOpen() ? { ok: true, summaries: ctx.vault.entrySummariesForUrl(req.url) } : { ok: false, error: 'locked' };
+      case 'getCardEntrySummariesForUrl':
+        return ctx.vault.isOpen() ? { ok: true, summaries: ctx.vault.cardSummariesForUrl(req.url) } : { ok: false, error: 'locked' };
       case 'getEntry':
         return { ok: true, entry: ctx.vault.getEntry(req.entryId) };
       case 'getTree':
