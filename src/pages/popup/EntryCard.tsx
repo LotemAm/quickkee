@@ -16,8 +16,8 @@ export function EntryCard({ entry, tabId, onCopy, groupName }: {
       <div className="flex justify-between items-start gap-2">
         <div className="min-w-0">
           <div className="font-medium truncate flex items-center gap-1" style={{ color: 'var(--text)' }}>
-            {entry.isCard && <CreditCard size={12} />}
-            <span className="truncate">{entry.title}</span>
+            {entry.isCard && <CreditCard size={12} className="shrink-0" />}
+            <span className="truncate min-w-0">{entry.title}</span>
           </div>
           <div className="text-sm truncate" style={{ color: 'var(--text-muted)' }}>{entry.username}</div>
         </div>
