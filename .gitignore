@@ -397,3 +397,6 @@ public/manifest.json
 # Playwright
 playwright-report/
 test-results/
+
+# agents
+.claude/

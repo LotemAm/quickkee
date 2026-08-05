@@ -1,0 +1,2 @@
+- Use `yarn`
+- Practice DRY - reuse components (if they exist, move to `shared` and use in both)
