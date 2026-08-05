@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Save, FolderClosed, FolderOpen, FileText, CreditCard, X, Lock,
+import { Save, Loader2, FolderClosed, FolderOpen, FileText, CreditCard, X, Lock,
   ChevronRight, ChevronDown, Plus, Pencil, Trash2, Check, Search } from 'lucide-react';
 import { useStatus } from '../../shared/useStatus';
 import { UnlockScreen } from '../../shared/UnlockScreen';
@@ -119,6 +119,7 @@ export function Panel() {
   const [selGroup, setSelGroup] = useState<string | null>(null);
   const [selEntry, setSelEntry] = useState<string | null>(null);
   const [clearSecs, setClearSecs] = useState(30); const [saved, setSaved] = useState('');
+  const [saving, setSaving] = useState(false);
   const [pwgen, setPwgen] = useState<PwGenOpts>(DEFAULT_PWGEN);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<string | null>(null);
@@ -175,8 +176,9 @@ export function Panel() {
     <div className="min-h-screen flex flex-col justify-center" style={{ background: 'var(--bg)' }}>
       <UnlockScreen onUnlocked={refresh} />
     </div>);
-  async function save() { const r = await sendToSW({ type: 'save' });
-    setSaved(r.ok ? 'Saved' : 'Save failed'); refresh(); setTimeout(() => setSaved(''), 2000); }
+  async function save() { setSaving(true);
+    const r = await sendToSW({ type: 'save' });
+    setSaved(r.ok ? 'Saved' : 'Save failed'); refresh(); setSaving(false); setTimeout(() => setSaved(''), 2000); }
 
   const group = tree && selGroup ? findGroup(tree, selGroup) : null;
   const q = query.trim().toLowerCase();
@@ -191,8 +193,10 @@ export function Panel() {
       <header className="app-header">
         <span className="app-title"><img src={chrome.runtime.getURL('icon-32.png')} alt="" className="app-logo" width={18} height={18} /> QuickKee</span>
         <div className="flex items-center gap-1">
-          <button className="btn-primary btn-xs" disabled={!dirty} onClick={save}>
-            <Save size={13} /> {dirty ? 'Save *' : 'Saved'}{saved && ` · ${saved}`}
+          <button className="btn-primary btn-xs" disabled={!dirty || saving} onClick={save}>
+            {saving
+              ? <><Loader2 size={13} className="animate-spin" /> Saving</>
+              : <><Save size={13} /> {dirty ? 'Save *' : 'Saved'}{saved && ` · ${saved}`}</>}
           </button>
           <button className="icon-btn" aria-label="Lock database" title="Lock database" onClick={() => lockVault(dirty).then(refresh)}>
             <Lock size={16} />
