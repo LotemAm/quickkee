@@ -33,6 +33,27 @@ const CARD_PAGE = `<!doctype html><html><body>
 </form>
 </body></html>`;
 
+// <select>-based expiry fixture, mirroring real sites like fill.dev/form/credit-card-simple
+// whose cc-exp-month/cc-exp-year are <select> elements with unpadded/full-year option
+// values rather than <input>s — a shape the plain-input-only detector originally missed.
+const CARD_SELECT_PAGE = `<!doctype html><html><body>
+<h1>Payment</h1>
+<form>
+  <input id="cc-number" name="cardnumber" autocomplete="cc-number" />
+  <input id="cc-name" name="cardname" autocomplete="cc-name" />
+  <select id="cc-exp-month" name="cardmonth" autocomplete="cc-exp-month">
+    <option value="">MM</option>
+    <option value="1">01</option><option value="2">02</option><option value="5">05</option><option value="12">12</option>
+  </select>
+  <select id="cc-exp-year" name="cardyear" autocomplete="cc-exp-year">
+    <option value="">YYYY</option>
+    <option value="2026">2026</option><option value="2027">2027</option><option value="2028">2028</option>
+  </select>
+  <input id="cc-csc" name="cardcvc" autocomplete="cc-csc" />
+  <button type="submit">Pay</button>
+</form>
+</body></html>`;
+
 // Two-step (username -> password) fixture for plan 018's spike (shape "a":
 // a plain, full-page GET form navigation from step one to step two).
 // The identifier field is type="text" (not "email"): QuickKee's real
@@ -64,6 +85,7 @@ export async function startHttpFixture() {
     else if (req.url === '/step1') res.end(STEP1_PAGE);
     else if (req.url?.startsWith('/step2')) res.end(STEP2_PAGE);
     else if (req.url === '/card') res.end(CARD_PAGE);
+    else if (req.url === '/card-select') res.end(CARD_SELECT_PAGE);
     else res.end(LOGIN_PAGE);
   });
   await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
@@ -75,6 +97,7 @@ export async function startHttpFixture() {
     singleUrl: `http://localhost:${port}/single`,
     step1Url: `http://localhost:${port}/step1`,
     cardUrl: `http://localhost:${port}/card`,
+    cardSelectUrl: `http://localhost:${port}/card-select`,
     close: () => { server.closeAllConnections(); return new Promise<void>(r => server.close(() => r())); },
   };
 }

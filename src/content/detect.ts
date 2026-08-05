@@ -24,24 +24,47 @@ export function isLoginField(el: HTMLElement, fields: LoginFields): boolean {
   return el === fields.username || el === fields.password;
 }
 
-function nativeInputSetter(el: HTMLInputElement) {
-  // React overwrites input.value via a descriptor on HTMLInputElement.prototype.
+type Fillable = HTMLInputElement | HTMLSelectElement;
+
+function nativeValueSetter(el: Fillable) {
+  // React overwrites value via a descriptor on HTMLInputElement.prototype/HTMLSelectElement.prototype.
   // To trigger React's onChange, we must call the original setter so React's fiber
   // detects the value change and fires synthetic events.
-  return Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.bind(el);
+  const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+  return Object.getOwnPropertyDescriptor(proto, 'value')?.set?.bind(el);
 }
 
-function setInputValue(el: HTMLInputElement | null, val: string): void {
+function setValue(el: Fillable | null, val: string): void {
   if (!el) return;
   el.focus();
-  const setter = nativeInputSetter(el);
+  const setter = nativeValueSetter(el);
   if (setter) setter(val); else el.value = val;
   el.dispatchEvent(new Event('input', { bubbles: true }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
+// Real card forms commonly use <select> for expiry month/year (e.g. fill.dev's
+// credit-card-simple form) with option *values* in whatever format the site chose
+// (e.g. unpadded "1".."12" months, 4-digit years) — there's no reliable way to predict
+// the format, so we try each plausible candidate and keep whichever one actually matches
+// an existing <option value>, restoring the original selection if none do.
+function setSelectValue(el: HTMLSelectElement | null, candidates: string[]): void {
+  if (!el) return;
+  const before = el.value;
+  el.focus();
+  const setter = nativeValueSetter(el);
+  let matched = false;
+  for (const c of candidates) {
+    if (setter) setter(c); else el.value = c;
+    if (el.value === c) { matched = true; break; }
+  }
+  if (!matched) { if (setter) setter(before); else el.value = before; }
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
 export function fillFields(f: LoginFields, username: string, password: string): void {
-  setInputValue(f.username, username); setInputValue(f.password, password);
+  setValue(f.username, username); setValue(f.password, password);
 }
 
 // Card forms are detected purely via the standard `autocomplete` token set (cc-number,
@@ -51,8 +74,9 @@ export interface CardFields {
   number: HTMLInputElement | null;
   name: HTMLInputElement | null;
   exp: HTMLInputElement | null;
-  expMonth: HTMLInputElement | null;
-  expYear: HTMLInputElement | null;
+  // Expiry month/year are commonly rendered as <select> (e.g. fill.dev), not <input>.
+  expMonth: Fillable | null;
+  expYear: Fillable | null;
   cvv: HTMLInputElement | null;
 }
 
@@ -61,8 +85,8 @@ export function findCardFields(doc: Document): CardFields {
     number: doc.querySelector<HTMLInputElement>('input[autocomplete="cc-number"]'),
     name: doc.querySelector<HTMLInputElement>('input[autocomplete="cc-name"]'),
     exp: doc.querySelector<HTMLInputElement>('input[autocomplete="cc-exp"]'),
-    expMonth: doc.querySelector<HTMLInputElement>('input[autocomplete="cc-exp-month"]'),
-    expYear: doc.querySelector<HTMLInputElement>('input[autocomplete="cc-exp-year"]'),
+    expMonth: doc.querySelector<Fillable>('input[autocomplete="cc-exp-month"], select[autocomplete="cc-exp-month"]'),
+    expYear: doc.querySelector<Fillable>('input[autocomplete="cc-exp-year"], select[autocomplete="cc-exp-year"]'),
     cvv: doc.querySelector<HTMLInputElement>('input[autocomplete="cc-csc"]'),
   };
 }
@@ -79,16 +103,22 @@ export function hasCardFields(fields: CardFields): boolean {
 export interface CardValues { number: string; name: string; cvv: string; expires: number | null }
 
 export function fillCardFields(f: CardFields, values: CardValues): void {
-  setInputValue(f.number, values.number);
-  setInputValue(f.name, values.name);
-  setInputValue(f.cvv, values.cvv);
+  setValue(f.number, values.number);
+  setValue(f.name, values.name);
+  setValue(f.cvv, values.cvv);
   if (values.expires == null) return;
   const d = new Date(values.expires);
   const month = String(d.getMonth() + 1).padStart(2, '0');
+  const monthUnpadded = String(d.getMonth() + 1);
   const year4 = String(d.getFullYear());
   const year2 = year4.slice(-2);
-  if (f.exp) setInputValue(f.exp, `${month}/${year2}`);
-  if (f.expMonth) setInputValue(f.expMonth, month);
-  // Split year field: honor its maxlength (2 vs 4 digits) when the site declared one.
-  if (f.expYear) setInputValue(f.expYear, f.expYear.maxLength === 2 ? year2 : year4);
+
+  if (f.exp) setValue(f.exp, `${month}/${year2}`);
+
+  if (f.expMonth instanceof HTMLSelectElement) setSelectValue(f.expMonth, [month, monthUnpadded]);
+  else if (f.expMonth) setValue(f.expMonth, month);
+
+  if (f.expYear instanceof HTMLSelectElement) setSelectValue(f.expYear, [year4, year2]);
+  // Split year <input>: honor its maxlength (2 vs 4 digits) when the site declared one.
+  else if (f.expYear) setValue(f.expYear, f.expYear.maxLength === 2 ? year2 : year4);
 }

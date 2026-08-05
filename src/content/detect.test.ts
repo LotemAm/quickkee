@@ -59,6 +59,17 @@ test('findCardFields locates split expiry-month/year fields', () => {
   expect(f.exp).toBeNull();
 });
 
+test('findCardFields locates <select>-based expiry-month/year fields (e.g. fill.dev)', () => {
+  document.body.innerHTML = `
+    <select id="m" autocomplete="cc-exp-month"><option value="1">01</option></select>
+    <select id="y" autocomplete="cc-exp-year"><option value="2027">2027</option></select>`;
+  const f = findCardFields(document);
+  expect(f.expMonth?.id).toBe('m');
+  expect(f.expYear?.id).toBe('y');
+  expect(f.expMonth).toBeInstanceOf(HTMLSelectElement);
+  expect(f.expYear).toBeInstanceOf(HTMLSelectElement);
+});
+
 test('hasCardFields false when no card autocomplete fields present', () => {
   document.body.innerHTML = `<input type="text" id="x">`;
   expect(hasCardFields(findCardFields(document))).toBe(false);
@@ -107,4 +118,31 @@ test('fillCardFields no-ops on absent fields and null expires', () => {
   const f = findCardFields(document);
   expect(() => fillCardFields(f, { number: '4111', name: 'X', cvv: '1', expires: null })).not.toThrow();
   expect(f.number?.value).toBe('4111');
+});
+
+test('fillCardFields selects matching <option> in unpadded-value expiry <select>s (fill.dev shape)', () => {
+  document.body.innerHTML = `
+    <select id="m" autocomplete="cc-exp-month">
+      <option value="1">01</option><option value="5">05</option><option value="12">12</option>
+    </select>
+    <select id="y" autocomplete="cc-exp-year">
+      <option value="2026">2026</option><option value="2027">2027</option>
+    </select>`;
+  const f = findCardFields(document);
+  const expires = new Date(2027, 4, 1).getTime(); // May 2027
+  fillCardFields(f, { number: '', name: '', cvv: '', expires });
+  expect((f.expMonth as HTMLSelectElement).value).toBe('5');
+  expect((f.expYear as HTMLSelectElement).value).toBe('2027');
+});
+
+test('fillCardFields leaves expiry <select> at its original value when no option matches', () => {
+  document.body.innerHTML = `
+    <select id="y" autocomplete="cc-exp-year">
+      <option value="2026">2026</option><option value="2027">2027</option>
+    </select>`;
+  const f = findCardFields(document);
+  const before = (f.expYear as HTMLSelectElement).value;
+  const expires = new Date(2030, 0, 1).getTime(); // out of the select's range
+  fillCardFields(f, { number: '', name: '', cvv: '', expires });
+  expect((f.expYear as HTMLSelectElement).value).toBe(before);
 });

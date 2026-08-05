@@ -3,18 +3,17 @@ import { test, expect, openExtensionPage, installDb } from '../helpers';
 /** Marks the seeded "Localhost Login" entry as a card (number/CVV/cardholder/expiry) via
  *  a direct `updateEntry` SW call — bypasses the panel UI, which is already covered by
  *  credit-card-marking.spec.ts, keeping this spec focused on the autofill wiring itself. */
-async function markAsCard(page: import('@playwright/test').Page, url: string) {
-  return page.evaluate(async (pageUrl) => {
+async function markAsCard(page: import('@playwright/test').Page, url: string, expires = new Date(2029, 4, 1).getTime()) {
+  return page.evaluate(async ({ pageUrl, expires }) => {
     const res = await chrome.runtime.sendMessage({ type: 'getEntriesForUrl', url: pageUrl }) as
       { ok: boolean; entries?: Array<{ id: string }> };
     const entryId = res.entries![0].id;
-    const expires = new Date(2029, 4, 1).getTime(); // May 2029
     await chrome.runtime.sendMessage({
       type: 'updateEntry', entryId, expires,
       fields: { 'QK-IsCard': '1', UserName: '4111111111111111', Password: '123', 'Cardholder Name': 'Jane Doe' },
     });
     return entryId;
-  }, url);
+  }, { pageUrl: url, expires });
 }
 
 test('card form: focusing a detected cc-number field shows only card entries and autofills number/name/cvv/expiry', async ({ context, extensionId, http }) => {
@@ -81,4 +80,30 @@ test('login form excludes card-marked entries from the inline picker', async ({ 
   await expect(site.locator('[data-quickkee-popup]')).toBeHidden();
   await expect(site.locator('#username')).toHaveValue('');
   await expect(site.locator('#password')).toHaveValue('');
+});
+
+test('card form with <select>-based expiry (real-world shape, e.g. fill.dev) fills month/year by matching option value', async ({ context, extensionId, http }) => {
+  const seed = await openExtensionPage(context, extensionId, 'src/pages/popup/index.html');
+  await installDb(seed);
+  await seed.reload();
+  await seed.getByPlaceholder('Master password').fill('correct horse');
+  await seed.getByRole('button', { name: 'Unlock' }).click();
+  await expect(seed.getByPlaceholder('Search…')).toBeVisible();
+
+  // Expiry within the fixture <select>'s available option range (2026-2028).
+  await markAsCard(seed, http.url, new Date(2027, 4, 1).getTime());
+
+  const site = await context.newPage();
+  await site.goto(http.cardSelectUrl);
+  await site.waitForLoadState('load');
+
+  await site.locator('input[autocomplete="cc-number"]').click();
+  await expect(site.getByText('Localhost Login')).toBeVisible();
+  await site.getByText('Localhost Login').click();
+
+  await expect(site.locator('input[autocomplete="cc-number"]')).toHaveValue('4111111111111111');
+  await expect(site.locator('input[autocomplete="cc-name"]')).toHaveValue('Jane Doe');
+  await expect(site.locator('input[autocomplete="cc-csc"]')).toHaveValue('123');
+  await expect(site.locator('select[autocomplete="cc-exp-month"]')).toHaveValue('5');
+  await expect(site.locator('select[autocomplete="cc-exp-year"]')).toHaveValue('2027');
 });
