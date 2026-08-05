@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Search, Settings, Cloud, CloudOff, RefreshCw, PanelRight, Lock } from 'lucide-react';
+import { Search, Settings, Cloud, CloudOff, RefreshCw, PanelRight, Lock, Plus, X } from 'lucide-react';
 import { useStatus } from '../../shared/useStatus';
 import { UnlockScreen } from '../../shared/UnlockScreen';
 import { sendToSW } from '../../shared/messages';
@@ -12,6 +12,7 @@ import { EntryCard } from './EntryCard';
 import { CreateForm } from './CreateForm';
 import { useClipboardTimer } from '../../shared/useClipboardTimer';
 import { ClipboardBar } from '../../shared/ClipboardBar';
+import { loadDraft } from '../../shared/createDraft';
 
 function collectEntries(node: TreeNode, acc: { id: string; title: string; username: string; url: string }[] = []) {
   for (const e of node.entries) acc.push(e);
@@ -40,6 +41,7 @@ export function Popup() {
   const [rootGroup, setRootGroup] = useState(''); const [clearSecs, setClearSecs] = useState(30);
   const [pwgen, setPwgen] = useState<PwGenOpts>(DEFAULT_PWGEN);
   const [sync, setSync] = useState<{ source: string | null; pendingUpload: boolean; online: boolean } | null>(null);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => { loadSettings().then(s => { applyTheme(s.theme); setClearSecs(s.clipboardClearSeconds); setPwgen(s.pwgen); }); }, []);
   useEffect(() => {
@@ -52,8 +54,10 @@ export function Popup() {
       .then(([t]) => t?.id && t.url && setTab({ id: t.id, url: t.url }));
   }, []);
   useEffect(() => { if (locked || !tab) return;
+    setCreating(false);
     sendToSW({ type: 'getEntriesForUrl', url: tab.url }).then(r => r.ok && setEntries(r.entries));
     sendToSW({ type: 'getTree' }).then(r => { if (r.ok) { setTree(r.tree); setRootGroup(r.tree.groupId); } });
+    loadDraft(tab.url).then(d => d && setCreating(true));
   }, [locked, tab]);
   useEffect(() => {
     const query = q.trim().toLowerCase();
@@ -109,17 +113,37 @@ export function Popup() {
       </header>
       {clipState && <ClipboardBar state={clipState} onCancel={cancel} />}
       <div className="p-3">
-        <div className="relative mb-2">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
-          <input className="input pl-9" placeholder="Search…" value={q} onChange={e => setQ(e.target.value)} />
-        </div>
-        {shown.map(e => tab && <EntryCard key={e.id} entry={e} tabId={tab.id} onCopy={copy} groupName={groupNames.get(e.id)} />)}
-        {searching && shown.length === 0 &&
-          <div className="empty-state mt-6">No entries match your search.</div>}
-        {!searching && entries.length === 0 && tab && rootGroup && tree &&
-          <CreateForm url={tab.url} tabId={tab.id} groups={flattenGroups(tree)} defaultGroupId={rootGroup}
-            clearSecs={clearSecs} pwgen={pwgen} onCreated={() =>
-            sendToSW({ type: 'getEntriesForUrl', url: tab.url }).then(r => r.ok && setEntries(r.entries))} />}
+        {creating && tab && rootGroup && tree ? (
+          <>
+            <button className="btn-secondary mb-2" onClick={() => setCreating(false)}>
+              <X size={15} /> Cancel
+            </button>
+            <CreateForm url={tab.url} tabId={tab.id} groups={flattenGroups(tree)} defaultGroupId={rootGroup}
+              clearSecs={clearSecs} pwgen={pwgen} onCreated={() => {
+                setCreating(false);
+                sendToSW({ type: 'getEntriesForUrl', url: tab.url }).then(r => r.ok && setEntries(r.entries));
+              }} />
+          </>
+        ) : (
+          <>
+            <div className="relative mb-2">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+              <input className="input pl-9" placeholder="Search…" value={q} onChange={e => setQ(e.target.value)} />
+            </div>
+            {shown.map(e => tab && <EntryCard key={e.id} entry={e} tabId={tab.id} onCopy={copy} groupName={groupNames.get(e.id)} />)}
+            {searching && shown.length === 0 &&
+              <div className="empty-state mt-6">No entries match your search.</div>}
+            {!searching && entries.length === 0 && tab && rootGroup && tree &&
+              <CreateForm url={tab.url} tabId={tab.id} groups={flattenGroups(tree)} defaultGroupId={rootGroup}
+                clearSecs={clearSecs} pwgen={pwgen} onCreated={() =>
+                sendToSW({ type: 'getEntriesForUrl', url: tab.url }).then(r => r.ok && setEntries(r.entries))} />}
+            {!searching && entries.length > 0 && tab && rootGroup && tree && (
+              <button className="btn-secondary w-full mt-2" onClick={() => setCreating(true)}>
+                <Plus size={15} /> Add entry
+              </button>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
