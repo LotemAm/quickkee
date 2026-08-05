@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "KeePass-compatible password manager browser extension (Chrome MV3) for local and cloud .kdbx databases.",
   "license": "MIT",
+  "packageManager": "yarn@4.17.0",
   "scripts": {
     "build": "vite build --config vite.config.chrome.ts",
     "build:chrome": "vite build --config vite.config.chrome.ts",
