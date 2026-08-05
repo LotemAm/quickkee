@@ -1,0 +1,107 @@
+import { test, expect, openExtensionPage, installDb, reReadKdbx } from '../helpers';
+import * as kdbxweb from 'kdbxweb';
+
+function findEntry(db: kdbxweb.Kdbx, title: string): kdbxweb.KdbxEntry | undefined {
+  const stack = [...db.groups];
+  while (stack.length) {
+    const g = stack.pop()!;
+    for (const e of g.entries) if (e.fields.get('Title')?.toString() === title) return e;
+    stack.push(...g.groups);
+  }
+}
+
+test('panel: mark an entry as credit card data, save, and verify persisted fields', async ({ context, extensionId }) => {
+  const popup = await openExtensionPage(context, extensionId, 'src/pages/popup/index.html');
+  await installDb(popup);
+  await popup.reload();
+  await popup.getByPlaceholder('Master password').fill('correct horse');
+  await popup.getByRole('button', { name: 'Unlock' }).click();
+  await expect(popup.getByPlaceholder('Search…')).toBeVisible();
+
+  const panel = await openExtensionPage(context, extensionId, 'src/pages/panel/index.html');
+  await panel.getByRole('button', { name: 'Sites' }).click();
+  await panel.getByRole('button', { name: 'Localhost Login' }).click();
+  await panel.getByRole('button', { name: 'Apply changes' }).waitFor();
+
+  // Not marked yet: normal labels, URL visible, rules button visible.
+  await expect(panel.getByText('Username')).toBeVisible();
+  await expect(panel.getByText('URL')).toBeVisible();
+  await expect(panel.getByLabel('Password rules')).toBeVisible();
+
+  await panel.getByLabel('Mark as credit card data').check();
+
+  // Relabeled; URL and the password-rules button are hidden; Cardholder Name appears.
+  await expect(panel.getByText('Card Number')).toBeVisible();
+  await expect(panel.getByText('CVV')).toBeVisible();
+  await expect(panel.getByText('Card Expiry')).toBeVisible();
+  await expect(panel.getByText('URL')).not.toBeVisible();
+  await expect(panel.getByLabel('Password rules')).not.toBeVisible();
+
+  await panel.locator('div.mb-3', { hasText: 'Card Number' }).locator('input').fill('4111111111111111');
+  await panel.locator('div.mb-3', { hasText: 'CVV' }).locator('input').fill('123');
+  await panel.getByLabel('Cardholder Name').fill('Jane Doe');
+
+  await panel.getByRole('button', { name: 'Apply changes' }).click();
+  const saveBtn = panel.getByRole('button', { name: /Save/ });
+  await expect(saveBtn).toContainText('Save *');
+  await saveBtn.click();
+  await expect(saveBtn).not.toContainText('Save *');
+
+  await expect.poll(async () => {
+    const db = await reReadKdbx(panel);
+    const un = findEntry(db, 'Localhost Login')!.fields.get('UserName');
+    return un instanceof kdbxweb.ProtectedValue ? un.getText() : un?.toString();
+  }).toBe('4111111111111111');
+
+  const db = await reReadKdbx(panel);
+  const e = findEntry(db, 'Localhost Login')!;
+  const pw = e.fields.get('Password');
+  expect(pw instanceof kdbxweb.ProtectedValue ? pw.getText() : pw?.toString()).toBe('123');
+  expect(e.fields.get('QK-IsCard')?.toString()).toBe('1');
+  expect(e.fields.get('Cardholder Name')?.toString()).toBe('Jane Doe');
+
+  // Unmark: labels revert; the underlying Cardholder Name field is left untouched.
+  await panel.getByLabel('Mark as credit card data').uncheck();
+  await expect(panel.getByText('Username')).toBeVisible();
+  await expect(panel.getByText('URL')).toBeVisible();
+  await panel.getByRole('button', { name: 'Apply changes' }).click();
+  await saveBtn.click();
+  await expect(saveBtn).not.toContainText('Save *');
+
+  const db2 = await reReadKdbx(panel);
+  const e2 = findEntry(db2, 'Localhost Login')!;
+  expect(e2.fields.get('QK-IsCard')?.toString()).toBe('');
+  expect(e2.fields.get('Cardholder Name')?.toString()).toBe('Jane Doe');
+});
+
+test('clearing Cardholder Name and saving removes the Additional Field', async ({ context, extensionId }) => {
+  const popup = await openExtensionPage(context, extensionId, 'src/pages/popup/index.html');
+  await installDb(popup);
+  await popup.reload();
+  await popup.getByPlaceholder('Master password').fill('correct horse');
+  await popup.getByRole('button', { name: 'Unlock' }).click();
+  await expect(popup.getByPlaceholder('Search…')).toBeVisible();
+
+  const panel = await openExtensionPage(context, extensionId, 'src/pages/panel/index.html');
+  await panel.getByRole('button', { name: 'Sites' }).click();
+  await panel.getByRole('button', { name: 'Localhost Login' }).click();
+  await panel.getByRole('button', { name: 'Apply changes' }).waitFor();
+
+  await panel.getByLabel('Mark as credit card data').check();
+  await panel.getByLabel('Cardholder Name').fill('Jane Doe');
+  await panel.getByRole('button', { name: 'Apply changes' }).click();
+  const saveBtn = panel.getByRole('button', { name: /Save/ });
+  await saveBtn.click();
+  await expect(saveBtn).not.toContainText('Save *');
+
+  let db = await reReadKdbx(panel);
+  expect(findEntry(db, 'Localhost Login')!.fields.get('Cardholder Name')?.toString()).toBe('Jane Doe');
+
+  await panel.getByLabel('Cardholder Name').fill('');
+  await panel.getByRole('button', { name: 'Apply changes' }).click();
+  await saveBtn.click();
+  await expect(saveBtn).not.toContainText('Save *');
+
+  db = await reReadKdbx(panel);
+  expect(findEntry(db, 'Localhost Login')!.fields.get('Cardholder Name')).toBeUndefined();
+});

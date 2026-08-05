@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Copy, Check, Eye, EyeOff, X, Plus, Trash2, RefreshCw, SlidersHorizontal } from 'lucide-react';
 import { sendToSW } from '../../shared/messages';
-import type { EntryView } from '../../shared/entry';
+import { CARD_FLAG_KEY, CARDHOLDER_NAME_KEY, type EntryView } from '../../shared/entry';
 import type { PwGenOpts } from '../../shared/pwgen';
 import { useClipboardTimer } from '../../shared/useClipboardTimer';
 import { ClipboardBar } from '../../shared/ClipboardBar';
@@ -24,6 +24,8 @@ export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }:
   const [deleteError, setDeleteError] = useState('');
   const [opts, setOpts] = useState<PwGenOpts>(pwgen);
   const [showRules, setShowRules] = useState(false);
+  const [isCard, setIsCard] = useState(false);
+  const [cardholderName, setCardholderName] = useState('');
   const noClass = !opts.lower && !opts.upper && !opts.digits && !opts.symbols;
   const { copy, state: clipState, cancel } = useClipboardTimer(clearSecs);
   useEffect(() => {
@@ -31,10 +33,14 @@ export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }:
     setDeleteError('');
     setOpts(pwgen);
     setShowRules(false);
+    setIsCard(false);
+    setCardholderName('');
     sendToSW({ type: 'getEntry', entryId }).then(r => {
       if (r.ok && r.entry) {
         setE(r.entry); setExpires(r.entry.expires);
-        setCustom(r.entry.fields.map(f => ({ key: f.key, value: f.value })));
+        setIsCard(r.entry.isCard);
+        setCardholderName(r.entry.fields.find(f => f.key === CARDHOLDER_NAME_KEY)?.value ?? '');
+        setCustom(r.entry.fields.filter(f => f.key !== CARDHOLDER_NAME_KEY).map(f => ({ key: f.key, value: f.value })));
         setOrigKeys(r.entry.fields.map(f => f.key));
       }
     });
@@ -79,7 +85,7 @@ export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }:
             <RefreshCw size={14} />
           </button>
         )}
-        {secret && (
+        {secret && !isCard && (
           <button className="icon-btn" aria-label="Password rules" title="Password rules (this session)"
             onClick={() => setShowRules(s => !s)}>
             <SlidersHorizontal size={14} />
@@ -92,20 +98,30 @@ export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }:
           <Copy size={15} />
         </button>
       </div>
-      {secret && showRules && (
+      {secret && !isCard && showRules && (
         <div className="mt-2"><PasswordRulesPanel opts={opts} onChange={setOpts} /></div>
       )}
     </div>);
   };
   async function save() {
-    const fields: Record<string, string> = { Title: e!.title, UserName: e!.username, URL: e!.url, Password: e!.password };
+    const fields: Record<string, string> = {
+      Title: e!.title, UserName: e!.username, URL: e!.url, Password: e!.password,
+      [CARD_FLAG_KEY]: isCard ? '1' : '',
+    };
     const keptKeys = new Set<string>();
     for (const f of custom) {
       const k = f.key.trim();
-      if (k && !['Title', 'UserName', 'URL', 'Password', 'Notes'].includes(k)) { fields[k] = f.value; keptKeys.add(k); }
+      if (k && !['Title', 'UserName', 'URL', 'Password', 'Notes', CARDHOLDER_NAME_KEY].includes(k)) { fields[k] = f.value; keptKeys.add(k); }
     }
+    const name = cardholderName.trim();
+    if (name) { fields[CARDHOLDER_NAME_KEY] = name; keptKeys.add(CARDHOLDER_NAME_KEY); }
     const removeKeys = origKeys.filter(k => !keptKeys.has(k));
     await sendToSW({ type: 'updateEntry', entryId, fields, expires, removeKeys });
+    // Sync origKeys to what was just persisted: Apply Changes doesn't trigger a
+    // getEntry refetch (onChanged only reloads the tree), so without this a field
+    // added on one Apply-changes click can never be removed by a later one — its
+    // key never enters `fields` (once cleared) nor `removeKeys` (stale origKeys).
+    setOrigKeys([...keptKeys]);
     onChanged();
   }
   async function del() {
@@ -120,9 +136,22 @@ export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }:
     <div className="p-4">
       <div className="card">
         {field('Title', 'title')}
-        {field('Username', 'username')}
-        {field('Password', 'password')}
-        {field('URL', 'url')}
+        <div className="mb-3">
+          <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--text)' }}>
+            <input type="checkbox" checked={isCard} onChange={ev => setIsCard(ev.target.checked)} />
+            Mark as credit card data
+          </label>
+        </div>
+        {field(isCard ? 'Card Number' : 'Username', 'username')}
+        {field(isCard ? 'CVV' : 'Password', 'password')}
+        {isCard && (
+          <div className="mb-3">
+            <label className="section-title block" htmlFor="cardholder-name">Cardholder Name</label>
+            <input id="cardholder-name" className="input w-full" aria-label="Cardholder Name" value={cardholderName}
+              onChange={ev => setCardholderName(ev.target.value)} />
+          </div>
+        )}
+        {!isCard && field('URL', 'url')}
         <div className="section-title block">Additional fields</div>
         {custom.map((f, i) => (
           <div key={i} className="flex gap-2 items-center mb-2">
@@ -142,7 +171,7 @@ export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }:
         </button>
 
         <div className="mb-3">
-          <div className="section-title block">Expiry date</div>
+          <div className="section-title block">{isCard ? 'Card Expiry' : 'Expiry date'}</div>
           <div className="flex gap-2 items-center">
             <input className="input flex-1" type="datetime-local"
               value={expires != null ? toLocalInput(expires) : ''}
