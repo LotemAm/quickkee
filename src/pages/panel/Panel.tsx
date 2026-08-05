@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Save, FolderClosed, FolderOpen, FileText, X, Lock,
+import { Save, FolderClosed, FolderOpen, FileText, CreditCard, X, Lock,
   ChevronRight, ChevronDown, Plus, Pencil, Trash2, Check, Search } from 'lucide-react';
 import { useStatus } from '../../shared/useStatus';
 import { UnlockScreen } from '../../shared/UnlockScreen';
@@ -234,7 +234,9 @@ export function Panel() {
                   }}
                   onMouseEnter={ev => { if (selEntry !== e.id) ev.currentTarget.style.background = 'var(--btn-bg)'; }}
                   onMouseLeave={ev => { if (selEntry !== e.id) ev.currentTarget.style.background = 'transparent'; }}>
-                  <FileText size={14} style={{ color: 'var(--text-muted)' }} />
+                  {e.isCard
+                    ? <CreditCard size={14} style={{ color: 'var(--text-muted)' }} />
+                    : <FileText size={14} style={{ color: 'var(--text-muted)' }} />}
                   <span className="flex flex-col min-w-0">
                     <span className="truncate">{e.title}</span>
                     {e.username && <span className="truncate text-xs" style={{ color: 'var(--text-muted)' }}>{e.username}</span>}
