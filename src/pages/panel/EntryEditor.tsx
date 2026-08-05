@@ -14,7 +14,12 @@ const toLocalInput = (ms: number) => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 
-export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }: { entryId: string; clearSecs: number; pwgen: PwGenOpts; onChanged: () => void; onDeleted: () => void }) {
+const BLANK_ENTRY: EntryView = {
+  id: '', title: '', username: '', url: '', password: '',
+  fields: [], expired: false, created: null, expires: null, isCard: false,
+};
+
+export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onCreated, onDeleted }: { entryId: string | null; groupId?: string; clearSecs: number; pwgen: PwGenOpts; onChanged: () => void; onCreated?: (entryId: string) => void; onDeleted: () => void }) {
   const [e, setE] = useState<EntryView | null>(null);
   const [showPass, setShowPass] = useState(false);
   const [showCardNumber, setShowCardNumber] = useState(false);
@@ -23,6 +28,7 @@ export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }:
   const [custom, setCustom] = useState<{ key: string; value: string }[]>([]);
   const [origKeys, setOrigKeys] = useState<string[]>([]);
   const [deleteError, setDeleteError] = useState('');
+  const [saveError, setSaveError] = useState('');
   const [opts, setOpts] = useState<PwGenOpts>(pwgen);
   const [showRules, setShowRules] = useState(false);
   const [isCard, setIsCard] = useState(false);
@@ -33,10 +39,15 @@ export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }:
     setShowPass(false);
     setShowCardNumber(false);
     setDeleteError('');
+    setSaveError('');
     setOpts(pwgen);
     setShowRules(false);
     setIsCard(false);
     setCardholderName('');
+    if (entryId === null) {
+      setE(BLANK_ENTRY); setExpires(null); setCustom([]); setOrigKeys([]);
+      return;
+    }
     sendToSW({ type: 'getEntry', entryId }).then(r => {
       if (r.ok && r.entry) {
         setE(r.entry); setExpires(r.entry.expires);
@@ -122,6 +133,12 @@ export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }:
     }
     const name = cardholderName.trim();
     if (name) { fields[CARDHOLDER_NAME_KEY] = name; keptKeys.add(CARDHOLDER_NAME_KEY); }
+    if (entryId === null) {
+      const r = await sendToSW({ type: 'createEntry', groupId: groupId!, fields });
+      if (r.ok) onCreated?.(r.entryId);
+      else setSaveError(r.error);
+      return;
+    }
     const removeKeys = origKeys.filter(k => !keptKeys.has(k));
     await sendToSW({ type: 'updateEntry', entryId, fields, expires, removeKeys });
     // Sync origKeys to what was just persisted: Apply Changes doesn't trigger a
@@ -132,6 +149,7 @@ export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }:
     onChanged();
   }
   async function del() {
+    if (entryId === null) return;
     if (!confirm('Delete this entry?')) return;
     const r = await sendToSW({ type: 'deleteEntry', entryId });
     if (r.ok) onDeleted();
@@ -201,16 +219,19 @@ export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }:
         </div>
 
         {deleteError && <p className="alert-error mb-3" role="alert">{deleteError}</p>}
+        {saveError && <p className="alert-error mb-3" role="alert">{saveError}</p>}
 
         <div className="flex items-center gap-2">
           <button className="btn-primary mt-1" onClick={save}>
-            <Check size={15} /> Apply changes
+            <Check size={15} /> {entryId === null ? 'Create' : 'Apply changes'}
           </button>
-          <button className="btn-xs mt-1" aria-label="Delete entry" title="Delete entry"
-            style={{ color: 'var(--danger-text)', background: 'var(--danger-tint)' }}
-            onClick={del}>
-            <Trash2 size={15} /> Delete
-          </button>
+          {entryId !== null && (
+            <button className="btn-xs mt-1" aria-label="Delete entry" title="Delete entry"
+              style={{ color: 'var(--danger-text)', background: 'var(--danger-tint)' }}
+              onClick={del}>
+              <Trash2 size={15} /> Delete
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -118,6 +118,7 @@ export function Panel() {
   const [tree, setTree] = useState<TreeNode | null>(null);
   const [selGroup, setSelGroup] = useState<string | null>(null);
   const [selEntry, setSelEntry] = useState<string | null>(null);
+  const [creatingEntry, setCreatingEntry] = useState(false);
   const [clearSecs, setClearSecs] = useState(30); const [saved, setSaved] = useState('');
   const [saving, setSaving] = useState(false);
   const [pwgen, setPwgen] = useState<PwGenOpts>(DEFAULT_PWGEN);
@@ -140,7 +141,7 @@ export function Panel() {
     const r = await sendToSW({ type: 'createGroup', parentId, name: 'New Group' });
     setExpanded(e => new Set(e).add(parentId));
     await reload(); refresh();
-    if (r.ok) { setSelGroup(r.groupId); setSelEntry(null); setEditing(r.groupId); }
+    if (r.ok) { setSelGroup(r.groupId); setSelEntry(null); setCreatingEntry(false); setEditing(r.groupId); }
   }
   async function renameGroup(id: string, name: string) {
     if (name) await sendToSW({ type: 'updateGroup', groupId: id, fields: { Name: name } });
@@ -154,6 +155,7 @@ export function Panel() {
     await sendToSW({ type: 'deleteGroup', groupId: node.groupId });
     setSelGroup(g => g === node.groupId ? (tree ? tree.groupId : null) : g);
     setSelEntry(null);
+    setCreatingEntry(false);
     await reload(); refresh();
   }
   useEffect(() => { if (!locked) reload(); }, [locked]);
@@ -170,6 +172,7 @@ export function Panel() {
       setExpanded(e => new Set([...e, ...found.ancestors]));
     }
     setSelEntry(pendingOpenEntry);
+    setCreatingEntry(false);
     setPendingOpenEntry(null);
   }, [pendingOpenEntry, tree]);
   if (locked) return (
@@ -209,7 +212,7 @@ export function Panel() {
         <div className="w-56 shrink-0 overflow-auto py-2" style={{ borderRight: '1px solid var(--border)' }}>
           {tree && <GroupTree node={tree} ops={{
             sel: selGroup, expanded, editing,
-            onPick: id => { setSelGroup(id); setSelEntry(null); },
+            onPick: id => { setSelGroup(id); setSelEntry(null); setCreatingEntry(false); },
             onToggle: toggle,
             onAdd: addGroup,
             onRename: renameGroup,
@@ -221,17 +224,22 @@ export function Panel() {
 
         {/* Right: entries of selected group, or search results */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="shrink-0 p-2" style={{ borderBottom: '1px solid var(--border)' }}>
-            <div className="relative">
+          <div className="shrink-0 p-2 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border)' }}>
+            <div className="relative flex-1">
               <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
               <input className="input pl-9" placeholder="Search all entries…" value={query}
                 onChange={e => setQuery(e.target.value)} />
             </div>
+            <button className="icon-btn" aria-label="Add entry" title={selGroup ? 'Add entry' : 'Select a group first'}
+              disabled={!selGroup}
+              onClick={() => { setCreatingEntry(true); setSelEntry(null); }}>
+              <Plus size={16} />
+            </button>
           </div>
           <div className="flex-1 overflow-auto py-2">
             {shown.length > 0
               ? shown.map(e => (
-                <button key={e.id} onClick={() => setSelEntry(e.id)}
+                <button key={e.id} onClick={() => { setSelEntry(e.id); setCreatingEntry(false); }}
                   className="flex items-center gap-2 w-full text-left text-sm rounded-md py-1.5 px-3 transition-colors"
                   style={{
                     color: 'var(--text)',
@@ -255,18 +263,21 @@ export function Panel() {
         </div>
       </div>
 
-      {/* Bottom: entry details / edit */}
-      {selEntry && (
+      {/* Bottom: entry details / edit / create */}
+      {(selEntry || creatingEntry) && (
         <div className="flex flex-col shrink-0" style={{ height: '45vh', borderTop: '1px solid var(--border)', background: 'var(--bg)' }}>
           <div className="flex items-center justify-between px-4 py-2" style={{ borderBottom: '1px solid var(--border)' }}>
-            <span className="section-title">Entry details</span>
-            <button className="icon-btn" aria-label="Close details" title="Close details" onClick={() => setSelEntry(null)}>
+            <span className="section-title">{creatingEntry ? 'New entry' : 'Entry details'}</span>
+            <button className="icon-btn" aria-label="Close details" title="Close details"
+              onClick={() => { setSelEntry(null); setCreatingEntry(false); }}>
               <X size={15} />
             </button>
           </div>
           <div className="overflow-auto flex-1">
-            <EntryEditor entryId={selEntry} clearSecs={clearSecs} pwgen={pwgen}
+            <EntryEditor entryId={creatingEntry ? null : selEntry} groupId={selGroup ?? undefined}
+              clearSecs={clearSecs} pwgen={pwgen}
               onChanged={() => { refresh(); reload(); }}
+              onCreated={id => { setCreatingEntry(false); setSelEntry(id); refresh(); reload(); }}
               onDeleted={() => { setSelEntry(null); refresh(); reload(); }} />
           </div>
         </div>)}
