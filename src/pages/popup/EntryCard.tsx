@@ -3,6 +3,7 @@ import { Copy, LogIn, ChevronDown, ChevronUp, PanelRight, CreditCard } from 'luc
 import type { EntryView } from '../../shared/entry';
 import { sendToSW } from '../../shared/messages';
 import { requestOpenEntry } from '../../shared/openEntry';
+import { maskCardNumber } from '../../shared/cardMask';
 
 export function EntryCard({ entry, tabId, onCopy, groupName }: {
   entry: EntryView;
@@ -19,7 +20,7 @@ export function EntryCard({ entry, tabId, onCopy, groupName }: {
             {entry.isCard && <CreditCard size={12} className="shrink-0" />}
             <span className="truncate min-w-0">{entry.title}</span>
           </div>
-          <div className="text-sm truncate" style={{ color: 'var(--text-muted)' }}>{entry.username}</div>
+          <div className="text-sm truncate" style={{ color: 'var(--text-muted)' }}>{entry.isCard ? maskCardNumber(entry.username) : entry.username}</div>
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
           {entry.expired && <span className="badge-danger badge">EXPIRED</span>}

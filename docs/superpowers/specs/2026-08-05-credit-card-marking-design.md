@@ -64,3 +64,7 @@ Small `CreditCard` icon (lucide-react) placed left of the title, shown **only** 
 - Card-form detection/autofill content-script logic.
 - Card number/CVV format validation.
 - Migrating/clearing username+password values automatically when marking/unmarking.
+- Excluding card-marked entries from the existing autofill pipeline (`fillRequest`, the inline
+  autofill popup): a card's number can still be autofilled into arbitrary site forms via the
+  normal Fill flow, since this spec deliberately preserves the entry's URL. Flagged in final
+  review; deferred by explicit decision, not an oversight.

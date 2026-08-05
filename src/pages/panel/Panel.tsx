@@ -8,6 +8,7 @@ import { lockVault } from '../../shared/lockVault';
 import { loadSettings } from '../../shared/settings';
 import { applyTheme } from '../../shared/theme';
 import { consumeOpenEntry, watchOpenEntry } from '../../shared/openEntry';
+import { maskCardNumber } from '../../shared/cardMask';
 import type { TreeNode } from '../../shared/entry';
 import { DEFAULT_PWGEN, type PwGenOpts } from '../../shared/pwgen';
 import { EntryEditor } from './EntryEditor';
@@ -239,7 +240,7 @@ export function Panel() {
                     : <FileText size={14} style={{ color: 'var(--text-muted)' }} />}
                   <span className="flex flex-col min-w-0">
                     <span className="truncate">{e.title}</span>
-                    {e.username && <span className="truncate text-xs" style={{ color: 'var(--text-muted)' }}>{e.username}</span>}
+                    {e.username && <span className="truncate text-xs" style={{ color: 'var(--text-muted)' }}>{e.isCard ? maskCardNumber(e.username) : e.username}</span>}
                   </span>
                   {e.expired && <span className="badge-danger badge ml-auto">expired</span>}
                 </button>))

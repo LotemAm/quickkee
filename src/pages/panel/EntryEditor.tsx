@@ -17,6 +17,7 @@ const toLocalInput = (ms: number) => {
 export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }: { entryId: string; clearSecs: number; pwgen: PwGenOpts; onChanged: () => void; onDeleted: () => void }) {
   const [e, setE] = useState<EntryView | null>(null);
   const [showPass, setShowPass] = useState(false);
+  const [showCardNumber, setShowCardNumber] = useState(false);
   const [expires, setExpires] = useState<number | null>(null);
   // editable additional fields + the original keys (to compute deletions/renames on save)
   const [custom, setCustom] = useState<{ key: string; value: string }[]>([]);
@@ -30,6 +31,7 @@ export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }:
   const { copy, state: clipState, cancel } = useClipboardTimer(clearSecs);
   useEffect(() => {
     setShowPass(false);
+    setShowCardNumber(false);
     setDeleteError('');
     setOpts(pwgen);
     setShowRules(false);
@@ -66,17 +68,22 @@ export function EntryEditor({ entryId, clearSecs, pwgen, onChanged, onDeleted }:
   if (!e) return null;
   const field = (label: string, key: 'title' | 'username' | 'url' | 'password') => {
     const secret = key === 'password';
+    // Card Number (username, when isCard) gets the same mask/reveal UX as Password/CVV, but
+    // uses its own reveal state so toggling one never reveals the other.
+    const masked = secret || (isCard && key === 'username');
+    const showThis = secret ? showPass : showCardNumber;
+    const setShowThis = secret ? setShowPass : setShowCardNumber;
     return (
     <div className="mb-3">
       <label className="section-title block">{label}</label>
       <div className="flex gap-2 items-center">
-        <input className="input flex-1" type={secret && !showPass ? 'password' : 'text'} value={e[key]} onChange={ev => setE({ ...e, [key]: ev.target.value })} />
-        {secret && (
-          <button className="icon-btn" aria-label={showPass ? 'Hide password' : 'Show password'} title={showPass ? 'Hide password' : 'Show password'} onClick={() => setShowPass(s => !s)}>
-            {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
+        <input className="input flex-1" type={masked && !showThis ? 'password' : 'text'} value={e[key]} onChange={ev => setE({ ...e, [key]: ev.target.value })} />
+        {masked && (
+          <button className="icon-btn" aria-label={showThis ? `Hide ${label}` : `Show ${label}`} title={showThis ? `Hide ${label}` : `Show ${label}`} onClick={() => setShowThis(s => !s)}>
+            {showThis ? <EyeOff size={15} /> : <Eye size={15} />}
           </button>
         )}
-        {secret && (
+        {key === 'password' && (
           <button className="icon-btn" aria-label="Generate password" title="Generate password"
             disabled={noClass}
             onClick={() => sendToSW({ type: 'generatePassword', opts }).then(r => {

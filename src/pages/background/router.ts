@@ -145,6 +145,9 @@ export function makeRouter(ctx: SwContext) {
         // Entries without a URL can't be validated — allow (explicit user action from the popup).
         if (entry.url && (!tab.url || !urlMatches(entry.url, tab.url)))
           return { ok: false, error: 'urlMismatch' };
+        // Card-marked entries (entry.isCard) are not excluded here — a card's number/CVV can
+        // still be autofilled into a matching site's form. Known, deliberately deferred
+        // limitation (see spec's "Out of scope"), not an oversight.
         await chrome.tabs.sendMessage(req.tabId, { type: 'fill', username: entry.username, password: entry.password });
         return { ok: true };
       }
