@@ -12,7 +12,7 @@ test('sha256Hex matches known vector for "abc"', async () => {
 test('copyWithClear sends scheduleClipboardClear with the text hash', async () => {
   vi.useFakeTimers();
   let buf = '';
-  (globalThis as any).navigator = { clipboard: {
+  (globalThis as unknown as { navigator: unknown }).navigator = { clipboard: {
     writeText: (t: string) => { buf = t; return Promise.resolve(); },
     readText: () => Promise.resolve(buf) } };
   await copyWithClear('secret', 30);
@@ -27,7 +27,7 @@ test('copyWithClear sends scheduleClipboardClear with the text hash', async () =
 test('copyWithClear does not send scheduleClipboardClear when clearSeconds is 0', async () => {
   vi.useFakeTimers();
   let buf = '';
-  (globalThis as any).navigator = { clipboard: {
+  (globalThis as unknown as { navigator: unknown }).navigator = { clipboard: {
     writeText: (t: string) => { buf = t; return Promise.resolve(); },
     readText: () => Promise.resolve(buf) } };
   await copyWithClear('secret', 0);
@@ -38,7 +38,7 @@ test('copyWithClear does not send scheduleClipboardClear when clearSeconds is 0'
 test('clears clipboard after delay when unchanged', async () => {
   vi.useFakeTimers();
   let buf = '';
-  (globalThis as any).navigator = { clipboard: {
+  (globalThis as unknown as { navigator: unknown }).navigator = { clipboard: {
     writeText: (t: string) => { buf = t; return Promise.resolve(); },
     readText: () => Promise.resolve(buf) } };
   await copyWithClear('secret', 30);
@@ -51,7 +51,7 @@ test('clears clipboard after delay when unchanged', async () => {
 test('does NOT clear clipboard if it changed before delay', async () => {
   vi.useFakeTimers();
   let buf = '';
-  (globalThis as any).navigator = { clipboard: {
+  (globalThis as unknown as { navigator: unknown }).navigator = { clipboard: {
     writeText: (t: string) => { buf = t; return Promise.resolve(); },
     readText: () => Promise.resolve(buf) } };
   await copyWithClear('secret', 30);
@@ -65,7 +65,7 @@ test('does NOT clear clipboard if it changed before delay', async () => {
 test('does not schedule clear when clearSeconds is 0', async () => {
   vi.useFakeTimers();
   let buf = '';
-  (globalThis as any).navigator = { clipboard: {
+  (globalThis as unknown as { navigator: unknown }).navigator = { clipboard: {
     writeText: (t: string) => { buf = t; return Promise.resolve(); },
     readText: () => Promise.resolve(buf) } };
   await copyWithClear('secret', 0);

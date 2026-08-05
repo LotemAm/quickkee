@@ -1,5 +1,8 @@
 import { test, expect, openExtensionPage, installDb, openPopupForTab, swCmd } from '../helpers';
 
+interface SpikeEvent { tabId: number; url: string; frameId: number; ts: number }
+type SpikeSelf = { __qkSpikeEvents: SpikeEvent[] };
+
 // Spike for plan 018 (multi-step autofill design doc). Answers two empirical
 // questions before any src/ implementation is attempted:
 //
@@ -27,9 +30,9 @@ test('spike: step-two page is untouched today, and onCompleted is observable in 
   // Arm the observer *before* any navigation happens, from inside the SW's own
   // global scope -- the same realm a real pendingFills implementation would run in.
   await sw.evaluate(() => {
-    (self as any).__qkSpikeEvents = [];
+    (self as unknown as SpikeSelf).__qkSpikeEvents = [];
     chrome.webNavigation.onCompleted.addListener(details => {
-      (self as any).__qkSpikeEvents.push({
+      (self as unknown as SpikeSelf).__qkSpikeEvents.push({
         tabId: details.tabId, url: details.url, frameId: details.frameId, ts: Date.now(),
       });
     });
@@ -73,8 +76,7 @@ test('spike: step-two page is untouched today, and onCompleted is observable in 
   // right tabId/url/frameId. Poll because the event may arrive slightly after
   // waitForURL resolves (they race the same underlying browser event).
   const readMatched = async () => {
-    const all = (await sw.evaluate(() => (self as any).__qkSpikeEvents)) as
-      { tabId: number; url: string; frameId: number; ts: number }[];
+    const all = await sw.evaluate(() => (self as unknown as SpikeSelf).__qkSpikeEvents);
     return all.filter(e => e.tabId === tabId && e.frameId === 0 && e.url.includes('/step2'));
   };
   await expect.poll(async () => (await readMatched()).length, { timeout: 5000 }).toBeGreaterThan(0);

@@ -13,7 +13,7 @@ function find(db: kdbxweb.Kdbx, title: string): kdbxweb.KdbxEntry | undefined {
 
 test('open from cloud, edit, save; remote change merges and uploads both edits', async ({ context, extensionId }) => {
   const popup = await openExtensionPage(context, extensionId, 'src/pages/popup/index.html');
-  await popup.waitForFunction(() => Boolean((window as any).__qkTest));
+  await popup.waitForFunction(() => Boolean((window as unknown as { __qkTest?: unknown }).__qkTest));
 
   // Build the base DB bytes before the reload so kdbxweb runs in Node context.
   const baseB64 = await makeKdbxB64();
@@ -21,7 +21,7 @@ test('open from cloud, edit, save; remote change merges and uploads both edits',
   // Reload to ensure a clean UI state, then install the fake provider so the SW
   // receives it while the popup page is open (preventing any SW restart window).
   await popup.reload();
-  await popup.waitForFunction(() => Boolean((window as any).__qkTest));
+  await popup.waitForFunction(() => Boolean((window as unknown as { __qkTest?: unknown }).__qkTest));
   await cloudInstall(popup, baseB64);
 
   // Pick the cloud source and open the file.

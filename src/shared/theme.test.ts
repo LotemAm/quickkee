@@ -1,7 +1,7 @@
 import { applyTheme } from './theme';
 
 function mockMatchMedia(matchesDark: boolean) {
-  (window as any).matchMedia = (query: string) => ({
+  window.matchMedia = (query: string) => ({
     matches: query.includes('dark') ? matchesDark : false,
     media: query,
     addEventListener: () => {},
@@ -10,7 +10,7 @@ function mockMatchMedia(matchesDark: boolean) {
     removeListener: () => {},
     onchange: null,
     dispatchEvent: () => false,
-  });
+  }) as MediaQueryList;
 }
 
 beforeEach(() => {

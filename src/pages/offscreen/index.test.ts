@@ -3,7 +3,7 @@
 let mod: typeof import('./index');
 
 beforeAll(async () => {
-  (globalThis as any).chrome = { runtime: { onMessage: { addListener: () => {} } } };
+  (globalThis as unknown as { chrome: unknown }).chrome = { runtime: { onMessage: { addListener: () => {} } } };
   mod = await import('./index');
 });
 

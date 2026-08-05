@@ -61,12 +61,22 @@ export async function openExtensionPage(
 export async function installDb(page: Page, kdbxPath: string = E2E_KDBX): Promise<void> {
   const b64 = fs.readFileSync(kdbxPath).toString('base64');
   const name = path.basename(kdbxPath);
-  await page.waitForFunction(() => Boolean((window as any).__qkTest));
-  await page.evaluate(({ data, name }) => (window as any).__qkTest.installDb(name, data), { data: b64, name });
+  await page.waitForFunction(() => Boolean((window as unknown as { __qkTest?: unknown }).__qkTest));
+  await page.evaluate(({ data, name }) => (window as unknown as { __qkTest: { installDb(name: string, b64: string): Promise<void> } }).__qkTest.installDb(name, data), { data: b64, name });
 }
 
-export async function swCmd(page: Page, msg: Record<string, unknown>): Promise<any> {
-  return page.evaluate((m) => chrome.runtime.sendMessage({ ...m, __qk: 'test' }), msg);
+export interface SwCmdResponse {
+  ok?: boolean;
+  text?: string;
+  color?: [number, number, number, number];
+  count?: number;
+  cert?: boolean;
+  id?: number;
+  tabs?: number[];
+}
+
+export async function swCmd(page: Page, msg: Record<string, unknown>): Promise<SwCmdResponse> {
+  return (await page.evaluate((m) => chrome.runtime.sendMessage({ ...m, __qk: 'test' }), msg)) as SwCmdResponse;
 }
 
 export async function openPopupForTab(

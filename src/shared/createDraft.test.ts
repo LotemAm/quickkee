@@ -19,10 +19,10 @@ function draft(url: string, overrides: Partial<CreateDraft> = {}): CreateDraft {
 
 beforeEach(() => {
   vi.useRealTimers();
-  const store: any = {};
-  (globalThis as any).chrome = { storage: { session: {
+  const store: Record<string, unknown> = {};
+  (globalThis as unknown as { chrome: unknown }).chrome = { storage: { session: {
     get: (k: string) => Promise.resolve({ [k]: store[k] }),
-    set: (o: any) => { Object.assign(store, o); return Promise.resolve(); },
+    set: (o: Record<string, unknown>) => { Object.assign(store, o); return Promise.resolve(); },
     remove: (k: string) => { delete store[k]; return Promise.resolve(); } } } };
 });
 

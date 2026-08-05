@@ -3,7 +3,8 @@ import { afterEach, vi } from 'vitest';
 
 const token = () => Promise.resolve('TOKEN');
 function mockFetch(handler: (url: string, init: RequestInit) => Response) {
-  globalThis.fetch = vi.fn((url: any, init: any) => Promise.resolve(handler(String(url), init ?? {}))) as any;
+  globalThis.fetch = vi.fn((url: RequestInfo | URL, init?: RequestInit) =>
+    Promise.resolve(handler(String(url), init ?? {}))) as unknown as typeof fetch;
 }
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -34,14 +35,14 @@ test('download returns bytes + rev from the API-Result header', async () => {
 });
 
 test('upload success returns new rev and sends basedOnRev in update mode', async () => {
-  let sentArg: any;
+  let sentArg: { mode: { '.tag': string; update: string } } | undefined;
   mockFetch((_url, init) => {
     sentArg = JSON.parse((init.headers as Record<string, string>)['Dropbox-API-Arg']);
     return new Response(JSON.stringify({ rev: 'r6' }), { status: 200 });
   });
   const res = await new DropboxProvider(token).upload('id:1', new Uint8Array([9]).buffer, 'r5');
   expect(res).toEqual({ ok: true, rev: 'r6' });
-  expect(sentArg.mode).toEqual({ '.tag': 'update', update: 'r5' });
+  expect(sentArg?.mode).toEqual({ '.tag': 'update', update: 'r5' });
 });
 
 test('upload 409 conflict returns conflict result', async () => {

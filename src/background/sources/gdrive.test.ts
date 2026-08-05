@@ -5,8 +5,8 @@ const token = () => Promise.resolve('TOKEN');
 type H = (url: string, init: RequestInit) => Response;
 function mockSequence(...handlers: H[]) {
   let i = 0;
-  globalThis.fetch = vi.fn((url: any, init: any) =>
-    Promise.resolve(handlers[Math.min(i++, handlers.length - 1)](String(url), init ?? {}))) as any;
+  globalThis.fetch = vi.fn((url: RequestInfo | URL, init?: RequestInit) =>
+    Promise.resolve(handlers[Math.min(i++, handlers.length - 1)](String(url), init ?? {}))) as unknown as typeof fetch;
 }
 afterEach(() => { vi.restoreAllMocks(); });
 

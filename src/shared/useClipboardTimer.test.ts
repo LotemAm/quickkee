@@ -7,7 +7,7 @@ vi.mock('./clipboard', () => ({ copyWithClear: vi.fn() }));
 vi.mock('./messages', () => ({ sendToSW: vi.fn().mockResolvedValue({ ok: true }) }));
 
 const writeTextMock = vi.fn().mockResolvedValue(undefined);
-(globalThis as any).navigator = {
+(globalThis as unknown as { navigator: unknown }).navigator = {
   clipboard: { writeText: writeTextMock, readText: vi.fn().mockResolvedValue('') },
 };
 
