@@ -6057,7 +6057,7 @@ __metadata:
     react-dom: "npm:^19.1.0"
     selfsigned: "npm:^5.5.0"
     tailwindcss: "npm:^4.1.16"
-    tldts: "npm:^7.4.6"
+    tldts: "npm:^7.4.10"
     ts-node: "npm:^10.9.2"
     typescript: "npm:^5.8.3"
     typescript-eslint: "npm:^8"
@@ -6944,17 +6944,17 @@ __metadata:
   languageName: node
   linkType: hard
 
+"tldts-core@npm:^7.4.10":
+  version: 7.4.10
+  resolution: "tldts-core@npm:7.4.10"
+  checksum: 10c0/a5f42aad8aa8adfc57d33e9bd5c43094e9de226dce4851867ea7014d8679040b4c01c500b9947595ab22cdfe9783ea5d88a7c0be2092d19a14f75c7cd4671181
+  languageName: node
+  linkType: hard
+
 "tldts-core@npm:^7.4.3":
   version: 7.4.3
   resolution: "tldts-core@npm:7.4.3"
   checksum: 10c0/866f9d46ef7ba80a560edaa0a659c32e0aa3b4e281694c96bcf7773f6530e107c5681c714f47d58ee1720dc5578bb168a1e8535c514de90b5907850dc1202cd8
-  languageName: node
-  linkType: hard
-
-"tldts-core@npm:^7.4.6":
-  version: 7.4.6
-  resolution: "tldts-core@npm:7.4.6"
-  checksum: 10c0/1da796a3e2b743d80a348ad9a98144e3284e74bd352b2a74e1cdb744e0c70637c1558d9c0909f28c3cd503b60d1f7c9e937ddb7a1330d7c426e25bb04f0ad3fd
   languageName: node
   linkType: hard
 
@@ -6969,14 +6969,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"tldts@npm:^7.4.6":
-  version: 7.4.6
-  resolution: "tldts@npm:7.4.6"
+"tldts@npm:^7.4.10":
+  version: 7.4.10
+  resolution: "tldts@npm:7.4.10"
   dependencies:
-    tldts-core: "npm:^7.4.6"
+    tldts-core: "npm:^7.4.10"
   bin:
     tldts: bin/cli.js
-  checksum: 10c0/5ef08812a8e4e16563b98e3d47010ad1f06c48fe353799f2d69e4ba72ee6987e766e3077f14153c2f36b03b2cab2414c4696aa9a939d8bc8eceb1784c2a1d13b
+  checksum: 10c0/a9a85d260bd0bfd046794f140667aae0975da4a3aa805d180b0808b672a6fa7de0fc9f36110c3bdeed87ad780e961e1e5bb1ed8b41f8aa3ad5d5fb469e70ba38
   languageName: node
   linkType: hard
 
