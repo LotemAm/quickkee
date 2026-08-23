@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Link, Copy, LogIn, RefreshCw, SlidersHorizontal, History } from 'lucide-react';
+import { Plus, Link, Copy, LogIn, RefreshCw, SlidersHorizontal, History, Loader2 } from 'lucide-react';
 import { sendToSW } from '../../shared/messages';
 import { copyWithClear } from '../../shared/clipboard';
 import type { PwGenOpts } from '../../shared/pwgen';
@@ -27,6 +27,7 @@ export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwge
   const [showRules, setShowRules] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [restored, setRestored] = useState(false);
+  const [saving, setSaving] = useState(false);
   const noClass = !opts.lower && !opts.upper && !opts.digits && !opts.symbols;
   function regenerate(o: PwGenOpts) {
     if (!o.lower && !o.upper && !o.digits && !o.symbols) return;
@@ -68,10 +69,17 @@ export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwge
     setEntryUrl(baseUrl(url)); setOpts(pwgen); regenerate(pwgen);
     setRestored(false);
   }
-  async function createAndSave() { await create(); onCreated(); }
+  async function createAndSave() {
+    setSaving(true);
+    try { await create(); } finally { setSaving(false); }
+    onCreated();
+  }
   async function createAndFill() {
-    const entryId = await create();
-    if (entryId) await sendToSW({ type: 'fillRequest', entryId, tabId });
+    setSaving(true);
+    try {
+      const entryId = await create();
+      if (entryId) await sendToSW({ type: 'fillRequest', entryId, tabId });
+    } finally { setSaving(false); }
     onCreated();
   }
   const isFullUrl = entryUrl === url;
@@ -112,11 +120,11 @@ export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwge
         <Link size={15} /> Use full page URL
       </button>
       <div className="flex gap-1.5">
-        <button className="btn-primary w-full" disabled={!title} onClick={createAndSave}>
-          <Plus size={15} /> Create &amp; Save
+        <button className="btn-primary w-full" disabled={!title || saving} onClick={createAndSave}>
+          {saving ? <><Loader2 size={15} className="animate-spin" /> Saving</> : <><Plus size={15} /> Create &amp; Save</>}
         </button>
-        <button className="btn-secondary w-full" disabled={!title} onClick={createAndFill} title="Create and autofill the current tab">
-          <LogIn size={15} /> Create &amp; Fill
+        <button className="btn-secondary w-full" disabled={!title || saving} onClick={createAndFill} title="Create and autofill the current tab">
+          {saving ? <><Loader2 size={15} className="animate-spin" /> Saving</> : <><LogIn size={15} /> Create &amp; Fill</>}
         </button>
       </div>
     </div>
