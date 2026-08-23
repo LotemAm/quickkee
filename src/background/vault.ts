@@ -1,7 +1,7 @@
 import * as kdbxweb from 'kdbxweb';
 import { registerArgon2 } from './crypto';
 import { urlMatches } from './matcher';
-import type { EntryView, EntryField, TreeNode, EntrySummary } from '../shared/entry';
+import type { EntryView, EntryField, TreeNode, EntrySummary, AttachmentMeta } from '../shared/entry';
 import { CARD_FLAG_KEY } from '../shared/entry';
 
 const STD = new Set(['Title', 'UserName', 'Password', 'URL', 'Notes', CARD_FLAG_KEY]);
@@ -74,7 +74,17 @@ export class Vault {
       url: str(e.fields.get('URL')),
       expired: this.isExpired(e),
       isCard: str(e.fields.get(CARD_FLAG_KEY)) === '1',
+      hasAttachments: e.binaries.size > 0,
     };
+  }
+
+  private toAttachments(e: kdbxweb.KdbxEntry): AttachmentMeta[] {
+    const out: AttachmentMeta[] = [];
+    e.binaries.forEach((b, name) => {
+      const val = 'hash' in b ? b.value : b;
+      out.push({ name, size: val.byteLength });
+    });
+    return out;
   }
 
   private toView(e: kdbxweb.KdbxEntry): EntryView {
@@ -93,6 +103,7 @@ export class Vault {
       created: e.times.creationTime ? e.times.creationTime.getTime() : null,
       expires: e.times.expires === true && e.times.expiryTime ? e.times.expiryTime.getTime() : null,
       isCard: str(e.fields.get(CARD_FLAG_KEY)) === '1',
+      attachments: this.toAttachments(e),
     };
   }
 
@@ -140,7 +151,7 @@ export class Vault {
     const build = (g: kdbxweb.KdbxGroup): TreeNode => ({
       groupId: g.uuid.id, name: str(g.name),
       entries: g.entries.map(e => { const v = this.toView(e);
-        return { id: v.id, title: v.title, username: v.username, url: v.url, expired: v.expired, isCard: v.isCard }; }),
+        return { id: v.id, title: v.title, username: v.username, url: v.url, expired: v.expired, isCard: v.isCard, hasAttachments: v.attachments.length > 0 }; }),
       children: g.groups.filter(c => !this.isRecycleBin(c)).map(build),
     });
     return build(this.root);
@@ -189,6 +200,31 @@ export class Vault {
     if (!this.db) throw new Error('locked');
     const e = this.findEntry(id); if (!e) throw new Error('no entry');
     this.db.remove(e); this.dirty = true;
+  }
+
+  async addAttachment(entryId: string, name: string, data: ArrayBuffer): Promise<void> {
+    if (!this.db) throw new Error('locked');
+    const e = this.findEntry(entryId); if (!e) throw new Error('no entry');
+    const bin = await this.db.createBinary(data);
+    e.binaries.set(name, bin);
+    // Cleans up the previous pool entry if `name` was overwritten and its hash isn't shared elsewhere.
+    await this.db.cleanup({ binaries: true });
+    this.dirty = true;
+  }
+
+  removeAttachment(entryId: string, name: string): void {
+    if (!this.db) throw new Error('locked');
+    const e = this.findEntry(entryId); if (!e) throw new Error('no entry');
+    if (!e.binaries.delete(name)) throw new Error('no attachment');
+    this.db.cleanup({ binaries: true });
+    this.dirty = true;
+  }
+
+  getAttachmentBytes(entryId: string, name: string): ArrayBuffer | null {
+    const e = this.findEntry(entryId); if (!e) return null;
+    const b = e.binaries.get(name); if (!b) return null;
+    const val = 'hash' in b ? b.value : b;
+    return val instanceof kdbxweb.ProtectedValue ? val.getBinary().buffer as ArrayBuffer : val;
   }
 
   private applyFields(e: kdbxweb.KdbxEntry, fields: Record<string, string>) {

@@ -17,6 +17,13 @@ function fixture(): ArrayBuffer {
   return ab;
 }
 
+function bytesOf(text: string): ArrayBuffer {
+  const encoded = new TextEncoder().encode(text);
+  const ab = new ArrayBuffer(encoded.byteLength);
+  new Uint8Array(ab).set(encoded);
+  return ab;
+}
+
 test('open + read entry by url', async () => {
   const v = new Vault(); await v.open(fixture(), 'correct horse', null);
   expect(v.dirty).toBe(false);
@@ -263,4 +270,72 @@ test('cardSummariesForUrl: a card entry WITH a URL is still restricted to matchi
 test('cardSummariesForUrl excludes non-card entries regardless of URL match', async () => {
   const v = new Vault(); await v.open(fixture(), 'correct horse', null);
   expect(v.cardSummariesForUrl('https://github.com/login')).toHaveLength(0);
+});
+
+test('addAttachment: getEntry shows it with correct name and size', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  const data = bytesOf('hello world');
+  await v.addAttachment(id, 'note.txt', data);
+  expect(v.dirty).toBe(true);
+
+  const view = v.getEntry(id)!;
+  expect(view.attachments).toEqual([{ name: 'note.txt', size: 11 }]);
+});
+
+test('addAttachment: entry summary and tree expose hasAttachments', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  await v.addAttachment(id, 'note.txt', bytesOf('x'));
+
+  const summaries = v.entrySummariesForUrl('https://github.com/login');
+  expect(summaries[0].hasAttachments).toBe(true);
+
+  const tree = v.getTree();
+  const sites = tree.children.find(c => c.name === 'Sites');
+  expect(sites?.entries.find(e => e.id === id)?.hasAttachments).toBe(true);
+});
+
+test('addAttachment: overwriting the same name cleans up the orphaned pool entry', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  await v.addAttachment(id, 'note.txt', bytesOf('first'));
+  await v.addAttachment(id, 'note.txt', bytesOf('second version'));
+
+  const view = v.getEntry(id)!;
+  expect(view.attachments).toEqual([{ name: 'note.txt', size: 'second version'.length }]);
+
+  const db = v['db'] as import('kdbxweb').Kdbx;
+  expect(db.binaries.getAll()).toHaveLength(1);
+});
+
+test('removeAttachment: getAttachment returns null and the pool entry is gone', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  await v.addAttachment(id, 'note.txt', bytesOf('hello'));
+  v.removeAttachment(id, 'note.txt');
+
+  expect(v.getEntry(id)?.attachments).toEqual([]);
+  expect(v.getAttachmentBytes(id, 'note.txt')).toBeNull();
+
+  const db = v['db'] as import('kdbxweb').Kdbx;
+  expect(db.binaries.getAll()).toHaveLength(0);
+});
+
+test("removeAttachment('nonexistent') throws 'no attachment'", async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  expect(() => v.removeAttachment(id, 'nope.txt')).toThrow('no attachment');
+});
+
+test('attachment bytes round-trip exactly through serialize + reload', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  const original = bytesOf('the quick brown fox');
+  await v.addAttachment(id, 'note.txt', original);
+
+  const bytes = await v.serialize();
+  const v2 = new Vault(); await v2.open(bytes, 'correct horse', null);
+  const roundTripped = v2.getAttachmentBytes(id, 'note.txt');
+  expect(roundTripped && new TextDecoder().decode(roundTripped)).toBe('the quick brown fox');
 });

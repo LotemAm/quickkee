@@ -304,6 +304,46 @@ describe('getCardEntrySummariesForUrl', () => {
   });
 });
 
+describe('attachments', () => {
+  test('addAttachment/getAttachment/removeAttachment locked -> locked error', async () => {
+    const { handle_ } = makeCtx();
+    expect(await handle_({ type: 'addAttachment', entryId: 'x', name: 'a.txt', data: 'aGk=' })).toEqual({ ok: false, error: 'locked' });
+    expect(await handle_({ type: 'getAttachment', entryId: 'x', name: 'a.txt' })).toEqual({ ok: false, error: 'locked' });
+    expect(await handle_({ type: 'removeAttachment', entryId: 'x', name: 'a.txt' })).toEqual({ ok: false, error: 'locked' });
+  });
+
+  test('add -> get -> remove happy path, base64 round-trips exactly', async () => {
+    const { ctx, handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    const entryId = ctx.vault.entriesForUrl('https://github.com')[0].id;
+    const data = Buffer.from('hello world').toString('base64');
+
+    expect(await handle_({ type: 'addAttachment', entryId, name: 'note.txt', data })).toEqual({ ok: true });
+    expect(ctx.vault.dirty).toBe(true);
+
+    const getRes = await handle_({ type: 'getAttachment', entryId, name: 'note.txt' });
+    expect(getRes).toEqual({ ok: true, data });
+
+    expect(await handle_({ type: 'removeAttachment', entryId, name: 'note.txt' })).toEqual({ ok: true });
+    expect(await handle_({ type: 'getAttachment', entryId, name: 'note.txt' })).toEqual({ ok: false, error: 'noAttachment' });
+  });
+
+  test('addAttachment on unknown entryId returns an error', async () => {
+    const { handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    const res = await handle_({ type: 'addAttachment', entryId: 'does-not-exist', name: 'a.txt', data: 'aGk=' });
+    expect(res.ok).toBe(false);
+  });
+
+  test('removeAttachment on a name that was never attached returns an error', async () => {
+    const { ctx, handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    const entryId = ctx.vault.entriesForUrl('https://github.com')[0].id;
+    const res = await handle_({ type: 'removeAttachment', entryId, name: 'nope.txt' });
+    expect(res.ok).toBe(false);
+  });
+});
+
 describe('getSyncStatus', () => {
   test('final response reflects a LIVE re-read of currentSource after the getCache await, not the pre-await snapshot', async () => {
     // Regression guard: pre-extraction index.ts closed directly over the mutable

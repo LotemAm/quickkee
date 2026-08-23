@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react';
-import { Copy, Check, Eye, EyeOff, X, Plus, Trash2, RefreshCw, SlidersHorizontal } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Copy, Check, Eye, EyeOff, X, Plus, Trash2, RefreshCw, SlidersHorizontal, Paperclip, Download } from 'lucide-react';
 import { sendToSW } from '../../shared/messages';
-import { CARD_FLAG_KEY, CARDHOLDER_NAME_KEY, type EntryView } from '../../shared/entry';
+import { CARD_FLAG_KEY, CARDHOLDER_NAME_KEY, type EntryView, type AttachmentMeta } from '../../shared/entry';
 import type { PwGenOpts } from '../../shared/pwgen';
 import { useClipboardTimer } from '../../shared/useClipboardTimer';
 import { ClipboardBar } from '../../shared/ClipboardBar';
 import { PasswordRulesPanel } from '../../shared/PasswordRulesPanel';
+import { arrayBufferToBase64, formatBytes } from '../../shared/bytes';
+import { downloadAttachment } from '../../shared/attachments';
 
 // epoch ms -> 'YYYY-MM-DDTHH:mm' (local) for <input type="datetime-local">
 const toLocalInput = (ms: number) => {
@@ -17,6 +19,7 @@ const toLocalInput = (ms: number) => {
 const BLANK_ENTRY: EntryView = {
   id: '', title: '', username: '', url: '', password: '',
   fields: [], expired: false, created: null, expires: null, isCard: false,
+  attachments: [],
 };
 
 export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onCreated, onDeleted }: { entryId: string | null; groupId?: string; clearSecs: number; pwgen: PwGenOpts; onChanged: () => void; onCreated?: (entryId: string) => void; onDeleted: () => void }) {
@@ -33,6 +36,9 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
   const [showRules, setShowRules] = useState(false);
   const [isCard, setIsCard] = useState(false);
   const [cardholderName, setCardholderName] = useState('');
+  const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
+  const [attachError, setAttachError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const noClass = !opts.lower && !opts.upper && !opts.digits && !opts.symbols;
   const { copy, state: clipState, cancel } = useClipboardTimer(clearSecs);
   useEffect(() => {
@@ -44,8 +50,9 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
     setShowRules(false);
     setIsCard(false);
     setCardholderName('');
+    setAttachError('');
     if (entryId === null) {
-      setE(BLANK_ENTRY); setExpires(null); setCustom([]); setOrigKeys([]);
+      setE(BLANK_ENTRY); setExpires(null); setCustom([]); setOrigKeys([]); setAttachments([]);
       return;
     }
     sendToSW({ type: 'getEntry', entryId }).then(r => {
@@ -55,6 +62,7 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
         setCardholderName(r.entry.fields.find(f => f.key === CARDHOLDER_NAME_KEY)?.value ?? '');
         setCustom(r.entry.fields.filter(f => f.key !== CARDHOLDER_NAME_KEY).map(f => ({ key: f.key, value: f.value })));
         setOrigKeys(r.entry.fields.map(f => f.key));
+        setAttachments(r.entry.attachments);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -155,6 +163,25 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
     if (r.ok) onDeleted();
     else setDeleteError(r.error);
   }
+  async function onFilePicked(ev: React.ChangeEvent<HTMLInputElement>) {
+    const file = ev.target.files?.[0];
+    ev.target.value = '';
+    if (!file || entryId === null) return;
+    setAttachError('');
+    const data = arrayBufferToBase64(await file.arrayBuffer());
+    const r = await sendToSW({ type: 'addAttachment', entryId, name: file.name, data });
+    if (r.ok) {
+      setAttachments(a => [...a.filter(x => x.name !== file.name), { name: file.name, size: file.size }]);
+      onChanged();
+    } else setAttachError(r.error);
+  }
+  async function removeAttachment(name: string) {
+    if (entryId === null) return;
+    if (!confirm(`Remove attachment "${name}"?`)) return;
+    const r = await sendToSW({ type: 'removeAttachment', entryId, name });
+    if (r.ok) { setAttachments(a => a.filter(x => x.name !== name)); onChanged(); }
+    else setAttachError(r.error);
+  }
   return (
   <div>
     {clipState && <ClipboardBar state={clipState} onCancel={cancel} />}
@@ -194,6 +221,28 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
         <button className="btn-xs mb-3" aria-label="Add field" title="Add field" onClick={() => setCustom(c => [...c, { key: '', value: '' }])}>
           <Plus size={14} /> Add field
         </button>
+
+        <div className="section-title block">Attachments</div>
+        {attachments.map(a => (
+          <div key={a.name} className="flex gap-2 items-center mb-2">
+            <Paperclip size={14} className="shrink-0" style={{ color: 'var(--text-muted)' }} />
+            <span className="flex-1 truncate text-sm">{a.name}</span>
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{formatBytes(a.size)}</span>
+            <button className="icon-btn" aria-label={`Download ${a.name}`} title="Download"
+              onClick={() => downloadAttachment(entryId!, a.name).then(err => { if (err) setAttachError(err); })}>
+              <Download size={15} />
+            </button>
+            <button className="icon-btn" aria-label={`Remove ${a.name}`} title="Remove" onClick={() => removeAttachment(a.name)}>
+              <Trash2 size={15} />
+            </button>
+          </div>))}
+        <input ref={fileInputRef} type="file" className="hidden" onChange={onFilePicked} />
+        <button className="btn-xs mb-3" aria-label="Add attachment"
+          title={entryId === null ? 'Save the entry first' : 'Add attachment'}
+          disabled={entryId === null} onClick={() => fileInputRef.current?.click()}>
+          <Plus size={14} /> Add attachment
+        </button>
+        {attachError && <p className="alert-error mb-3" role="alert">{attachError}</p>}
 
         <div className="mb-3">
           <div className="section-title block">{isCard ? 'Card Expiry' : 'Expiry date'}</div>

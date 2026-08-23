@@ -6,6 +6,7 @@ import { generatePassword, DEFAULT_PWGEN } from '../../shared/pwgen';
 import { urlMatches } from '../../background/matcher';
 import type { Request, Response } from '../../shared/messages';
 import { CARDHOLDER_NAME_KEY } from '../../shared/entry';
+import { arrayBufferToBase64, base64ToArrayBuffer } from '../../shared/bytes';
 import { providerFor, __hasOverride } from './cloudRouting';
 import { openCloud, saveCloud, type SyncDeps } from '../../background/sync';
 import { getAccessToken, disconnect, DROPBOX_OAUTH, GDRIVE_OAUTH } from '../../background/sources/oauth';
@@ -75,6 +76,24 @@ export function makeRouter(ctx: SwContext) {
       case 'createGroup': return { ok: true, groupId: ctx.vault.createGroup(req.parentId, req.name) };
       case 'deleteGroup': ctx.vault.deleteGroup(req.groupId); return { ok: true };
       case 'deleteEntry': ctx.vault.deleteEntry(req.entryId); return { ok: true };
+      case 'addAttachment': {
+        if (!ctx.vault.isOpen()) return { ok: false, error: 'locked' };
+        try {
+          await ctx.vault.addAttachment(req.entryId, req.name, base64ToArrayBuffer(req.data));
+          return { ok: true };
+        } catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'addAttachmentFailed' }; }
+      }
+      case 'removeAttachment': {
+        if (!ctx.vault.isOpen()) return { ok: false, error: 'locked' };
+        try { ctx.vault.removeAttachment(req.entryId, req.name); return { ok: true }; }
+        catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'removeAttachmentFailed' }; }
+      }
+      case 'getAttachment': {
+        if (!ctx.vault.isOpen()) return { ok: false, error: 'locked' };
+        const bytes = ctx.vault.getAttachmentBytes(req.entryId, req.name);
+        if (!bytes) return { ok: false, error: 'noAttachment' };
+        return { ok: true, data: arrayBufferToBase64(bytes) };
+      }
       case 'save': {
         const currentSource = ctx.getCurrentSource();
         if (currentSource?.kind === 'cloud') {

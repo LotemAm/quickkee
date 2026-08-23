@@ -18,6 +18,9 @@ export type Request =
   | { type: 'createGroup'; parentId: string; name: string }
   | { type: 'deleteGroup'; groupId: string }
   | { type: 'deleteEntry'; entryId: string }
+  | { type: 'addAttachment'; entryId: string; name: string; data: string }
+  | { type: 'removeAttachment'; entryId: string; name: string }
+  | { type: 'getAttachment'; entryId: string; name: string }
   | { type: 'save' }
   | { type: 'generatePassword'; opts?: PwGenOpts }
   | { type: 'fillRequest'; entryId: string; tabId: number }
@@ -45,6 +48,9 @@ type OkFor = {
   updateGroup: Ok;
   deleteGroup: Ok;
   deleteEntry: Ok;
+  addAttachment: Ok;
+  removeAttachment: Ok;
+  getAttachment: Ok<{ data: string }>;
   connectCloud: Ok;
   disconnectCloud: Ok;
   fillRequest: Ok;
