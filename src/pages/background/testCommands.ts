@@ -1,5 +1,6 @@
 import type { SwContext } from './router';
 import type { FakeCloudProvider } from '../../background/sources/fakeCloudProvider';
+import { __makeFake, __setProviderOverride } from './cloudRouting';
 
 interface TestCommandMessage {
   __qk?: string;
@@ -42,11 +43,11 @@ export function registerTestCommands(ctx: SwContext & { warnedTabs: Set<number> 
         case 'warned': send({ tabs: Array.from(ctx.warnedTabs) }); break;
         case 'cloudInstall': {
           // Install a fake provider holding the given base64 .kdbx as remote rev "r1".
-          const fake = (await import('./cloudRouting')).__makeFake(req.provider!);
+          const fake = __makeFake(req.provider!);
           const bin = atob(req.b64 ?? ''); const bytes = new Uint8Array(bin.length);
           for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
           fake.setFile(req.fileId ?? '', req.name ?? '', bytes.buffer, 'r1');
-          (await import('./cloudRouting')).__setProviderOverride(fake);
+          __setProviderOverride(fake);
           (globalThis as unknown as { __qkFake: FakeCloudProvider }).__qkFake = fake;
           send({ ok: true });
           break;
