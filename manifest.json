@@ -15,8 +15,6 @@
   "permissions": [
     "storage",
     "alarms",
-    "activeTab",
-    "scripting",
     "tabs",
     "sidePanel",
     "webNavigation",
