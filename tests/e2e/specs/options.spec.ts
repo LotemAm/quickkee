@@ -7,6 +7,15 @@ test('options: changing settings persists to chrome.storage.local across reload'
   await opts.getByRole('combobox').first().selectOption('24');
   await opts.getByRole('button', { name: 'Dark' }).click();
 
+  // Both controls persist asynchronously; wait for those writes before navigating.
+  await expect.poll(() => opts.evaluate(async () => {
+    const stored = await chrome.storage.local.get('settings');
+    return {
+      autoCloseHours: stored.settings?.autoCloseHours,
+      theme: stored.settings?.theme,
+    };
+  })).toEqual({ autoCloseHours: 24, theme: 'dark' });
+
   // Reload and confirm the controls reflect the saved values.
   await opts.reload();
   await expect(opts.getByRole('combobox').first()).toHaveValue('24');
