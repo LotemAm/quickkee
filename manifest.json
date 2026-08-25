@@ -61,6 +61,11 @@
         "<all_urls>"
       ]
     }
-  ]
+  ],
+  "oauth2": {
+    "client_id": "325609171067-pc1l4lsoekp9iah7amp56umj8qb56d7l.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/drive.file"
+    ]
+  }
 }
-
