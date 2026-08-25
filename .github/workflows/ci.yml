@@ -33,11 +33,11 @@ jobs:
           node-version: 22
           cache: 'yarn'
       - run: yarn install --immutable
-      - run: yarn build:chrome
+      - run: yarn build:production
       - uses: actions/upload-artifact@v4
         with:
           name: quickkee-chrome
-          path: dist_chrome
+          path: quickkee.zip
 
   e2e:
     name: E2E Tests
