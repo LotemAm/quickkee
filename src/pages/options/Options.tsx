@@ -49,6 +49,11 @@ export function Options() {
               {[0, 15, 30, 60].map(x => <option key={x} value={x}>{x === 0 ? 'never' : `${x}s`}</option>)}
             </select>
           </label>
+          <label className="flex items-center justify-between gap-3 text-sm">
+            Offer to save submitted credentials
+            <input type="checkbox" checked={s.offerToSaveCredentials}
+              onChange={e => update({ offerToSaveCredentials: e.target.checked })} />
+          </label>
         </section>
 
         <section className="card space-y-3">

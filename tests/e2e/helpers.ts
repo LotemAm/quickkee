@@ -73,6 +73,7 @@ export interface SwCmdResponse {
   cert?: boolean;
   id?: number;
   tabs?: number[];
+  prompt?: unknown;
 }
 
 export async function swCmd(page: Page, msg: Record<string, unknown>): Promise<SwCmdResponse> {
@@ -139,4 +140,82 @@ export function allEntryTitles(db: kdbxweb.Kdbx): string[] {
 function walk(group: kdbxweb.KdbxGroup, out: string[]) {
   for (const e of group.entries) out.push(e.fields.get('Title')?.toString() ?? '');
   for (const g of group.groups) walk(g, out);
+}
+
+interface CdpNode {
+  nodeName: string;
+  nodeValue: string;
+  backendNodeId: number;
+  attributes?: string[];
+  children?: CdpNode[];
+  shadowRoots?: CdpNode[];
+  contentDocument?: CdpNode;
+}
+
+function descendants(node: CdpNode): CdpNode[] {
+  const nested = [...(node.children ?? []), ...(node.shadowRoots ?? []), ...(node.contentDocument ? [node.contentDocument] : [])];
+  return [node, ...nested.flatMap(descendants)];
+}
+
+function attribute(node: CdpNode, name: string): string | null {
+  const attrs = node.attributes ?? [];
+  const index = attrs.indexOf(name);
+  return index >= 0 ? attrs[index + 1] : null;
+}
+
+async function withPromptNodes<T>(page: Page, run: (nodes: CdpNode[], client: Awaited<ReturnType<BrowserContext['newCDPSession']>>) => Promise<T>): Promise<T> {
+  const client = await page.context().newCDPSession(page);
+  try {
+    await client.send('DOM.enable');
+    const documentResult = await client.send('DOM.getDocument', { depth: -1, pierce: true }) as unknown as { root: CdpNode };
+    const nodes = descendants(documentResult.root);
+    const host = nodes.find(node => attribute(node, 'data-quickkee-credential-prompt') === 'true');
+    if (!host) throw new Error('QuickKee credential prompt not found');
+    return await run(descendants(host), client);
+  } finally { await client.detach(); }
+}
+
+export async function closedCredentialPromptText(page: Page): Promise<string> {
+  return withPromptNodes(page, async nodes => nodes.filter(node => node.nodeName === '#text').map(node => node.nodeValue).join(' ').replace(/\s+/g, ' ').trim());
+}
+
+export async function closedCredentialPromptPrimaryDisabled(page: Page): Promise<boolean> {
+  return withPromptNodes(page, async (nodes, client) => {
+    const button = nodes.find(node => attribute(node, 'data-action') === 'primary');
+    if (!button) throw new Error('Credential prompt primary action not found');
+    const { object } = await client.send('DOM.resolveNode', { backendNodeId: button.backendNodeId });
+    const result = await client.send('Runtime.callFunctionOn', {
+      objectId: object.objectId, functionDeclaration: 'function(){ return this.disabled; }', returnByValue: true,
+    });
+    return Boolean(result.result.value);
+  });
+}
+
+export async function selectClosedCredentialDestination(page: Page, optionIndex = 1): Promise<void> {
+  await withPromptNodes(page, async (nodes, client) => {
+    const select = nodes.find(node => node.nodeName === 'SELECT');
+    if (!select) throw new Error('Credential destination select not found');
+    const { object } = await client.send('DOM.resolveNode', { backendNodeId: select.backendNodeId });
+    await client.send('Runtime.callFunctionOn', {
+      objectId: object.objectId,
+      functionDeclaration: 'function(index){ this.value = this.options[index].value; this.dispatchEvent(new Event("change", { bubbles: true })); }',
+      arguments: [{ value: optionIndex }],
+    });
+  });
+}
+
+export async function clickClosedCredentialAction(page: Page, action: 'primary' | 'dismiss'): Promise<void> {
+  await withPromptNodes(page, async (nodes, client) => {
+    const button = nodes.find(node => attribute(node, 'data-action') === action);
+    if (!button) throw new Error(`Credential prompt ${action} action not found`);
+    const { object } = await client.send('DOM.resolveNode', { backendNodeId: button.backendNodeId });
+    const result = await client.send('Runtime.callFunctionOn', {
+      objectId: object.objectId,
+      functionDeclaration: 'function(){ const r=this.getBoundingClientRect(); return { x:r.left+r.width/2, y:r.top+r.height/2 }; }',
+      returnByValue: true,
+    });
+    const point = result.result.value as { x: number; y: number };
+    await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+    await client.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+  });
 }

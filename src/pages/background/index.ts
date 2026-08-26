@@ -8,8 +8,10 @@ import type { DbSource } from '../../shared/dbSource';
 import { clearAllDrafts } from '../../shared/createDraft';
 import { makeRouter, depsFor, CLIPBOARD_CLEAR_ALARM, type SwContext } from './router';
 import { registerTestCommands } from './testCommands';
+import { CredentialCaptureStore } from '../../background/credentialCaptureStore';
 
 const vault = new Vault();
+const credentialCaptures = new CredentialCaptureStore();
 let handle: FileSystemFileHandle | null = null;
 const autolock = new AutoLock(() => doLock());
 
@@ -60,10 +62,14 @@ const onlineNow = () => (typeof navigator !== 'undefined' ? navigator.onLine : t
 // Tracks tabs with an active cert-warning badge so match-count updates don't overwrite them.
 const warnedTabs = new Set<number>();
 
-function doLock() { vault.lock(); handle = null; currentSource = null; autolock.disarm(); void clearAllDrafts(); refreshAllIcons(); }
+function doLock() {
+  vault.lock(); handle = null; currentSource = null; autolock.disarm();
+  void clearAllDrafts(); void credentialCaptures.clearAll(); refreshAllIcons();
+}
 
 const ctx: SwContext = {
   vault,
+  credentialCaptures,
   autolock,
   getHandle: () => handle,
   setHandle: h => { handle = h; },
@@ -121,6 +127,7 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
     void updateIconForTab(tabId, tab.url, vault);
   }
 });
+chrome.tabs.onRemoved.addListener(tabId => { void credentialCaptures.clearTab(tabId); });
 async function refreshAllIcons() {
   const tabs = await chrome.tabs.query({});
   for (const t of tabs) {

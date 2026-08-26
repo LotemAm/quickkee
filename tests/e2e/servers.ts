@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 
 const LOGIN_PAGE = `<!doctype html><html><body>
 <h1>Login</h1>
-<form>
+<form method="post" action="/credential-landing">
   <input id="username" name="username" type="text" autocomplete="username" />
   <input id="password" name="password" type="password" autocomplete="current-password" />
   <button type="submit">Sign in</button>
@@ -22,7 +22,7 @@ const SINGLE_STEP_PAGE = `<!doctype html><html><body>
 
 const OTP_PAGE = `<!doctype html><html><body>
 <h1>Login with authenticator</h1>
-<form>
+<form method="post" action="/credential-landing">
   <input id="username" name="username" autocomplete="username" />
   <input id="password" name="password" type="password" autocomplete="current-password" />
   <label for="otp">Authenticator code</label>
@@ -35,7 +35,7 @@ const OTP_PAGE = `<!doctype html><html><body>
 // autocomplete tokens matter to detect.ts's findCardFields — ids/names are incidental.
 const CARD_PAGE = `<!doctype html><html><body>
 <h1>Payment</h1>
-<form>
+<form method="post" action="/credential-landing">
   <input id="cc-number" name="cardnumber" autocomplete="cc-number" />
   <input id="cc-name" name="cardname" autocomplete="cc-name" />
   <input id="cc-exp" name="cardexpiry" autocomplete="cc-exp" placeholder="MM/YY" />
@@ -98,6 +98,43 @@ const STEP2_PAGE = `<!doctype html><html><body>
 </form>
 </body></html>`;
 
+const CREDENTIAL_LOGIN_PAGE = `<!doctype html><html><body>
+<h1>Account login</h1>
+<form method="post" action="/credential-landing">
+  <input id="username" name="username" autocomplete="username" />
+  <input id="password" name="password" type="password" autocomplete="current-password" />
+  <button type="submit">Sign in</button>
+</form>
+</body></html>`;
+
+const PASSWORD_CHANGE_PAGE = `<!doctype html><html><body>
+<h1>Change password</h1>
+<form method="post" action="/credential-landing">
+  <input id="username" name="username" autocomplete="username" />
+  <input id="current" name="current" type="password" autocomplete="current-password" />
+  <input id="next" name="next" type="password" autocomplete="new-password" />
+  <input id="confirm" name="confirm" type="password" autocomplete="new-password" />
+  <button type="submit">Change password</button>
+</form>
+</body></html>`;
+
+const REJECTED_LOGIN_PAGE = `<!doctype html><html><body>
+<h1>Account login</h1>
+<form id="login">
+  <input id="username" name="username" autocomplete="username" />
+  <input id="password" name="password" type="password" autocomplete="current-password" />
+  <button type="submit">Sign in</button>
+</form>
+<p id="result"></p>
+<script>
+  document.getElementById('login').addEventListener('submit', event => {
+    event.preventDefault(); document.getElementById('result').textContent = 'Credentials rejected by fixture';
+  });
+</script>
+</body></html>`;
+
+const CREDENTIAL_LANDING_PAGE = '<!doctype html><html><body><h1>Account page</h1></body></html>';
+
 export async function startHttpFixture() {
   const server = http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'text/html' });
@@ -108,6 +145,10 @@ export async function startHttpFixture() {
     else if (req.url === '/card') res.end(CARD_PAGE);
     else if (req.url === '/card-select') res.end(CARD_SELECT_PAGE);
     else if (req.url === '/card-iframe') res.end(CARD_IFRAME_PAGE);
+    else if (req.url === '/credential-login') res.end(CREDENTIAL_LOGIN_PAGE);
+    else if (req.url === '/credential-password-change') res.end(PASSWORD_CHANGE_PAGE);
+    else if (req.url === '/credential-rejected') res.end(REJECTED_LOGIN_PAGE);
+    else if (req.url === '/credential-landing') res.end(CREDENTIAL_LANDING_PAGE);
     else res.end(LOGIN_PAGE);
   });
   await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
@@ -122,6 +163,10 @@ export async function startHttpFixture() {
     cardUrl: `http://localhost:${port}/card`,
     cardSelectUrl: `http://localhost:${port}/card-select`,
     cardIframeUrl: `http://localhost:${port}/card-iframe`,
+    credentialLoginUrl: `http://localhost:${port}/credential-login`,
+    newCredentialLoginUrl: `http://127.0.0.1:${port}/credential-login`,
+    passwordChangeUrl: `http://localhost:${port}/credential-password-change`,
+    rejectedCredentialUrl: `http://localhost:${port}/credential-rejected`,
     close: () => { server.closeAllConnections(); return new Promise<void>(r => server.close(() => r())); },
   };
 }

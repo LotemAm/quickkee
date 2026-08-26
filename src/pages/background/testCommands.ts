@@ -12,6 +12,8 @@ interface TestCommandMessage {
   b64?: string;
   fileId?: string;
   name?: string;
+  username?: string;
+  password?: string;
 }
 
 /**
@@ -41,6 +43,28 @@ export function registerTestCommands(ctx: SwContext & { warnedTabs: Set<number> 
           break;
         }
         case 'warned': send({ tabs: Array.from(ctx.warnedTabs) }); break;
+        case 'credentialPrepare': {
+          const entry = ctx.vault.entriesForUrl(req.url ?? '')[0];
+          if (!entry) { send({ ok: false }); break; }
+          ctx.vault.updateEntry(entry.id, { Notes: 'keep-note', CustomField: 'keep-custom' });
+          ctx.vault.setTotpConfig(entry.id, { secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30 });
+          send({ ok: true });
+          break;
+        }
+        case 'credentialDuplicate': {
+          const source = ctx.vault.entriesForUrl(req.url ?? '')[0];
+          if (!source) { send({ ok: false }); break; }
+          ctx.vault.createEntry(ctx.vault.getTree().groupId, {
+            Title: 'Duplicate account', UserName: req.username ?? source.username,
+            Password: req.password ?? 'duplicate-pass', URL: source.url,
+          });
+          send({ ok: true });
+          break;
+        }
+        case 'credentialPending': {
+          send({ prompt: req.tabId == null || !req.url ? null : await ctx.credentialCaptures.pendingForPage(req.tabId, req.url) });
+          break;
+        }
         case 'cloudInstall': {
           // Install a fake provider holding the given base64 .kdbx as remote rev "r1".
           const fake = __makeFake(req.provider!);
