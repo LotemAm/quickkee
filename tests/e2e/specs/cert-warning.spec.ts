@@ -4,6 +4,12 @@ test('bad certificate: badge shows red ! for the offending tab', async ({ contex
   // A page to send SW test commands from.
   const probe = await openExtensionPage(context, extensionId, 'src/pages/popup/index.html');
 
+  // The service-worker fixture is discoverable before its module has necessarily finished
+  // registering listeners. The test-command listener is registered after the certificate
+  // listener, so this handshake guarantees the warning event cannot race SW startup.
+  await expect.poll(async () => (await swCmd(probe, { cmd: 'warned' }))?.tabs ?? null)
+    .toEqual([]);
+
   const site = await context.newPage();
   // Navigation to a self-signed origin fails at the cert interstitial; swallow the error.
   await site.goto(https.url).catch(() => {});

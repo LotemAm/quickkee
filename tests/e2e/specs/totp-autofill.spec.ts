@@ -99,6 +99,7 @@ test('TOTP lifecycle: create, use from every surface, then remove it', async ({ 
   await expect(popup.getByText('Authenticator code copied')).toBeVisible();
 
   // Remove only the authenticator configuration, keeping the credential entry intact.
+  await panel.getByRole('button', { name: 'TOTP settings' }).click();
   await panel.getByRole('button', { name: 'Remove TOTP' }).click();
   await panel.getByRole('button', { name: 'Apply changes' }).click();
   const saveButton = panel.getByRole('button', { name: /Save/ });
