@@ -1,5 +1,5 @@
-import fs from 'fs';
-import { resolve } from 'path';
+import fs from 'node:fs';
+import { resolve } from 'node:path';
 import type { PluginOption } from 'vite';
 
 // plugin to remove dev icons from prod build
@@ -28,7 +28,7 @@ export function crxI18n (options: { localize: boolean, src: string }): PluginOpt
     const files = fs.readdirSync(dir, {recursive: true}) as string[]
     return files.filter(file => !!file && file.endsWith('.json'))
   }
-  const entry = resolve(__dirname, options.src)
+  const entry = resolve(import.meta.dirname, options.src)
   const localeFiles = getJsonFiles(entry)
   const files = localeFiles.map(file => {
     return {

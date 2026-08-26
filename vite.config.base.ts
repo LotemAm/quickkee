@@ -1,13 +1,12 @@
 import react from '@vitejs/plugin-react';
-import { resolve } from 'path';
-import { ManifestV3Export } from '@crxjs/vite-plugin';
+import { resolve } from 'node:path';
+import type { ManifestV3Export } from '@crxjs/vite-plugin';
 import tailwindcss from "@tailwindcss/vite";
-import { defineConfig, BuildOptions } from 'vite';
-import tsconfigPaths from 'vite-tsconfig-paths'
-import { stripDevIcons, crxI18n } from './custom-vite-plugins';
-import manifest from './manifest.json';
-import devManifest from './manifest.dev.json';
-import pkg from './package.json';
+import { defineConfig, type BuildOptions } from 'vite';
+import { stripDevIcons, crxI18n } from './custom-vite-plugins.ts';
+import manifest from './manifest.json' with { type: 'json' };
+import devManifest from './manifest.dev.json' with { type: 'json' };
+import pkg from './package.json' with { type: 'json' };
 
 
 const isDev = process.env.__DEV__ === 'true';
@@ -33,10 +32,12 @@ export const baseBuildOptions: BuildOptions = {
 export default defineConfig({
   plugins: [
     tailwindcss(),
-    tsconfigPaths(),
     react(),
     stripDevIcons(isDev),
     crxI18n({ localize, src: './src/locales' }),
   ],
-  publicDir: resolve(__dirname, 'public'),
+  resolve: {
+    tsconfigPaths: true,
+  },
+  publicDir: resolve(import.meta.dirname, 'public'),
 });
