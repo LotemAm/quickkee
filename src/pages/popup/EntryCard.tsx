@@ -14,6 +14,7 @@ export function EntryCard({ entry, tabId, onCopy, groupName }: {
 }) {
   const [open, setOpen] = useState(false);
   const [showTotp, setShowTotp] = useState(false);
+  const hasFields = entry.expires != null || entry.fields.length > 0;
   return (
     <div className="card mb-2">
       <div className="flex justify-between items-start gap-2">
@@ -24,9 +25,15 @@ export function EntryCard({ entry, tabId, onCopy, groupName }: {
           </div>
           <div className="text-sm truncate" style={{ color: 'var(--text-muted)' }}>{entry.isCard ? maskCardNumber(entry.username) : entry.username}</div>
         </div>
-        <div className="flex flex-col items-end gap-1 shrink-0">
-          {entry.expired && <span className="badge-danger badge">EXPIRED</span>}
-          {groupName && <span className="badge max-w-[120px]"><span className="truncate">{groupName}</span></span>}
+        <div className="flex items-start gap-1 shrink-0">
+          <div className="flex flex-col items-end gap-1">
+            {entry.expired && <span className="badge-danger badge">EXPIRED</span>}
+            {groupName && <span className="badge max-w-[120px]"><span className="truncate">{groupName}</span></span>}
+          </div>
+          <button className="icon-btn-xs" aria-label="Open in sidebar" title="Open in sidebar"
+            onClick={() => { requestOpenEntry(entry.id); chrome.sidePanel.open({ tabId }); }}>
+            <PanelRight size={12} />
+          </button>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-1.5 mt-2">
@@ -44,16 +51,14 @@ export function EntryCard({ entry, tabId, onCopy, groupName }: {
             <KeyRound size={12} /> Code
           </button>
         )}
-        <button className="btn-xs" aria-label="Toggle fields" onClick={() => setOpen(o => !o)}>
-          {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />} Fields
-        </button>
-        <button className="icon-btn-xs ml-auto" aria-label="Open in sidebar" title="Open in sidebar"
-          onClick={() => { requestOpenEntry(entry.id); chrome.sidePanel.open({ tabId }); }}>
-          <PanelRight size={12} />
-        </button>
+        {hasFields && (
+          <button className="btn-xs" aria-label="Toggle fields" onClick={() => setOpen(o => !o)}>
+            {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />} Fields
+          </button>
+        )}
       </div>
       {showTotp && entry.hasTotp && <div className="mt-2"><TotpCodeDisplay entryId={entry.id} onCopy={onCopy} /></div>}
-      {open && <div className="mt-2 space-y-1">
+      {open && hasFields && <div className="mt-2 space-y-1">
         {entry.expires != null && (
           <div className="flex justify-between items-center text-sm">
             <span style={{ color: 'var(--text-muted)' }}>Expires</span>
