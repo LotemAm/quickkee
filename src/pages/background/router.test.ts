@@ -14,6 +14,7 @@ import { AutoLock } from '../../background/autolock';
 import { makeRouter, type SwContext } from './router';
 import type { DbSource } from '../../shared/dbSource';
 import { CARD_FLAG_KEY, CARDHOLDER_NAME_KEY } from '../../shared/entry';
+import { CredentialCaptureStore } from '../../background/credentialCaptureStore';
 
 // Keep mock factories free of outer-scope references — vi.mock is hoisted above imports
 // and above local `const`/`let` declarations, so factories may only build fresh vi.fn()s.
@@ -30,10 +31,15 @@ vi.mock('../../background/cache', () => ({
   getCache: vi.fn(),
   cacheKey: (provider: string, fileId: string) => `${provider}:${fileId}`,
 }));
+vi.mock('../../background/sync', () => ({
+  openCloud: vi.fn(),
+  saveCloud: vi.fn(),
+}));
 
 import { loadHandle, ensurePermission, readBytes, writeBytes } from '../../background/fileHandle';
 import { loadSettings } from '../../shared/settings';
 import { getCache, type CacheRecord } from '../../background/cache';
+import { saveCloud } from '../../background/sync';
 import type { CloudFileSource } from '../../shared/dbSource';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -51,14 +57,16 @@ function fakeHandle(name = 'vault.kdbx'): FileSystemFileHandle {
   return { name } as unknown as FileSystemFileHandle;
 }
 
-const DEFAULT_SETTINGS_STUB = { autoCloseHours: 8, clipboardClearSeconds: 30, pwgen: { length: 20, lower: true, upper: true, digits: true, symbols: true }, theme: 'system' as const };
+const DEFAULT_SETTINGS_STUB = { autoCloseHours: 8, clipboardClearSeconds: 30, pwgen: { length: 20, lower: true, upper: true, digits: true, symbols: true }, theme: 'system' as const, offerToSaveCredentials: true };
 
 /** Fresh router + context for each test, mirroring index.ts's module-level wiring. */
 function makeCtx() {
   let handle: FileSystemFileHandle | null = null;
   let currentSource: DbSource | null = null;
   const vault = new Vault();
-  const doLock = vi.fn(() => { vault.lock(); handle = null; currentSource = null; autolock.disarm(); });
+  let captureNumber = 0;
+  const credentialCaptures = new CredentialCaptureStore({ storage: null, randomId: () => `capture-${++captureNumber}` });
+  const doLock = vi.fn(() => { vault.lock(); handle = null; currentSource = null; autolock.disarm(); void credentialCaptures.clearAll(); });
   const autolock = new AutoLock(() => doLock());
   const refreshAllIcons = vi.fn();
   const persistPendingClipboardHash = vi.fn(async () => {});
@@ -66,6 +74,7 @@ function makeCtx() {
 
   const ctx: SwContext = {
     vault,
+    credentialCaptures,
     autolock,
     getHandle: () => handle,
     setHandle: h => { handle = h; },
@@ -94,6 +103,20 @@ beforeEach(() => {
   chromeMock = { tabs: { get: vi.fn(), sendMessage: vi.fn() }, alarms: { create: vi.fn(), clear: vi.fn() } };
   vi.stubGlobal('chrome', chromeMock);
 });
+
+function contentSender(url = 'https://github.com/login', tabId = 7, frameId = 0): chrome.runtime.MessageSender {
+  return { url, frameId, tab: { id: tabId, url } } as chrome.runtime.MessageSender;
+}
+
+async function stageAndGetPrompt(
+  handle_: ReturnType<typeof makeRouter>,
+  candidate: { username: string; password: string; kind?: 'login' | 'password-change' },
+) {
+  const sender = contentSender();
+  const staged = await handle_({ type: 'stageCredentialCapture', kind: candidate.kind ?? 'login', username: candidate.username, password: candidate.password }, sender);
+  const prompt = await handle_({ type: 'getPendingCredentialPrompt' }, contentSender('https://github.com/account'));
+  return { staged, prompt };
+}
 
 describe('getStatus', () => {
   test('while locked reports locked:true, dirty:false', async () => {
@@ -464,5 +487,136 @@ describe('getSyncStatus', () => {
     // The cache lookup was keyed off the pre-await (dropbox) source, but the `provider`
     // in the final response must reflect the post-await (gdrive) live state.
     expect(res).toEqual({ ok: true, source: 'cloud', provider: 'gdrive', pendingUpload: true, online: true, lastSyncedAt: 111 });
+  });
+});
+
+describe('credential capture', () => {
+  test('requires an unlocked vault, enabled setting, top frame, and HTTP(S) sender provenance', async () => {
+    const { handle_ } = makeCtx();
+    const request = { type: 'stageCredentialCapture' as const, username: 'octocat', password: 'new-secret', kind: 'login' as const };
+    expect(await handle_(request, contentSender())).toEqual({ ok: false, error: 'locked' });
+
+    await unlockHappyPath(handle_);
+    vi.mocked(loadSettings).mockResolvedValue({ ...DEFAULT_SETTINGS_STUB, offerToSaveCredentials: false });
+    expect(await handle_(request, contentSender())).toEqual({ ok: true, staged: false });
+
+    vi.mocked(loadSettings).mockResolvedValue(DEFAULT_SETTINGS_STUB);
+    expect(await handle_(request, contentSender('https://github.com/login', 7, 2))).toEqual({ ok: false, error: 'forbidden' });
+    expect(await handle_(request, { ...contentSender(), url: 'chrome-extension://quickkee/page.html' })).toEqual({ ok: false, error: 'forbidden' });
+    expect(await handle_(request, contentSender())).toEqual({ ok: true, staged: true });
+  });
+
+  test('does not stage after a concurrent vault lock while settings are loading', async () => {
+    const { handle_, doLock } = makeCtx();
+    await unlockHappyPath(handle_);
+    let resolveSettings!: (settings: typeof DEFAULT_SETTINGS_STUB) => void;
+    vi.mocked(loadSettings).mockImplementationOnce(() => new Promise(resolve => { resolveSettings = resolve; }));
+    const pending = handle_({ type: 'stageCredentialCapture', username: 'octocat', password: 'new-secret', kind: 'login' }, contentSender());
+    await vi.waitFor(() => expect(loadSettings).toHaveBeenCalledTimes(2));
+    doLock();
+    resolveSettings(DEFAULT_SETTINGS_STUB);
+    expect(await pending).toEqual({ ok: false, error: 'locked' });
+  });
+
+  test('suppresses identical credentials and classifies update, create, and ambiguous matches', async () => {
+    const { ctx, handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    const existing = ctx.vault.entriesForUrl('https://github.com')[0];
+
+    const identical = await stageAndGetPrompt(handle_, { username: existing.username, password: existing.password });
+    expect(identical.prompt).toEqual({ ok: true, prompt: null });
+
+    const update = await stageAndGetPrompt(handle_, { username: existing.username.toUpperCase(), password: 'changed-secret' });
+    expect(update.prompt).toMatchObject({ ok: true, prompt: {
+      suggestedAction: 'update', entries: [{ id: existing.id, title: existing.title, username: existing.username }],
+    } });
+
+    const create = await stageAndGetPrompt(handle_, { username: 'brand-new-user', password: 'new-secret' });
+    expect(create.prompt).toMatchObject({ ok: true, prompt: { suggestedAction: 'save', entries: [] } });
+
+    ctx.vault.createEntry(ctx.vault.getTree().groupId, {
+      Title: 'Duplicate GitHub', UserName: existing.username, Password: 'other-secret', URL: 'https://github.com/',
+    });
+    const ambiguous = await stageAndGetPrompt(handle_, { username: existing.username, password: 'third-secret' });
+    expect(ambiguous.prompt).toMatchObject({ ok: true, prompt: { suggestedAction: 'choose' } });
+    expect((ambiguous.prompt as { ok: true; prompt: { entries: unknown[] } }).prompt.entries).toHaveLength(2);
+  });
+
+  test('an empty username updates only a sole match and requires a choice when several exist', async () => {
+    const { ctx, handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    const sole = await stageAndGetPrompt(handle_, { username: '', password: 'changed-secret' });
+    expect(sole.prompt).toMatchObject({ ok: true, prompt: { suggestedAction: 'update' } });
+
+    ctx.vault.createEntry(ctx.vault.getTree().groupId, {
+      Title: 'Another GitHub', UserName: 'another-user', Password: 'other-secret', URL: 'https://github.com/',
+    });
+    const multiple = await stageAndGetPrompt(handle_, { username: '', password: 'third-secret' });
+    expect(multiple.prompt).toMatchObject({ ok: true, prompt: { suggestedAction: 'choose' } });
+  });
+
+  test('updates only submitted credential fields, persists, and preserves unrelated entry data', async () => {
+    const { ctx, handle_, refreshAllIcons } = makeCtx();
+    await unlockHappyPath(handle_);
+    const existing = ctx.vault.entriesForUrl('https://github.com')[0];
+    const expiry = new Date(2032, 0, 1).getTime();
+    ctx.vault.updateEntry(existing.id, { CustomField: 'keep-me' }, expiry);
+    ctx.vault.setTotpConfig(existing.id, { secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30 });
+    vi.mocked(writeBytes).mockResolvedValue(undefined);
+
+    const { prompt } = await stageAndGetPrompt(handle_, { username: existing.username.toUpperCase(), password: 'changed-secret' });
+    const captureId = (prompt as { ok: true; prompt: { captureId: string } }).prompt.captureId;
+    expect(await handle_({ type: 'commitCredentialCapture', captureId }, contentSender('https://github.com/account'))).toEqual({ ok: true });
+
+    const updated = ctx.vault.getEntry(existing.id)!;
+    expect(updated).toMatchObject({
+      id: existing.id, title: existing.title, username: existing.username.toUpperCase(),
+      password: 'changed-secret', url: 'https://github.com/', expires: expiry, hasTotp: true,
+    });
+    expect(updated.fields).toContainEqual({ key: 'CustomField', value: 'keep-me', protected: false });
+    expect(writeBytes).toHaveBeenCalledOnce();
+    expect(refreshAllIcons).toHaveBeenCalled();
+  });
+
+  test('a local save failure keeps an idempotent create retry without duplicating the entry', async () => {
+    const { ctx, handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    const { prompt } = await stageAndGetPrompt(handle_, { username: 'retry-user', password: 'new-secret' });
+    const captureId = (prompt as { ok: true; prompt: { captureId: string } }).prompt.captureId;
+    const commit = { type: 'commitCredentialCapture' as const, captureId };
+    const sender = contentSender('https://github.com/account');
+
+    vi.mocked(writeBytes).mockRejectedValueOnce(new Error('disk full'));
+    expect(await handle_(commit, sender)).toEqual({ ok: false, error: 'saveFailed' });
+    expect(ctx.vault.entriesForUrl('https://github.com').filter(entry => entry.username === 'retry-user')).toHaveLength(1);
+
+    vi.mocked(writeBytes).mockResolvedValueOnce(undefined);
+    expect(await handle_(commit, sender)).toEqual({ ok: true });
+    expect(ctx.vault.entriesForUrl('https://github.com').filter(entry => entry.username === 'retry-user')).toHaveLength(1);
+    expect(await handle_({ type: 'getPendingCredentialPrompt' }, sender)).toEqual({ ok: true, prompt: null });
+  });
+
+  test('a cloud save failure uses the same retained mutation and duplicate-free retry path', async () => {
+    const { ctx, handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    ctx.setCurrentSource({ kind: 'cloud', provider: 'dropbox', fileId: 'vault', basedOnRev: 'r1' });
+    const { prompt } = await stageAndGetPrompt(handle_, { username: 'cloud-retry-user', password: 'new-secret' });
+    const captureId = (prompt as { ok: true; prompt: { captureId: string } }).prompt.captureId;
+    const sender = contentSender('https://github.com/account');
+
+    vi.mocked(saveCloud).mockRejectedValueOnce(new Error('offline'));
+    expect(await handle_({ type: 'commitCredentialCapture', captureId }, sender)).toEqual({ ok: false, error: 'saveFailed' });
+    vi.mocked(saveCloud).mockResolvedValueOnce({ basedOnRev: 'r2', merged: false, pendingUpload: false });
+    expect(await handle_({ type: 'commitCredentialCapture', captureId }, sender)).toEqual({ ok: true });
+    expect(ctx.vault.entriesForUrl('https://github.com').filter(entry => entry.username === 'cloud-retry-user')).toHaveLength(1);
+  });
+
+  test('rejects commit and dismissal from a different tab or bound origin', async () => {
+    const { handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    const { prompt } = await stageAndGetPrompt(handle_, { username: 'new-user', password: 'new-secret' });
+    const captureId = (prompt as { ok: true; prompt: { captureId: string } }).prompt.captureId;
+    expect(await handle_({ type: 'commitCredentialCapture', captureId }, contentSender('https://evil.test/', 7))).toEqual({ ok: false, error: 'forbidden' });
+    expect(await handle_({ type: 'dismissCredentialCapture', captureId }, contentSender('https://github.com/account', 8))).toEqual({ ok: false, error: 'forbidden' });
   });
 });

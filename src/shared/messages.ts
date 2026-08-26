@@ -4,6 +4,22 @@ import type { RemoteFile } from '../background/sources/cloudProvider';
 import type { DbSource } from './dbSource';
 import type { TotpConfig, TotpCode } from '../background/totp';
 
+export interface CredentialPromptEntry {
+  id: string;
+  title: string;
+  username: string;
+}
+
+export interface CredentialPromptMetadata {
+  captureId: string;
+  site: string;
+  username: string;
+  kind: 'login' | 'password-change';
+  suggestedAction: 'save' | 'update' | 'choose';
+  entries: CredentialPromptEntry[];
+  retry?: boolean;
+}
+
 export type Request =
   | { type: 'unlock'; password: string | null; keyFile: number[] | null }
   | { type: 'lock' }
@@ -35,7 +51,11 @@ export type Request =
   | { type: 'getSyncStatus' }
   | { type: 'disconnectCloud'; provider: 'dropbox' | 'gdrive' }
   | { type: 'scheduleClipboardClear'; textHash: string; seconds: number }
-  | { type: 'cancelClipboardClear' };
+  | { type: 'cancelClipboardClear' }
+  | { type: 'stageCredentialCapture'; username: string; password: string; kind: 'login' | 'password-change' }
+  | { type: 'getPendingCredentialPrompt' }
+  | { type: 'commitCredentialCapture'; captureId: string; entryId?: string; saveAsNew?: boolean }
+  | { type: 'dismissCredentialCapture'; captureId: string };
 
 // Intentional: `{}` (not `Record<string, never>`) is required so bare `Ok` is excluded from
 // `'prop' in r` narrowing on the `Response` union below; an index-signature type would keep
@@ -65,6 +85,10 @@ type OkFor = {
   previewTotp: Ok<TotpCode>;
   scheduleClipboardClear: Ok;
   cancelClipboardClear: Ok;
+  stageCredentialCapture: Ok<{ staged: boolean }>;
+  getPendingCredentialPrompt: Ok<{ prompt: CredentialPromptMetadata | null }>;
+  commitCredentialCapture: Ok;
+  dismissCredentialCapture: Ok;
   getStatus: Ok<{ locked: boolean; dbName?: string; dirty: boolean }>;
   getEntriesForUrl: Ok<{ entries: EntryView[] }>;
   getEntrySummariesForUrl: Ok<{ summaries: EntrySummary[] }>;

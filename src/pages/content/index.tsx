@@ -6,8 +6,41 @@ import { showPopup, hidePopup } from '../../content/inlinePopup';
 import { sendToSW } from '../../shared/messages';
 import { maskCardNumber } from '../../shared/cardMask';
 import { CARDHOLDER_NAME_KEY } from '../../shared/entry';
+import { extractCredentialCandidate, SubmitGestureTracker } from '../../content/credentialCapture';
+import { CredentialPrompt } from '../../content/credentialPrompt';
 
 let filling = false;
+const credentialPrompt = new CredentialPrompt();
+const submitGestures = new SubmitGestureTracker();
+
+function eligibleTopPage(): boolean {
+  return window.top === window && (location.protocol === 'http:' || location.protocol === 'https:');
+}
+
+async function showPendingCredentialPrompt(): Promise<void> {
+  if (!eligibleTopPage() || credentialPrompt.isVisible()) return;
+  const response = await sendToSW({ type: 'getPendingCredentialPrompt' });
+  if (!response.ok || !response.prompt) return;
+  hidePopup();
+  credentialPrompt.show(response.prompt, {
+    commit: async request => (await sendToSW({ type: 'commitCredentialCapture', ...request })).ok,
+    dismiss: async captureId => { await sendToSW({ type: 'dismissCredentialCapture', captureId }); },
+  });
+}
+
+if (eligibleTopPage()) {
+  document.addEventListener('pointerdown', event => submitGestures.record(event), true);
+  document.addEventListener('keydown', event => submitGestures.record(event), true);
+  document.addEventListener('submit', event => {
+    if (filling || !(event.target instanceof HTMLFormElement) || !submitGestures.consume(event.target)) return;
+    const candidate = extractCredentialCandidate(event.target);
+    if (!candidate) return;
+    void sendToSW({ type: 'stageCredentialCapture', ...candidate }).then(response => {
+      if (response.ok && response.staged) setTimeout(() => void showPendingCredentialPrompt(), 300);
+    });
+  }, true);
+  for (const delay of [0, 500, 1_500]) setTimeout(() => void showPendingCredentialPrompt(), delay);
+}
 
 function fillAndHide(fields: ReturnType<typeof findLoginFields>, username: string, password: string, totp?: string): void {
   filling = true;
@@ -44,6 +77,7 @@ let hideTimer: ReturnType<typeof setTimeout> | null = null;
 document.addEventListener('focusin', ev => {
   if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
   if (filling) return;
+  if (credentialPrompt.isVisible()) return;
   const el = ev.target;
   if (!(el instanceof HTMLInputElement)) return;
 
