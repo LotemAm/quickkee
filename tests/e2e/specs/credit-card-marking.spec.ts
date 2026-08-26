@@ -1,4 +1,4 @@
-import { test, expect, openExtensionPage, installDb, reReadKdbx } from '../helpers';
+import { test, expect, openExtensionPage, openEntryEditorMore, installDb, reReadKdbx } from '../helpers';
 import kdbxweb from 'kdbxweb';
 
 function findEntry(db: kdbxweb.Kdbx, title: string): kdbxweb.KdbxEntry | undefined {
@@ -28,6 +28,7 @@ test('panel: mark an entry as credit card data, save, and verify persisted field
   await expect(panel.getByText('URL')).toBeVisible();
   await expect(panel.getByLabel('Password rules')).toBeVisible();
 
+  await openEntryEditorMore(panel);
   await panel.getByLabel('Mark as credit card data').check();
 
   // Relabeled; URL and the password-rules button are hidden; Cardholder Name appears.
@@ -87,6 +88,7 @@ test('clearing Cardholder Name and saving removes the Additional Field', async (
   await panel.getByRole('button', { name: 'Localhost Login' }).click();
   await panel.getByRole('button', { name: 'Apply changes' }).waitFor();
 
+  await openEntryEditorMore(panel);
   await panel.getByLabel('Mark as credit card data').check();
   await panel.getByLabel('Cardholder Name').fill('Jane Doe');
   await panel.getByRole('button', { name: 'Apply changes' }).click();
