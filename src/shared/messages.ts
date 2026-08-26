@@ -2,6 +2,7 @@ import type { EntryView, EntrySummary, TreeNode } from './entry';
 import type { PwGenOpts } from './pwgen';
 import type { RemoteFile } from '../background/sources/cloudProvider';
 import type { DbSource } from './dbSource';
+import type { TotpConfig, TotpCode } from '../background/totp';
 
 export type Request =
   | { type: 'unlock'; password: string | null; keyFile: number[] | null }
@@ -11,9 +12,12 @@ export type Request =
   | { type: 'getEntrySummariesForUrl'; url: string }
   | { type: 'getCardEntrySummariesForUrl'; url: string }
   | { type: 'getEntry'; entryId: string }
+  | { type: 'getTotpConfig'; entryId: string }
+  | { type: 'getTotpCode'; entryId: string }
+  | { type: 'previewTotp'; config: TotpConfig }
   | { type: 'getTree' }
-  | { type: 'createEntry'; groupId: string; fields: Record<string, string> }
-  | { type: 'updateEntry'; entryId: string; fields: Record<string, string>; expires?: number | null; removeKeys?: string[] }
+  | { type: 'createEntry'; groupId: string; fields: Record<string, string>; totp?: TotpConfig }
+  | { type: 'updateEntry'; entryId: string; fields: Record<string, string>; expires?: number | null; removeKeys?: string[]; totp?: TotpConfig | null }
   | { type: 'updateGroup'; groupId: string; fields: Record<string, string> }
   | { type: 'createGroup'; parentId: string; name: string }
   | { type: 'deleteGroup'; groupId: string }
@@ -24,6 +28,7 @@ export type Request =
   | { type: 'save' }
   | { type: 'generatePassword'; opts?: PwGenOpts }
   | { type: 'fillRequest'; entryId: string; tabId: number }
+  | { type: 'fillTotpRequest'; entryId: string }
   | { type: 'connectCloud'; provider: 'dropbox' | 'gdrive' }
   | { type: 'listRemoteFiles'; provider: 'dropbox' | 'gdrive' }
   | { type: 'openRemote'; provider: 'dropbox' | 'gdrive'; fileId: string; fileName: string; password: string | null; keyFile: number[] | null }
@@ -54,6 +59,10 @@ type OkFor = {
   connectCloud: Ok;
   disconnectCloud: Ok;
   fillRequest: Ok;
+  fillTotpRequest: Ok;
+  getTotpConfig: Ok<{ config: TotpConfig | null }>;
+  getTotpCode: Ok<TotpCode>;
+  previewTotp: Ok<TotpCode>;
   scheduleClipboardClear: Ok;
   cancelClipboardClear: Ok;
   getStatus: Ok<{ locked: boolean; dbName?: string; dirty: boolean }>;

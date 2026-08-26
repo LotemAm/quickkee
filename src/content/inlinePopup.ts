@@ -2,7 +2,8 @@ import type { EntrySummary } from '../shared/entry';
 import { loadSettings } from '../shared/settings';
 import tailwindCss from '../assets/styles/tailwind.css?raw';
 
-type EntryStub = Pick<EntrySummary, 'id' | 'title' | 'username'>;
+type EntryStub = Pick<EntrySummary, 'id' | 'title' | 'username'>
+  & Partial<Pick<EntrySummary, 'hasTotp' | 'totpPeriod'>>;
 type Palette = { bg: string; border: string; text: string; muted: string; hover: string; shadow: string };
 
 // CSS custom properties on the extension's own document don't reach a shadow
@@ -40,6 +41,21 @@ let currentField: HTMLElement | null = null;
 let currentOnSelect: ((e: EntryStub) => void) | null = null;
 let keydownBound = false;
 let dark = false;
+let progressTimer: ReturnType<typeof setInterval> | null = null;
+
+function updateProgressBars(): void {
+  const shadow = host?.shadowRoot;
+  if (!shadow) return;
+  shadow.querySelectorAll<HTMLElement>('.bar[data-period]').forEach(bar => {
+    const period = Number(bar.dataset.period);
+    if (!period) return;
+    const periodMs = period * 1000;
+    const remainingMs = periodMs - (Date.now() % periodMs);
+    bar.setAttribute('aria-valuenow', String(Math.max(1, Math.ceil(remainingMs / 1000))));
+    const fill = bar.firstElementChild as HTMLElement | null;
+    if (fill) fill.style.width = `${(remainingMs / periodMs) * 100}%`;
+  });
+}
 
 void loadSettings().then(s => {
   dark = s.theme === 'dark' || (s.theme === 'system'
@@ -74,6 +90,8 @@ function render(shadow: ShadowRoot): void {
     .e:hover,.e.active{background:${c.hover}}
     .t{font-weight:500}
     .u{font-size:11px;color:${c.muted};margin-top:1px}
+    .bar{height:3px;margin-top:5px;background:${c.hover};border-radius:999px;overflow:hidden}
+    .bar>span{display:block;height:100%;background:${c.text};border-radius:999px}
   `;
 
   const panel = document.createElement('div');
@@ -98,6 +116,21 @@ function render(shadow: ShadowRoot): void {
 
     row.appendChild(title);
     row.appendChild(username);
+    if (e.hasTotp && e.totpPeriod) {
+      const periodMs = e.totpPeriod * 1000;
+      const remainingMs = periodMs - (Date.now() % periodMs);
+      const bar = document.createElement('div');
+      bar.className = 'bar';
+      bar.setAttribute('role', 'progressbar');
+      bar.setAttribute('aria-label', 'TOTP time remaining');
+      bar.setAttribute('aria-valuemin', '0');
+      bar.setAttribute('aria-valuemax', String(e.totpPeriod));
+      bar.setAttribute('aria-valuenow', String(Math.max(1, Math.ceil(remainingMs / 1000))));
+      bar.dataset.period = String(e.totpPeriod);
+      const fill = document.createElement('span');
+      fill.style.width = `${(remainingMs / periodMs) * 100}%`;
+      bar.appendChild(fill); row.appendChild(bar);
+    }
     row.addEventListener('mousedown', ev => { ev.preventDefault(); select(i); });
 
     panel.appendChild(row);
@@ -148,9 +181,15 @@ export function showPopup(field: HTMLElement, entries: EntryStub[], onSelect: (e
   activeIndex = 0;
   render(shadow);
 
+  if (progressTimer) clearInterval(progressTimer);
+  progressTimer = entries.some(entry => entry.hasTotp && entry.totpPeriod)
+    ? setInterval(updateProgressBars, 250)
+    : null;
+
   if (!keydownBound) { document.addEventListener('keydown', onKeydown, true); keydownBound = true; }
 }
 
 export function hidePopup(): void {
   if (host) host.style.display = 'none';
+  if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
 }

@@ -20,6 +20,17 @@ const SINGLE_STEP_PAGE = `<!doctype html><html><body>
 </form>
 </body></html>`;
 
+const OTP_PAGE = `<!doctype html><html><body>
+<h1>Login with authenticator</h1>
+<form>
+  <input id="username" name="username" autocomplete="username" />
+  <input id="password" name="password" type="password" autocomplete="current-password" />
+  <label for="otp">Authenticator code</label>
+  <input id="otp" name="otp" autocomplete="one-time-code" inputmode="numeric" maxlength="6" />
+  <button type="submit">Sign in</button>
+</form>
+</body></html>`;
+
 // Standard-autocomplete-tagged card form fixture (plan: card-form autofill). Only the
 // autocomplete tokens matter to detect.ts's findCardFields — ids/names are incidental.
 const CARD_PAGE = `<!doctype html><html><body>
@@ -91,6 +102,7 @@ export async function startHttpFixture() {
   const server = http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'text/html' });
     if (req.url === '/single') res.end(SINGLE_STEP_PAGE);
+    else if (req.url === '/otp') res.end(OTP_PAGE);
     else if (req.url === '/step1') res.end(STEP1_PAGE);
     else if (req.url?.startsWith('/step2')) res.end(STEP2_PAGE);
     else if (req.url === '/card') res.end(CARD_PAGE);
@@ -105,6 +117,7 @@ export async function startHttpFixture() {
     url: `http://localhost:${port}/`,
     altUrl: `http://127.0.0.1:${port}/`,
     singleUrl: `http://localhost:${port}/single`,
+    otpUrl: `http://localhost:${port}/otp`,
     step1Url: `http://localhost:${port}/step1`,
     cardUrl: `http://localhost:${port}/card`,
     cardSelectUrl: `http://localhost:${port}/card-select`,

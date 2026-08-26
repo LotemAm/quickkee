@@ -209,6 +209,23 @@ describe('fillRequest', () => {
     expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(7, { type: 'fill', username: entry.username, password: entry.password });
   });
 
+  test('entry with TOTP includes a freshly generated code in the fill payload', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(59_999);
+    try {
+      const { ctx, handle_ } = makeCtx();
+      await unlockHappyPath(handle_);
+      const entry = ctx.vault.entriesForUrl('https://github.com')[0];
+      ctx.vault.setTotpConfig(entry.id, {
+        secret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', algorithm: 'SHA1', digits: 8, period: 30,
+      });
+      chromeMock.tabs.get.mockResolvedValue({ url: 'https://github.com/login' });
+      expect(await handle_({ type: 'fillRequest', entryId: entry.id, tabId: 7 })).toEqual({ ok: true });
+      expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(7, {
+        type: 'fill', username: entry.username, password: entry.password, totp: '94287082',
+      });
+    } finally { vi.useRealTimers(); }
+  });
+
   test('mismatching tab URL -> urlMismatch and sendMessage NOT called (plan 003)', async () => {
     const { ctx, handle_ } = makeCtx();
     await unlockHappyPath(handle_);
@@ -242,6 +259,81 @@ describe('fillRequest', () => {
 
     await handle_({ type: 'fillRequest', entryId, tabId: 7 });
     expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(7, expect.objectContaining({ type: 'fillCard', cardholderName: '' }));
+  });
+});
+
+describe('TOTP requests', () => {
+  const panelSender = { url: 'chrome-extension://quickkee/src/pages/panel/index.html' } as chrome.runtime.MessageSender;
+  const popupSender = { url: 'chrome-extension://quickkee/src/pages/popup/index.html' } as chrome.runtime.MessageSender;
+  const contentSender = {
+    url: 'https://github.com/login', frameId: 3,
+    tab: { id: 7, url: 'https://github.com/login' },
+  } as chrome.runtime.MessageSender;
+
+  test('setup config is available to the panel but not a content script', async () => {
+    const { ctx, handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    const id = ctx.vault.entriesForUrl('https://github.com')[0].id;
+    ctx.vault.setTotpConfig(id, { secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30 });
+
+    expect(await handle_({ type: 'getTotpConfig', entryId: id }, contentSender)).toEqual({ ok: false, error: 'forbidden' });
+    expect(await handle_({ type: 'getTotpConfig', entryId: id }, panelSender)).toMatchObject({
+      ok: true, config: { secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30 },
+    });
+  });
+
+  test('setup config is available when the panel is hosted in an extension tab', async () => {
+    const { ctx, handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    const id = ctx.vault.entriesForUrl('https://github.com')[0].id;
+    ctx.vault.setTotpConfig(id, { secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30 });
+    const panelTabSender = {
+      ...panelSender,
+      tab: { id: 9, url: panelSender.url },
+    } as chrome.runtime.MessageSender;
+
+    expect(await handle_({ type: 'getTotpConfig', entryId: id }, panelTabSender)).toMatchObject({
+      ok: true, config: { secret: 'JBSWY3DPEHPK3PXP' },
+    });
+  });
+
+  test('manual code request returns only the current short-lived code', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(59_000);
+    try {
+      const { ctx, handle_ } = makeCtx();
+      await unlockHappyPath(handle_);
+      const id = ctx.vault.entriesForUrl('https://github.com')[0].id;
+      ctx.vault.setTotpConfig(id, {
+        secret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', algorithm: 'SHA1', digits: 8, period: 30,
+      });
+      expect(await handle_({ type: 'getTotpCode', entryId: id }, popupSender)).toEqual({
+        ok: true, code: '94287082', period: 30, expiresAt: 60_000,
+      });
+    } finally { vi.useRealTimers(); }
+  });
+
+  test('inline fill uses the current code immediately and targets the sender frame', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(59_999);
+    try {
+      const { ctx, handle_ } = makeCtx();
+      await unlockHappyPath(handle_);
+      const id = ctx.vault.entriesForUrl('https://github.com')[0].id;
+      ctx.vault.setTotpConfig(id, {
+        secret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', algorithm: 'SHA1', digits: 8, period: 30,
+      });
+      expect(await handle_({ type: 'fillTotpRequest', entryId: id }, contentSender)).toEqual({ ok: true });
+      expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(7, { type: 'fillTotp', code: '94287082' }, { frameId: 3 });
+    } finally { vi.useRealTimers(); }
+  });
+
+  test('inline fill rejects a sender URL that does not match the entry', async () => {
+    const { ctx, handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    const id = ctx.vault.entriesForUrl('https://github.com')[0].id;
+    ctx.vault.setTotpConfig(id, { secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30 });
+    const evil = { ...contentSender, url: 'https://evil.example.com', tab: { id: 7, url: 'https://evil.example.com' } } as chrome.runtime.MessageSender;
+    expect(await handle_({ type: 'fillTotpRequest', entryId: id }, evil)).toEqual({ ok: false, error: 'urlMismatch' });
+    expect(chromeMock.tabs.sendMessage).not.toHaveBeenCalled();
   });
 });
 

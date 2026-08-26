@@ -76,3 +76,14 @@ test('escape hides the popup', async () => {
 
   expect(host.style.display).toBe('none');
 });
+
+test('TOTP entries show an accessible live period bar', async () => {
+  const { showPopup } = await freshModule();
+  const field = document.getElementById('f') as HTMLElement;
+  showPopup(field, [{ id: '1', title: 'GitHub', username: 'octocat', hasTotp: true, totpPeriod: 30 }], vi.fn());
+
+  const bar = getHost().shadowRoot!.querySelector('[role="progressbar"]')!;
+  expect(bar).not.toBeNull();
+  expect(bar.getAttribute('aria-label')).toBe('TOTP time remaining');
+  expect(Number(bar.getAttribute('aria-valuenow'))).toBeGreaterThan(0);
+});

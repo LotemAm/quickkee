@@ -8,6 +8,8 @@ import { ClipboardBar } from '../../shared/ClipboardBar';
 import { PasswordRulesPanel } from '../../shared/PasswordRulesPanel';
 import { arrayBufferToBase64, formatBytes } from '../../shared/bytes';
 import { downloadAttachment } from '../../shared/attachments';
+import { TotpSetup } from '../../shared/TotpSetup';
+import type { TotpConfig } from '../../background/totp';
 
 // epoch ms -> 'YYYY-MM-DDTHH:mm' (local) for <input type="datetime-local">
 const toLocalInput = (ms: number) => {
@@ -19,7 +21,7 @@ const toLocalInput = (ms: number) => {
 const BLANK_ENTRY: EntryView = {
   id: '', title: '', username: '', url: '', password: '',
   fields: [], expired: false, created: null, expires: null, isCard: false,
-  attachments: [],
+  hasTotp: false, totpPeriod: null, attachments: [],
 };
 
 export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onCreated, onDeleted }: { entryId: string | null; groupId?: string; clearSecs: number; pwgen: PwGenOpts; onChanged: () => void; onCreated?: (entryId: string) => void; onDeleted: () => void }) {
@@ -38,6 +40,9 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
   const [cardholderName, setCardholderName] = useState('');
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
   const [attachError, setAttachError] = useState('');
+  const [initialTotp, setInitialTotp] = useState<TotpConfig | null>(null);
+  const [totp, setTotp] = useState<TotpConfig | null>(null);
+  const [totpError, setTotpError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const noClass = !opts.lower && !opts.upper && !opts.digits && !opts.symbols;
   const { copy, state: clipState, cancel } = useClipboardTimer(clearSecs);
@@ -51,6 +56,9 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
     setIsCard(false);
     setCardholderName('');
     setAttachError('');
+    setInitialTotp(null);
+    setTotp(null);
+    setTotpError('');
     if (entryId === null) {
       setE(BLANK_ENTRY); setExpires(null); setCustom([]); setOrigKeys([]); setAttachments([]);
       return;
@@ -64,6 +72,10 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
         setOrigKeys(r.entry.fields.map(f => f.key));
         setAttachments(r.entry.attachments);
       }
+    });
+    sendToSW({ type: 'getTotpConfig', entryId }).then(r => {
+      if (r.ok) { setInitialTotp(r.config); setTotp(r.config); }
+      else setTotpError(r.error);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entryId]);
@@ -142,13 +154,14 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
     const name = cardholderName.trim();
     if (name) { fields[CARDHOLDER_NAME_KEY] = name; keptKeys.add(CARDHOLDER_NAME_KEY); }
     if (entryId === null) {
-      const r = await sendToSW({ type: 'createEntry', groupId: groupId!, fields });
+      const r = await sendToSW({ type: 'createEntry', groupId: groupId!, fields, ...(totp ? { totp } : {}) });
       if (r.ok) onCreated?.(r.entryId);
       else setSaveError(r.error);
       return;
     }
     const removeKeys = origKeys.filter(k => !keptKeys.has(k));
-    await sendToSW({ type: 'updateEntry', entryId, fields, expires, removeKeys });
+    const result = await sendToSW({ type: 'updateEntry', entryId, fields, expires, removeKeys, totp });
+    if (!result.ok) { setSaveError(result.error); return; }
     // Sync origKeys to what was just persisted: Apply Changes doesn't trigger a
     // getEntry refetch (onChanged only reloads the tree), so without this a field
     // added on one Apply-changes click can never be removed by a later one — its
@@ -204,6 +217,9 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
           </div>
         )}
         {!isCard && field('URL', 'url')}
+        <TotpSetup initialConfig={initialTotp} issuer={e.title} account={e.username} resetKey={entryId}
+          onChange={(config, error) => { setTotp(config); setTotpError(error ?? ''); }}
+          showPreview onCopy={copy} />
         <div className="section-title block">Additional fields</div>
         {custom.map((f, i) => (
           <div key={i} className="flex gap-2 items-center mb-2">
@@ -271,7 +287,7 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
         {saveError && <p className="alert-error mb-3" role="alert">{saveError}</p>}
 
         <div className="flex items-center gap-2">
-          <button className="btn-primary mt-1" onClick={save}>
+          <button className="btn-primary mt-1" disabled={!!totpError} onClick={save}>
             <Check size={15} /> {entryId === null ? 'Create' : 'Apply changes'}
           </button>
           {entryId !== null && (

@@ -2,9 +2,20 @@ import * as kdbxweb from 'kdbxweb';
 import { registerArgon2 } from './crypto';
 import { urlMatches } from './matcher';
 import type { EntryView, EntryField, TreeNode, EntrySummary, AttachmentMeta } from '../shared/entry';
-import { CARD_FLAG_KEY } from '../shared/entry';
+import { CARD_FLAG_KEY, OTP_FIELD_KEY } from '../shared/entry';
+import { parseTotpInput, toOtpUri, type TotpConfig } from './totp';
 
-const STD = new Set(['Title', 'UserName', 'Password', 'URL', 'Notes', CARD_FLAG_KEY]);
+const TOTP_SEED_KEY = 'TOTP Seed';
+const TOTP_SETTINGS_KEY = 'TOTP Settings';
+const KP_TOTP_SECRET_KEY = 'TimeOtp-Secret-Base32';
+const KP_TOTP_ALGORITHM_KEY = 'TimeOtp-Algorithm';
+const KP_TOTP_LENGTH_KEY = 'TimeOtp-Length';
+const KP_TOTP_PERIOD_KEY = 'TimeOtp-Period';
+const TOTP_KEYS = [
+  OTP_FIELD_KEY, TOTP_SEED_KEY, TOTP_SETTINGS_KEY, KP_TOTP_SECRET_KEY,
+  KP_TOTP_ALGORITHM_KEY, KP_TOTP_LENGTH_KEY, KP_TOTP_PERIOD_KEY,
+];
+const STD = new Set(['Title', 'UserName', 'Password', 'URL', 'Notes', CARD_FLAG_KEY, ...TOTP_KEYS]);
 
 /** True only when an error means the password/key file was wrong — not when load
  *  failed for another reason (corrupt file, missing Argon2/WASM, runtime fault). */
@@ -66,7 +77,57 @@ export class Vault {
       : false;
   }
 
+  private readTotp(e: kdbxweb.KdbxEntry): TotpConfig | null {
+    const otp = str(e.fields.get(OTP_FIELD_KEY));
+    if (otp) return parseTotpInput(otp);
+
+    const legacySettings = str(e.fields.get(TOTP_SETTINGS_KEY));
+    const legacySeed = str(e.fields.get(TOTP_SEED_KEY));
+    if (legacySettings || legacySeed) {
+      const params = new URLSearchParams(legacySettings);
+      if (params.has('key')) {
+        return this.totpFromParts(
+          params.get('key') ?? legacySeed,
+          params.get('otpHashMode'),
+          params.get('size'),
+          params.get('step'),
+        );
+      }
+      const [period, digits] = legacySettings.split(';');
+      return this.totpFromParts(legacySeed, null, digits, period);
+    }
+
+    const nativeSeed = str(e.fields.get(KP_TOTP_SECRET_KEY));
+    if (!nativeSeed) return null;
+    return this.totpFromParts(
+      nativeSeed,
+      str(e.fields.get(KP_TOTP_ALGORITHM_KEY)) || null,
+      str(e.fields.get(KP_TOTP_LENGTH_KEY)) || null,
+      str(e.fields.get(KP_TOTP_PERIOD_KEY)) || null,
+    );
+  }
+
+  private totpFromParts(secret: string, algorithm: string | null, digits: string | null, period: string | null): TotpConfig {
+    const query = new URLSearchParams({ secret });
+    if (algorithm) query.set('algorithm', algorithm);
+    if (digits) query.set('digits', digits);
+    if (period) query.set('period', period);
+    return parseTotpInput(`otpauth://totp/QuickKee:none?${query}`);
+  }
+
+  private totpMeta(e: kdbxweb.KdbxEntry): { hasTotp: boolean; totpPeriod: number | null } {
+    const configured = TOTP_KEYS.some(key => str(e.fields.get(key)) !== '');
+    if (!configured) return { hasTotp: false, totpPeriod: null };
+    try {
+      const config = this.readTotp(e);
+      return { hasTotp: true, totpPeriod: config?.period ?? null };
+    } catch {
+      return { hasTotp: true, totpPeriod: null };
+    }
+  }
+
   private toSummary(e: kdbxweb.KdbxEntry): EntrySummary {
+    const totp = this.totpMeta(e);
     return {
       id: e.uuid.id,
       title: str(e.fields.get('Title')),
@@ -74,6 +135,7 @@ export class Vault {
       url: str(e.fields.get('URL')),
       expired: this.isExpired(e),
       isCard: str(e.fields.get(CARD_FLAG_KEY)) === '1',
+      ...totp,
       hasAttachments: e.binaries.size > 0,
     };
   }
@@ -103,11 +165,25 @@ export class Vault {
       created: e.times.creationTime ? e.times.creationTime.getTime() : null,
       expires: e.times.expires === true && e.times.expiryTime ? e.times.expiryTime.getTime() : null,
       isCard: str(e.fields.get(CARD_FLAG_KEY)) === '1',
+      ...this.totpMeta(e),
       attachments: this.toAttachments(e),
     };
   }
 
   getEntry(id: string): EntryView | null { const e = this.findEntry(id); return e ? this.toView(e) : null; }
+
+  getTotpConfig(id: string): TotpConfig | null {
+    const e = this.findEntry(id); if (!e) throw new Error('no entry');
+    return this.readTotp(e);
+  }
+
+  setTotpConfig(id: string, config: TotpConfig | null): void {
+    const e = this.findEntry(id); if (!e) throw new Error('no entry');
+    const otpUri = config ? toOtpUri(config) : null;
+    for (const key of TOTP_KEYS) e.fields.delete(key);
+    if (otpUri) e.fields.set(OTP_FIELD_KEY, kdbxweb.ProtectedValue.fromString(otpUri));
+    e.times.update(); this.dirty = true;
+  }
 
   entriesForUrl(pageUrl: string): EntryView[] {
     const out: EntryView[] = [];
@@ -151,24 +227,36 @@ export class Vault {
     const build = (g: kdbxweb.KdbxGroup): TreeNode => ({
       groupId: g.uuid.id, name: str(g.name),
       entries: g.entries.map(e => { const v = this.toView(e);
-        return { id: v.id, title: v.title, username: v.username, url: v.url, expired: v.expired, isCard: v.isCard, hasAttachments: v.attachments.length > 0 }; }),
+        return {
+          id: v.id, title: v.title, username: v.username, url: v.url, expired: v.expired,
+          isCard: v.isCard, hasTotp: v.hasTotp, totpPeriod: v.totpPeriod,
+          hasAttachments: v.attachments.length > 0,
+        }; }),
       children: g.groups.filter(c => !this.isRecycleBin(c)).map(build),
     });
     return build(this.root);
   }
 
-  createEntry(groupId: string, fields: Record<string, string>): string {
+  createEntry(groupId: string, fields: Record<string, string>, totp?: TotpConfig): string {
     if (!this.db) throw new Error('locked');
     const g = this.findGroup(groupId);
     if (!g) throw new Error('no group');
+    const otpUri = totp ? toOtpUri(totp) : null;
     const e = this.db.createEntry(g);
-    this.applyFields(e, fields); this.dirty = true; return e.uuid.id;
+    this.applyFields(e, fields);
+    if (otpUri) e.fields.set(OTP_FIELD_KEY, kdbxweb.ProtectedValue.fromString(otpUri));
+    this.dirty = true; return e.uuid.id;
   }
 
-  updateEntry(id: string, fields: Record<string, string>, expires?: number | null, removeKeys?: string[]): void {
+  updateEntry(id: string, fields: Record<string, string>, expires?: number | null, removeKeys?: string[], totp?: TotpConfig | null): void {
     const e = this.findEntry(id); if (!e) throw new Error('no entry');
+    const otpUri = totp ? toOtpUri(totp) : null;
     if (removeKeys) for (const k of removeKeys) if (!STD.has(k)) e.fields.delete(k);
     this.applyFields(e, fields);
+    if (totp !== undefined) {
+      for (const key of TOTP_KEYS) e.fields.delete(key);
+      if (otpUri) e.fields.set(OTP_FIELD_KEY, kdbxweb.ProtectedValue.fromString(otpUri));
+    }
     if (expires !== undefined) {
       if (expires === null) { e.times.expires = false; }
       else { e.times.expires = true; e.times.expiryTime = new Date(expires); }
@@ -229,7 +317,8 @@ export class Vault {
 
   private applyFields(e: kdbxweb.KdbxEntry, fields: Record<string, string>) {
     for (const [k, val] of Object.entries(fields)) {
-      const prot = k === 'Password' || (e.fields.get(k) instanceof kdbxweb.ProtectedValue);
+      const prot = k === 'Password' || k === OTP_FIELD_KEY || k === TOTP_SEED_KEY || k === KP_TOTP_SECRET_KEY
+        || (e.fields.get(k) instanceof kdbxweb.ProtectedValue);
       e.fields.set(k, prot ? kdbxweb.ProtectedValue.fromString(val) : val);
     }
   }

@@ -1,4 +1,7 @@
-import { findLoginFields, fillFields, isLoginField, findCardFields, isCardField, hasCardFields, fillCardFields } from './detect';
+import {
+  findLoginFields, fillFields, isLoginField, findCardFields, isCardField, hasCardFields, fillCardFields,
+  findOtpFields, fillOtpFields, isOtpField,
+} from './detect';
 test('finds email-only field when no password present (single-step flow)', () => {
   document.body.innerHTML = `<form><input type="email" id="u" autocomplete="email"></form>`;
   const f = findLoginFields(document);
@@ -145,4 +148,44 @@ test('fillCardFields leaves expiry <select> at its original value when no option
   const expires = new Date(2030, 0, 1).getTime(); // out of the select's range
   fillCardFields(f, { number: '', name: '', cvv: '', expires });
   expect((f.expYear as HTMLSelectElement).value).toBe(before);
+});
+
+test('findOtpFields prefers the standard one-time-code autocomplete token', () => {
+  document.body.innerHTML = `<input id="otp" autocomplete="one-time-code"><input id="other" name="product_code">`;
+  const fields = findOtpFields(document);
+  expect(fields.inputs.map(input => input.id)).toEqual(['otp']);
+  expect(isOtpField(document.getElementById('otp')!, fields)).toBe(true);
+});
+
+test('findOtpFields accepts strong conservative TOTP signals', () => {
+  document.body.innerHTML = `<label for="token">Authenticator verification code</label><input id="token" inputmode="numeric" maxlength="6">`;
+  expect(findOtpFields(document).inputs.map(input => input.id)).toEqual(['token']);
+});
+
+test.each(['postal_code', 'coupon_code', 'product_code', 'language_code', 'referral_code'])(
+  'findOtpFields excludes unrelated %s fields', name => {
+    document.body.innerHTML = `<input id="candidate" name="${name}" maxlength="6">`;
+    expect(findOtpFields(document).inputs).toEqual([]);
+  },
+);
+
+test('findOtpFields and fillOtpFields support a labelled segmented code group', () => {
+  document.body.innerHTML = `<fieldset><legend>Enter authenticator code</legend>${
+    Array.from({ length: 6 }, (_, i) => `<input id="d${i}" maxlength="1" inputmode="numeric">`).join('')
+  }</fieldset>`;
+  const fields = findOtpFields(document, document.getElementById('d2') as HTMLInputElement);
+  expect(fields.inputs).toHaveLength(6);
+  expect(fillOtpFields(fields, '123456')).toBe(true);
+  expect(fields.inputs.map(input => input.value).join('')).toBe('123456');
+});
+
+test('fillOtpFields sets a single field and dispatches input/change events', () => {
+  document.body.innerHTML = `<input id="otp" autocomplete="one-time-code">`;
+  const fields = findOtpFields(document);
+  const input = fields.inputs[0];
+  const onInput = vi.fn(); const onChange = vi.fn();
+  input.addEventListener('input', onInput); input.addEventListener('change', onChange);
+  expect(fillOtpFields(fields, '654321')).toBe(true);
+  expect(input.value).toBe('654321');
+  expect(onInput).toHaveBeenCalledOnce(); expect(onChange).toHaveBeenCalledOnce();
 });

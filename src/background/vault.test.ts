@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Vault, isInvalidKey } from './vault';
-import { CARD_FLAG_KEY } from '../shared/entry';
+import { CARD_FLAG_KEY, OTP_FIELD_KEY } from '../shared/entry';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -247,6 +247,62 @@ test('entrySummariesForUrl and getTree both expose isCard', async () => {
   const tree = v.getTree();
   const sites = tree.children.find(c => c.name === 'Sites');
   expect(sites?.entries.find(e => e.id === id)?.isCard).toBe(true);
+});
+
+test('TOTP config is protected, omitted from fields, and round-trips through serialize', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  v.setTotpConfig(id, {
+    secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA256', digits: 8, period: 45,
+    issuer: 'GitHub', account: 'octocat',
+  });
+
+  const view = v.getEntry(id)!;
+  expect(view.hasTotp).toBe(true);
+  expect(view.totpPeriod).toBe(45);
+  expect(view.fields.find(f => f.key === OTP_FIELD_KEY)).toBeUndefined();
+  expect(v.getTotpConfig(id)).toMatchObject({ secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA256', digits: 8, period: 45 });
+
+  const db = v['db'] as import('kdbxweb').Kdbx;
+  const rawEntry = db.getDefaultGroup().groups.flatMap(g => g.entries).find(e => e.uuid.id === id)!;
+  expect(rawEntry.fields.get(OTP_FIELD_KEY)).toBeInstanceOf((await import('kdbxweb')).ProtectedValue);
+
+  const bytes = await v.serialize();
+  const v2 = new Vault(); await v2.open(bytes, 'correct horse', null);
+  expect(v2.getEntry(id)).toMatchObject({ hasTotp: true, totpPeriod: 45 });
+  expect(v2.getTotpConfig(id)).toMatchObject({ algorithm: 'SHA256', digits: 8, period: 45 });
+});
+
+test('reads KeePass TimeOtp fields and normalizes them only when explicitly edited', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  v.updateEntry(id, {
+    'TimeOtp-Secret-Base32': 'JBSWY3DPEHPK3PXP',
+    'TimeOtp-Algorithm': 'HMAC-SHA-512',
+    'TimeOtp-Length': '7',
+    'TimeOtp-Period': '60',
+  });
+
+  expect(v.getTotpConfig(id)).toMatchObject({ algorithm: 'SHA512', digits: 7, period: 60 });
+  expect(v.getEntry(id)).toMatchObject({ hasTotp: true, totpPeriod: 60 });
+
+  v.setTotpConfig(id, v.getTotpConfig(id));
+  const db = v['db'] as import('kdbxweb').Kdbx;
+  const rawEntry = db.getDefaultGroup().groups.flatMap(g => g.entries).find(e => e.uuid.id === id)!;
+  expect(rawEntry.fields.has(OTP_FIELD_KEY)).toBe(true);
+  expect(rawEntry.fields.has('TimeOtp-Secret-Base32')).toBe(false);
+  expect(rawEntry.fields.has('TimeOtp-Algorithm')).toBe(false);
+  expect(rawEntry.fields.has('TimeOtp-Length')).toBe(false);
+  expect(rawEntry.fields.has('TimeOtp-Period')).toBe(false);
+});
+
+test('removing TOTP clears all recognized formats', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  v.setTotpConfig(id, { secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30 });
+  v.setTotpConfig(id, null);
+  expect(v.getTotpConfig(id)).toBeNull();
+  expect(v.getEntry(id)).toMatchObject({ hasTotp: false, totpPeriod: null });
 });
 
 test('cardSummariesForUrl: a card entry with no URL matches every site', async () => {

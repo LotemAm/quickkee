@@ -77,10 +77,10 @@ const ctx: SwContext = {
 
 const handle_ = makeRouter(ctx);
 
-chrome.runtime.onMessage.addListener((req: Request, _s, sendResponse) => {
+chrome.runtime.onMessage.addListener((req: Request, sender, sendResponse) => {
   if ((req as unknown as { __qk?: string }).__qk === 'test') return false;
   if ((req as unknown as { __qkOffscreen?: boolean }).__qkOffscreen) return false;
-  handle_(req).then(sendResponse).catch(e => sendResponse({ ok: false, error: String(e) }));
+  handle_(req, sender).then(sendResponse).catch(e => sendResponse({ ok: false, error: String(e) }));
   return true; // async
 });
 

@@ -1,4 +1,7 @@
-import { findLoginFields, fillFields, isLoginField, findCardFields, fillCardFields, isCardField, hasCardFields } from '../../content/detect';
+import {
+  findLoginFields, fillFields, isLoginField, findCardFields, fillCardFields, isCardField, hasCardFields,
+  findOtpFields, fillOtpFields, isOtpField,
+} from '../../content/detect';
 import { showPopup, hidePopup } from '../../content/inlinePopup';
 import { sendToSW } from '../../shared/messages';
 import { maskCardNumber } from '../../shared/cardMask';
@@ -6,9 +9,18 @@ import { CARDHOLDER_NAME_KEY } from '../../shared/entry';
 
 let filling = false;
 
-function fillAndHide(fields: ReturnType<typeof findLoginFields>, username: string, password: string): void {
+function fillAndHide(fields: ReturnType<typeof findLoginFields>, username: string, password: string, totp?: string): void {
   filling = true;
   fillFields(fields, username, password);
+  if (totp) fillOtpFields(findOtpFields(document), totp);
+  filling = false;
+  hidePopup();
+}
+
+function fillTotpAndHide(code: string): void {
+  const active = document.activeElement instanceof HTMLInputElement ? document.activeElement : null;
+  filling = true;
+  fillOtpFields(findOtpFields(document, active), code);
   filling = false;
   hidePopup();
 }
@@ -20,8 +32,9 @@ function fillCardAndHide(fields: ReturnType<typeof findCardFields>, values: { nu
   hidePopup();
 }
 
-chrome.runtime.onMessage.addListener((msg: { type: string; username?: string; password?: string; number?: string; cardholderName?: string; cvv?: string; expires?: number | null }) => {
-  if (msg.type === 'fill') fillAndHide(findLoginFields(document), msg.username ?? '', msg.password ?? '');
+chrome.runtime.onMessage.addListener((msg: { type: string; username?: string; password?: string; totp?: string; code?: string; number?: string; cardholderName?: string; cvv?: string; expires?: number | null }) => {
+  if (msg.type === 'fill') fillAndHide(findLoginFields(document), msg.username ?? '', msg.password ?? '', msg.totp);
+  if (msg.type === 'fillTotp') fillTotpAndHide(msg.code ?? '');
   if (msg.type === 'fillCard')
     fillCardAndHide(findCardFields(document), { number: msg.number ?? '', name: msg.cardholderName ?? '', cvv: msg.cvv ?? '', expires: msg.expires ?? null });
 });
@@ -48,6 +61,17 @@ document.addEventListener('focusin', ev => {
           fillCardAndHide(cardFields, { number: full.entry.username, name: cardholderName, cvv: full.entry.password, expires: full.entry.expires });
         });
       });
+    });
+    return;
+  }
+
+  const otpFields = findOtpFields(document, el);
+  if (isOtpField(el, otpFields)) {
+    void sendToSW({ type: 'getEntrySummariesForUrl', url: location.href }).then(res => {
+      if (!res.ok) return;
+      const totpEntries = res.summaries.filter(summary => !summary.isCard && summary.hasTotp);
+      if (totpEntries.length === 0) return;
+      showPopup(el, totpEntries, entry => { void sendToSW({ type: 'fillTotpRequest', entryId: entry.id }); });
     });
     return;
   }

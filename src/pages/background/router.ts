@@ -12,6 +12,7 @@ import { openCloud, saveCloud, type SyncDeps } from '../../background/sync';
 import { getAccessToken, disconnect, DROPBOX_OAUTH, GDRIVE_OAUTH } from '../../background/sources/oauth';
 import { getCache, cacheKey } from '../../background/cache';
 import type { CloudFileSource, DbSource } from '../../shared/dbSource';
+import { generateTotp } from '../../background/totp';
 
 /** Name of the alarm used to schedule a deferred clipboard clear (shared with lifecycle wiring in index.ts). */
 export const CLIPBOARD_CLEAR_ALARM = 'clipboard-clear';
@@ -34,9 +35,19 @@ export function depsFor(ctx: SwContext, src: CloudFileSource): SyncDeps {
   return { vault: ctx.vault, provider: providerFor(src.provider), online: ctx.online };
 }
 
+function isExtensionPage(sender: chrome.runtime.MessageSender, ...pages: Array<'popup' | 'panel'>): boolean {
+  if (!sender.url) return false;
+  try {
+    const url = new URL(sender.url);
+    if (url.protocol !== 'chrome-extension:') return false;
+    const path = url.pathname;
+    return pages.some(page => path.endsWith(`/src/pages/${page}/index.html`));
+  } catch { return false; }
+}
+
 /** Builds the SW message handler bound to `ctx`. Moved verbatim from index.ts (plan 009). */
 export function makeRouter(ctx: SwContext) {
-  return async function handle_(req: Request): Promise<Response> {
+  return async function handle_(req: Request, sender: chrome.runtime.MessageSender = {}): Promise<Response> {
     ctx.autolock.touch();
     switch (req.type) {
       case 'unlock': {
@@ -67,11 +78,31 @@ export function makeRouter(ctx: SwContext) {
         return ctx.vault.isOpen() ? { ok: true, summaries: ctx.vault.cardSummariesForUrl(req.url) } : { ok: false, error: 'locked' };
       case 'getEntry':
         return { ok: true, entry: ctx.vault.getEntry(req.entryId) };
+      case 'getTotpConfig': {
+        if (!isExtensionPage(sender, 'panel')) return { ok: false, error: 'forbidden' };
+        if (!ctx.vault.isOpen()) return { ok: false, error: 'locked' };
+        try { return { ok: true, config: ctx.vault.getTotpConfig(req.entryId) }; }
+        catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'invalidTotp' }; }
+      }
+      case 'getTotpCode': {
+        if (!isExtensionPage(sender, 'popup', 'panel')) return { ok: false, error: 'forbidden' };
+        if (!ctx.vault.isOpen()) return { ok: false, error: 'locked' };
+        try {
+          const config = ctx.vault.getTotpConfig(req.entryId);
+          if (!config) return { ok: false, error: 'noTotp' };
+          return { ok: true, ...await generateTotp(config) };
+        } catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'invalidTotp' }; }
+      }
+      case 'previewTotp': {
+        if (!isExtensionPage(sender, 'panel')) return { ok: false, error: 'forbidden' };
+        try { return { ok: true, ...await generateTotp(req.config) }; }
+        catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'invalidTotp' }; }
+      }
       case 'getTree':
         return ctx.vault.isOpen() ? { ok: true, tree: ctx.vault.getTree() } : { ok: false, error: 'locked' };
       case 'createEntry':
-        return { ok: true, entryId: ctx.vault.createEntry(req.groupId, req.fields) };
-      case 'updateEntry': ctx.vault.updateEntry(req.entryId, req.fields, req.expires, req.removeKeys); return { ok: true };
+        return { ok: true, entryId: ctx.vault.createEntry(req.groupId, req.fields, req.totp) };
+      case 'updateEntry': ctx.vault.updateEntry(req.entryId, req.fields, req.expires, req.removeKeys, req.totp); return { ok: true };
       case 'updateGroup': ctx.vault.updateGroup(req.groupId, req.fields); return { ok: true };
       case 'createGroup': return { ok: true, groupId: ctx.vault.createGroup(req.parentId, req.name) };
       case 'deleteGroup': ctx.vault.deleteGroup(req.groupId); return { ok: true };
@@ -176,9 +207,31 @@ export function makeRouter(ctx: SwContext) {
             type: 'fillCard', number: entry.username, cvv: entry.password, cardholderName, expires: entry.expires,
           });
         } else {
-          await chrome.tabs.sendMessage(req.tabId, { type: 'fill', username: entry.username, password: entry.password });
+          try {
+            const config = ctx.vault.getTotpConfig(entry.id);
+            const totp = config ? (await generateTotp(config)).code : undefined;
+            await chrome.tabs.sendMessage(req.tabId, {
+              type: 'fill', username: entry.username, password: entry.password, ...(totp ? { totp } : {}),
+            });
+          } catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'invalidTotp' }; }
         }
         return { ok: true };
+      }
+      case 'fillTotpRequest': {
+        if (!ctx.vault.isOpen()) return { ok: false, error: 'locked' };
+        const entry = ctx.vault.getEntry(req.entryId);
+        if (!entry) return { ok: false, error: 'noEntry' };
+        const tabId = sender.tab?.id;
+        const pageUrl = sender.url ?? sender.tab?.url;
+        if (tabId == null || !pageUrl) return { ok: false, error: 'forbidden' };
+        if (entry.url && !urlMatches(entry.url, pageUrl)) return { ok: false, error: 'urlMismatch' };
+        try {
+          const config = ctx.vault.getTotpConfig(entry.id);
+          if (!config) return { ok: false, error: 'noTotp' };
+          const { code } = await generateTotp(config);
+          await chrome.tabs.sendMessage(tabId, { type: 'fillTotp', code }, { frameId: sender.frameId ?? 0 });
+          return { ok: true };
+        } catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'invalidTotp' }; }
       }
       case 'scheduleClipboardClear':
         await ctx.persistPendingClipboardHash(req.textHash);

@@ -43,6 +43,76 @@ function setValue(el: Fillable | null, val: string): void {
   el.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
+export interface OtpFields { inputs: HTMLInputElement[] }
+
+const OTP_SIGNAL = /(?:^|[\s_-])(?:otp|totp|2fa|mfa)(?:$|[\s_-])|one[\s_-]?time|verification[\s_-]?(?:code|token)|authenticator(?:[\s_-]?(?:code|token))?/i;
+const OTP_EXCLUDE = /postal|postcode|zip|coupon|promo|referral|product|language|country|security[\s_-]?code/i;
+
+function eligibleOtpInput(input: HTMLInputElement): boolean {
+  const type = (input.type || 'text').toLowerCase();
+  return !input.disabled && !input.readOnly && ['text', 'tel', 'number', 'password'].includes(type);
+}
+
+function hasOtpAutocomplete(input: HTMLInputElement): boolean {
+  return input.autocomplete.toLowerCase().split(/\s+/).includes('one-time-code');
+}
+
+function otpText(input: HTMLInputElement): string {
+  const labels = Array.from(input.labels ?? []).map(label => label.textContent ?? '').join(' ');
+  return [input.id, input.name, input.placeholder, input.getAttribute('aria-label') ?? '', labels].join(' ');
+}
+
+function hasStrongOtpSignal(input: HTMLInputElement): boolean {
+  const text = otpText(input);
+  if (OTP_EXCLUDE.test(text) || !OTP_SIGNAL.test(text)) return false;
+  return input.maxLength <= 0 || (input.maxLength >= 4 && input.maxLength <= 8);
+}
+
+function segmentedGroups(inputs: HTMLInputElement[]): HTMLInputElement[][] {
+  const groups = new Map<Element, HTMLInputElement[]>();
+  for (const input of inputs) {
+    if (input.maxLength !== 1) continue;
+    const container = input.closest('fieldset, [role="group"], form') ?? input.parentElement;
+    if (!container) continue;
+    const group = groups.get(container) ?? [];
+    group.push(input); groups.set(container, group);
+  }
+  return [...groups.entries()].flatMap(([container, group]) => {
+    if (group.length < 4 || group.length > 8) return [];
+    const context = `${container.textContent ?? ''} ${group.map(otpText).join(' ')}`;
+    if (!group.some(hasOtpAutocomplete) && (OTP_EXCLUDE.test(context) || !OTP_SIGNAL.test(context))) return [];
+    return [group];
+  });
+}
+
+export function findOtpFields(doc: Document, preferred?: HTMLInputElement | null): OtpFields {
+  const inputs = Array.from(doc.querySelectorAll<HTMLInputElement>('input')).filter(eligibleOtpInput);
+  const groups = segmentedGroups(inputs);
+  if (preferred) {
+    const segmented = groups.find(group => group.includes(preferred));
+    if (segmented) return { inputs: segmented };
+    if (hasOtpAutocomplete(preferred) || hasStrongOtpSignal(preferred)) return { inputs: [preferred] };
+    return { inputs: [] };
+  }
+  if (groups.length === 1) return { inputs: groups[0] };
+  const standard = inputs.filter(hasOtpAutocomplete);
+  if (standard.length === 1) return { inputs: standard };
+  const inferred = inputs.filter(hasStrongOtpSignal);
+  return { inputs: inferred.length === 1 ? inferred : [] };
+}
+
+export function isOtpField(el: HTMLElement, fields: OtpFields): boolean {
+  return fields.inputs.includes(el as HTMLInputElement);
+}
+
+export function fillOtpFields(fields: OtpFields, code: string): boolean {
+  if (fields.inputs.length === 0) return false;
+  if (fields.inputs.length === 1) { setValue(fields.inputs[0], code); return true; }
+  if (fields.inputs.length !== code.length) return false;
+  fields.inputs.forEach((input, index) => setValue(input, code[index]));
+  return true;
+}
+
 // Real card forms commonly use <select> for expiry month/year (e.g. fill.dev's
 // credit-card-simple form) with option *values* in whatever format the site chose
 // (e.g. unpadded "1".."12" months, 4-digit years) — there's no reliable way to predict

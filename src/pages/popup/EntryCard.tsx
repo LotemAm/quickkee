@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Copy, LogIn, ChevronDown, ChevronUp, PanelRight, CreditCard } from 'lucide-react';
+import { Copy, LogIn, ChevronDown, ChevronUp, PanelRight, CreditCard, KeyRound } from 'lucide-react';
 import type { EntryView } from '../../shared/entry';
 import { sendToSW } from '../../shared/messages';
 import { requestOpenEntry } from '../../shared/openEntry';
 import { maskCardNumber } from '../../shared/cardMask';
+import { TotpCodeDisplay } from '../../shared/TotpSetup';
 
 export function EntryCard({ entry, tabId, onCopy, groupName }: {
   entry: EntryView;
@@ -12,6 +13,7 @@ export function EntryCard({ entry, tabId, onCopy, groupName }: {
   groupName?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [showTotp, setShowTotp] = useState(false);
   return (
     <div className="card mb-2">
       <div className="flex justify-between items-start gap-2">
@@ -37,6 +39,11 @@ export function EntryCard({ entry, tabId, onCopy, groupName }: {
         <button className="btn-xs" aria-label="Autofill" onClick={() => sendToSW({ type: 'fillRequest', entryId: entry.id, tabId })}>
           <LogIn size={12} /> Autofill
         </button>
+        {entry.hasTotp && (
+          <button className="btn-xs" aria-label="Show authenticator code" aria-expanded={showTotp} onClick={() => setShowTotp(s => !s)}>
+            <KeyRound size={12} /> Code
+          </button>
+        )}
         <button className="btn-xs" aria-label="Toggle fields" onClick={() => setOpen(o => !o)}>
           {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />} Fields
         </button>
@@ -45,6 +52,7 @@ export function EntryCard({ entry, tabId, onCopy, groupName }: {
           <PanelRight size={12} />
         </button>
       </div>
+      {showTotp && entry.hasTotp && <div className="mt-2"><TotpCodeDisplay entryId={entry.id} onCopy={onCopy} /></div>}
       {open && <div className="mt-2 space-y-1">
         {entry.expires != null && (
           <div className="flex justify-between items-center text-sm">

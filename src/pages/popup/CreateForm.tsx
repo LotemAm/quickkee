@@ -5,6 +5,8 @@ import { copyWithClear } from '../../shared/clipboard';
 import type { PwGenOpts } from '../../shared/pwgen';
 import { loadDraft, saveDraft, clearDraft } from '../../shared/createDraft';
 import { PasswordRulesPanel } from '../../shared/PasswordRulesPanel';
+import { TotpSetup } from '../../shared/TotpSetup';
+import type { TotpConfig } from '../../background/totp';
 
 function baseUrl(url: string) {
   try { return new URL(url).origin + '/'; } catch { return url; }
@@ -28,6 +30,9 @@ export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwge
   const [hydrated, setHydrated] = useState(false);
   const [restored, setRestored] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [totp, setTotp] = useState<TotpConfig | null>(null);
+  const [totpError, setTotpError] = useState('');
+  const [totpReset, setTotpReset] = useState(0);
   const noClass = !opts.lower && !opts.upper && !opts.digits && !opts.symbols;
   function regenerate(o: PwGenOpts) {
     if (!o.lower && !o.upper && !o.digits && !o.symbols) return;
@@ -57,7 +62,11 @@ export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwge
     void saveDraft({ url, title, username, password, groupId, entryUrl, opts, savedAt: Date.now() });
   }, [hydrated, url, title, username, password, groupId, entryUrl, opts]);
   async function create(): Promise<string | null> {
-    const r = await sendToSW({ type: 'createEntry', groupId, fields: { Title: title, UserName: username, Password: password, URL: entryUrl } });
+    const r = await sendToSW({
+      type: 'createEntry', groupId,
+      fields: { Title: title, UserName: username, Password: password, URL: entryUrl },
+      ...(totp ? { totp } : {}),
+    });
     await sendToSW({ type: 'save' });
     await clearDraft(url);
     setRestored(false);
@@ -67,6 +76,7 @@ export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwge
     await clearDraft(url);
     setTitle(''); setUsername(''); setGroupId(defaultGroupId);
     setEntryUrl(baseUrl(url)); setOpts(pwgen); regenerate(pwgen);
+    setTotp(null); setTotpError(''); setTotpReset(n => n + 1);
     setRestored(false);
   }
   async function createAndSave() {
@@ -119,11 +129,13 @@ export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwge
       <button className="btn-secondary w-full" disabled={isFullUrl} onClick={() => setEntryUrl(url)} title="Use the current full page URL">
         <Link size={15} /> Use full page URL
       </button>
+      <TotpSetup initialConfig={null} issuer={title} account={username} resetKey={totpReset}
+        onChange={(config, error) => { setTotp(config); setTotpError(error ?? ''); }} />
       <div className="flex gap-1.5">
-        <button className="btn-primary w-full" disabled={!title || saving} onClick={createAndSave}>
+        <button className="btn-primary w-full" disabled={!title || saving || !!totpError} onClick={createAndSave}>
           {saving ? <><Loader2 size={15} className="animate-spin" /> Saving</> : <><Plus size={15} /> Create &amp; Save</>}
         </button>
-        <button className="btn-secondary w-full" disabled={!title || saving} onClick={createAndFill} title="Create and autofill the current tab">
+        <button className="btn-secondary w-full" disabled={!title || saving || !!totpError} onClick={createAndFill} title="Create and autofill the current tab">
           {saving ? <><Loader2 size={15} className="animate-spin" /> Saving</> : <><LogIn size={15} /> Create &amp; Fill</>}
         </button>
       </div>
