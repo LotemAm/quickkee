@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Copy, Check, Eye, EyeOff, X, Plus, Trash2, RefreshCw, SlidersHorizontal, Paperclip, Download } from 'lucide-react';
+import { Copy, Check, Eye, EyeOff, X, Plus, Trash2, RefreshCw, SlidersHorizontal, Paperclip, Download, ChevronDown } from 'lucide-react';
 import { sendToSW } from '../../shared/messages';
 import { CARD_FLAG_KEY, CARDHOLDER_NAME_KEY, type EntryView, type AttachmentMeta } from '../../shared/entry';
 import type { PwGenOpts } from '../../shared/pwgen';
@@ -201,12 +201,6 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
     <div className="p-4">
       <div className="card">
         {field('Title', 'title')}
-        <div className="mb-3">
-          <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--text)' }}>
-            <input type="checkbox" checked={isCard} onChange={ev => setIsCard(ev.target.checked)} />
-            Mark as credit card data
-          </label>
-        </div>
         {field(isCard ? 'Card Number' : 'Username', 'username')}
         {field(isCard ? 'CVV' : 'Password', 'password')}
         {isCard && (
@@ -238,27 +232,52 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
           <Plus size={14} /> Add field
         </button>
 
-        <div className="section-title block">Attachments</div>
-        {attachments.map(a => (
-          <div key={a.name} className="flex gap-2 items-center mb-2">
-            <Paperclip size={14} className="shrink-0" style={{ color: 'var(--text-muted)' }} />
-            <span className="flex-1 truncate text-sm">{a.name}</span>
-            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{formatBytes(a.size)}</span>
-            <button className="icon-btn" aria-label={`Download ${a.name}`} title="Download"
-              onClick={() => downloadAttachment(entryId!, a.name).then(err => { if (err) setAttachError(err); })}>
-              <Download size={15} />
-            </button>
-            <button className="icon-btn" aria-label={`Remove ${a.name}`} title="Remove" onClick={() => removeAttachment(a.name)}>
-              <Trash2 size={15} />
-            </button>
-          </div>))}
-        <input ref={fileInputRef} type="file" className="hidden" onChange={onFilePicked} />
-        <button className="btn-xs mb-3" aria-label="Add attachment"
-          title={entryId === null ? 'Save the entry first' : 'Add attachment'}
-          disabled={entryId === null} onClick={() => fileInputRef.current?.click()}>
-          <Plus size={14} /> Add attachment
-        </button>
-        {attachError && <p className="alert-error mb-3" role="alert">{attachError}</p>}
+        <details key={entryId ?? 'new'} className="group mb-3 overflow-hidden rounded-lg border"
+          style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}>
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm font-semibold transition-colors hover:bg-[var(--btn-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ring)] [&::-webkit-details-marker]:hidden">
+            <span>More</span>
+            <span className="ml-auto flex items-center gap-2">
+              {attachments.length > 0 && (
+                <span className="text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
+                  {attachments.length} {attachments.length === 1 ? 'attachment' : 'attachments'}
+                </span>
+              )}
+              <ChevronDown size={15} className="transition-transform group-open:rotate-180 motion-reduce:transition-none"
+                style={{ color: 'var(--text-muted)' }} />
+            </span>
+          </summary>
+          <div className="space-y-4 border-t px-3 py-3" style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}>
+            <label className="flex cursor-pointer items-center gap-2 text-sm" style={{ color: 'var(--text)' }}>
+              <input className="h-4 w-4 accent-[var(--primary)]" type="checkbox" checked={isCard}
+                onChange={ev => setIsCard(ev.target.checked)} />
+              Mark as credit card data
+            </label>
+
+            <section aria-labelledby="attachments-heading">
+              <div id="attachments-heading" className="section-title block">Attachments</div>
+              {attachments.map(a => (
+                <div key={a.name} className="flex gap-2 items-center mb-2">
+                  <Paperclip size={14} className="shrink-0" style={{ color: 'var(--text-muted)' }} />
+                  <span className="flex-1 truncate text-sm">{a.name}</span>
+                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{formatBytes(a.size)}</span>
+                  <button className="icon-btn" aria-label={`Download ${a.name}`} title="Download"
+                    onClick={() => downloadAttachment(entryId!, a.name).then(err => { if (err) setAttachError(err); })}>
+                    <Download size={15} />
+                  </button>
+                  <button className="icon-btn" aria-label={`Remove ${a.name}`} title="Remove" onClick={() => removeAttachment(a.name)}>
+                    <Trash2 size={15} />
+                  </button>
+                </div>))}
+              <input ref={fileInputRef} type="file" className="hidden" onChange={onFilePicked} />
+              <button className="btn-xs" aria-label="Add attachment"
+                title={entryId === null ? 'Save the entry first' : 'Add attachment'}
+                disabled={entryId === null} onClick={() => fileInputRef.current?.click()}>
+                <Plus size={14} /> Add attachment
+              </button>
+              {attachError && <p className="alert-error mt-2" role="alert">{attachError}</p>}
+            </section>
+          </div>
+        </details>
 
         <div className="mb-3">
           <div className="section-title block">{isCard ? 'Card Expiry' : 'Expiry date'}</div>
