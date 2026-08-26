@@ -107,6 +107,16 @@ const CREDENTIAL_LOGIN_PAGE = `<!doctype html><html><body>
 </form>
 </body></html>`;
 
+const CREDENTIAL_SIGNUP_PAGE = `<!doctype html><html><body>
+<h1>Create account</h1>
+<form method="post" action="/credential-landing">
+  <input id="email" name="email" type="email" autocomplete="username" />
+  <input id="password" name="password" type="password" autocomplete="new-password" />
+  <input id="confirm" name="confirm" type="password" autocomplete="new-password" />
+  <button type="submit">Create account</button>
+</form>
+</body></html>`;
+
 const PASSWORD_CHANGE_PAGE = `<!doctype html><html><body>
 <h1>Change password</h1>
 <form method="post" action="/credential-landing">
@@ -146,6 +156,7 @@ export async function startHttpFixture() {
     else if (req.url === '/card-select') res.end(CARD_SELECT_PAGE);
     else if (req.url === '/card-iframe') res.end(CARD_IFRAME_PAGE);
     else if (req.url === '/credential-login') res.end(CREDENTIAL_LOGIN_PAGE);
+    else if (req.url === '/credential-signup') res.end(CREDENTIAL_SIGNUP_PAGE);
     else if (req.url === '/credential-password-change') res.end(PASSWORD_CHANGE_PAGE);
     else if (req.url === '/credential-rejected') res.end(REJECTED_LOGIN_PAGE);
     else if (req.url === '/credential-landing') res.end(CREDENTIAL_LANDING_PAGE);
@@ -165,6 +176,7 @@ export async function startHttpFixture() {
     cardIframeUrl: `http://localhost:${port}/card-iframe`,
     credentialLoginUrl: `http://localhost:${port}/credential-login`,
     newCredentialLoginUrl: `http://127.0.0.1:${port}/credential-login`,
+    credentialSignupUrl: `http://127.0.0.1:${port}/credential-signup`,
     passwordChangeUrl: `http://localhost:${port}/credential-password-change`,
     rejectedCredentialUrl: `http://localhost:${port}/credential-rejected`,
     close: () => { server.closeAllConnections(); return new Promise<void>(r => server.close(() => r())); },
