@@ -1,9 +1,9 @@
-import { resolve } from 'path';
+import { resolve } from 'node:path';
 import { mergeConfig, defineConfig } from 'vite';
-import { crx, ManifestV3Export } from '@crxjs/vite-plugin';
-import baseConfig, { baseManifest, baseBuildOptions } from './vite.config.base'
+import { crx, type ManifestV3Export } from '@crxjs/vite-plugin';
+import baseConfig, { baseManifest, baseBuildOptions } from './vite.config.base.ts'
 
-const outDir = resolve(__dirname, 'dist_firefox');
+const outDir = resolve(import.meta.dirname, 'dist_firefox');
 
 export default mergeConfig(
   baseConfig,
@@ -26,6 +26,6 @@ export default mergeConfig(
       ...baseBuildOptions,
       outDir
     },
-    publicDir: resolve(__dirname, 'public'),
+    publicDir: resolve(import.meta.dirname, 'public'),
   })
 )

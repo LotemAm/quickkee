@@ -385,6 +385,7 @@ $RECYCLE.BIN/
 /dist_chrome
 /dist_firefox
 /quickkee.zip
+/release
 
 # etc
 .idea

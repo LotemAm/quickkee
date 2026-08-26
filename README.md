@@ -31,7 +31,7 @@ Then open `chrome://extensions`, enable **Developer mode**, choose **Load unpack
 | `yarn lint` | Run ESLint |
 | `yarn test` | Run unit tests |
 | `yarn test:e2e` | Build and run the Playwright extension tests |
-| `yarn build:production` | Produce `quickkee.zip` |
+| `yarn build:production` | Produce `release/quickkee.zip` |
 
 ## Cloud sync
 
