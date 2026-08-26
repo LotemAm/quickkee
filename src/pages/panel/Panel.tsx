@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Save, Loader2, FolderClosed, FolderOpen, FileText, CreditCard, X, Lock,
-  ChevronRight, ChevronDown, Plus, Pencil, Trash2, Check, Search, Paperclip } from 'lucide-react';
+  ChevronRight, ChevronDown, Plus, Pencil, Trash2, Check, Search, Paperclip, KeyRound } from 'lucide-react';
 import { useStatus } from '../../shared/useStatus';
 import { UnlockScreen } from '../../shared/UnlockScreen';
 import { sendToSW } from '../../shared/messages';
@@ -34,6 +34,22 @@ function findEntryGroup(node: TreeNode, entryId: string, ancestors: string[] = [
 }
 
 type FlatEntry = TreeNode['entries'][number];
+
+export function EntryIndicators({ hasTotp, hasAttachments, expired }:
+  Pick<FlatEntry, 'hasTotp' | 'hasAttachments' | 'expired'>) {
+  if (!hasTotp && !hasAttachments && !expired) return null;
+  return (
+    <span className="ml-auto flex shrink-0 items-center gap-1.5">
+      {hasTotp && <span role="img" aria-label="Has authenticator code" title="Has authenticator code">
+        <KeyRound size={12} style={{ color: 'var(--text-muted)' }} />
+      </span>}
+      {hasAttachments && <span role="img" aria-label="Has attachments" title="Has attachments">
+        <Paperclip size={12} style={{ color: 'var(--text-muted)' }} />
+      </span>}
+      {expired && <span className="badge-danger badge">expired</span>}
+    </span>
+  );
+}
 
 function collectEntries(node: TreeNode, acc: FlatEntry[] = []): FlatEntry[] {
   for (const e of node.entries) acc.push(e);
@@ -319,8 +335,7 @@ export function Panel() {
                     <span className="truncate">{e.title}</span>
                     {e.username && <span className="truncate text-xs" style={{ color: 'var(--text-muted)' }}>{e.isCard ? maskCardNumber(e.username) : e.username}</span>}
                   </span>
-                  {e.hasAttachments && <Paperclip size={12} className="ml-auto" style={{ color: 'var(--text-muted)' }} />}
-                  {e.expired && <span className="badge-danger badge ml-auto">expired</span>}
+                  <EntryIndicators hasTotp={e.hasTotp} hasAttachments={e.hasAttachments} expired={e.expired} />
                 </button>))
               : <div className="empty-state mt-12">
                   {searching ? 'No entries match your search.' : group ? 'This group has no entries.' : 'Select a group.'}

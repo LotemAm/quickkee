@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Copy, Eye, EyeOff, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { Copy, Eye, EyeOff, Plus, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { parseTotpInput, toOtpUri, type TotpConfig, type TotpCode } from '../background/totp';
 import { sendToSW } from './messages';
 
@@ -63,7 +63,7 @@ export function TotpCodeDisplay({ entryId, config, onCopy }: {
   );
 }
 
-export function TotpSetup({ initialConfig, issuer, account, onChange, resetKey, showPreview = false, onCopy }: {
+export function TotpSetup({ initialConfig, issuer, account, onChange, resetKey, showPreview = false, onCopy, compact = false }: {
   initialConfig: TotpConfig | null;
   issuer: string;
   account: string;
@@ -71,6 +71,7 @@ export function TotpSetup({ initialConfig, issuer, account, onChange, resetKey, 
   resetKey?: string | number | null;
   showPreview?: boolean;
   onCopy?: (code: string, label: string) => void;
+  compact?: boolean;
 }) {
   const [input, setInput] = useState(() => initialConfig ? toOtpUri(initialConfig) : '');
   const [config, setConfig] = useState<TotpConfig | null>(initialConfig);
@@ -104,9 +105,8 @@ export function TotpSetup({ initialConfig, issuer, account, onChange, resetKey, 
     setConfig(next); setInput(toOtpUri(next)); setError(''); onChange(next, null);
   }
 
-  return (
-    <div className="mb-3 space-y-2">
-      <div className="section-title block">Authenticator code (optional)</div>
+  const setupInput = (
+    <>
       <div className="flex gap-2 items-center">
         <input className="input flex-1" type={showSecret ? 'text' : 'password'} value={input}
           aria-label="TOTP setup key or URI" aria-invalid={!!error}
@@ -116,40 +116,80 @@ export function TotpSetup({ initialConfig, issuer, account, onChange, resetKey, 
           {showSecret ? <EyeOff size={15} /> : <Eye size={15} />}
         </button>
         {input && (
-          <button className="icon-btn" aria-label="Remove TOTP" title="Remove TOTP" onClick={() => changeInput('')}>
+          <button className="icon-btn" aria-label="Remove TOTP" title="Remove TOTP" onClick={() => {
+            changeInput('');
+            if (compact) setAdvanced(false);
+          }}>
             <Trash2 size={15} />
           </button>
         )}
       </div>
       {error && <p className="alert-error" role="alert">{error}</p>}
+    </>
+  );
+
+  const advancedSettings = config && (
+    <div className="grid grid-cols-3 gap-2">
+      <label className="text-xs" style={{ color: 'var(--text-muted)' }}>Algorithm
+        <select className="input mt-1" value={config.algorithm}
+          onChange={ev => updateConfig({ ...config, algorithm: ev.target.value as TotpConfig['algorithm'] })}>
+          <option value="SHA1">SHA-1</option><option value="SHA256">SHA-256</option><option value="SHA512">SHA-512</option>
+        </select>
+      </label>
+      <label className="text-xs" style={{ color: 'var(--text-muted)' }}>Digits
+        <select className="input mt-1" value={config.digits}
+          onChange={ev => updateConfig({ ...config, digits: Number(ev.target.value) })}>
+          <option value={6}>6</option><option value={7}>7</option><option value={8}>8</option>
+        </select>
+      </label>
+      <label className="text-xs" style={{ color: 'var(--text-muted)' }}>Period
+        <input className="input mt-1" type="number" min={1} max={86400} value={config.period}
+          onChange={ev => {
+            const period = Number(ev.target.value);
+            if (Number.isInteger(period) && period >= 1 && period <= 86400) updateConfig({ ...config, period });
+          }} />
+      </label>
+    </div>
+  );
+
+  if (compact) {
+    return (
+      <div className="mb-3 space-y-2">
+        {!config && !advanced ? (
+          <button className="btn-xs" aria-label="Add Authenticator code" onClick={() => setAdvanced(true)}>
+            <Plus size={14} /> Add Authenticator code
+          </button>
+        ) : (
+          <>
+            {config && showPreview && onCopy && <TotpCodeDisplay config={config} onCopy={onCopy} />}
+            {config && (
+              <button className="btn-xs" aria-expanded={advanced} onClick={() => setAdvanced(s => !s)}>
+                <SlidersHorizontal size={13} /> TOTP settings
+              </button>
+            )}
+            {advanced && (
+              <div className="space-y-2">
+                <div className="section-title block">Authenticator code (optional)</div>
+                {setupInput}
+                {advancedSettings}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-3 space-y-2">
+      <div className="section-title block">Authenticator code (optional)</div>
+      {setupInput}
       {config && (
         <>
           <button className="btn-xs" aria-expanded={advanced} onClick={() => setAdvanced(s => !s)}>
             <SlidersHorizontal size={13} /> TOTP settings
           </button>
-          {advanced && (
-            <div className="grid grid-cols-3 gap-2">
-              <label className="text-xs" style={{ color: 'var(--text-muted)' }}>Algorithm
-                <select className="input mt-1" value={config.algorithm}
-                  onChange={ev => updateConfig({ ...config, algorithm: ev.target.value as TotpConfig['algorithm'] })}>
-                  <option value="SHA1">SHA-1</option><option value="SHA256">SHA-256</option><option value="SHA512">SHA-512</option>
-                </select>
-              </label>
-              <label className="text-xs" style={{ color: 'var(--text-muted)' }}>Digits
-                <select className="input mt-1" value={config.digits}
-                  onChange={ev => updateConfig({ ...config, digits: Number(ev.target.value) })}>
-                  <option value={6}>6</option><option value={7}>7</option><option value={8}>8</option>
-                </select>
-              </label>
-              <label className="text-xs" style={{ color: 'var(--text-muted)' }}>Period
-                <input className="input mt-1" type="number" min={1} max={86400} value={config.period}
-                  onChange={ev => {
-                    const period = Number(ev.target.value);
-                    if (Number.isInteger(period) && period >= 1 && period <= 86400) updateConfig({ ...config, period });
-                  }} />
-              </label>
-            </div>
-          )}
+          {advanced && advancedSettings}
           {showPreview && onCopy && <TotpCodeDisplay config={config} onCopy={onCopy} />}
         </>
       )}

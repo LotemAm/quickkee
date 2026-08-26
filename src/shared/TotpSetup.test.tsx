@@ -26,6 +26,28 @@ test('keeps invalid input visible and reports a specific error', () => {
   expect(onChange).toHaveBeenLastCalledWith(null, expect.stringContaining('Only TOTP'));
 });
 
+test('compact mode starts with an add button when no authenticator is configured', () => {
+  render(<TotpSetup compact initialConfig={null} issuer="GitHub" account="octocat" onChange={vi.fn()} />);
+
+  expect(screen.queryByLabelText('TOTP setup key or URI')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Add Authenticator code' }));
+  expect(screen.getByLabelText('TOTP setup key or URI')).toBeTruthy();
+});
+
+test('compact mode shows an existing code and keeps its URI under TOTP settings', async () => {
+  const sendMessage = chrome.runtime.sendMessage as unknown as ReturnType<typeof vi.fn>;
+  sendMessage.mockResolvedValue({ ok: true, code: '123456', period: 30, expiresAt: Date.now() + 30_000 });
+  render(<TotpSetup compact showPreview initialConfig={{
+    secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30,
+    issuer: 'GitHub', account: 'octocat',
+  }} issuer="GitHub" account="octocat" onChange={vi.fn()} onCopy={vi.fn()} />);
+
+  expect(screen.queryByLabelText('TOTP setup key or URI')).toBeNull();
+  expect(await screen.findByText('123456')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'TOTP settings' }));
+  expect(screen.getByLabelText('TOTP setup key or URI')).toBeTruthy();
+});
+
 test('manual code display requests and renders only the current code with a progress bar', async () => {
   const sendMessage = chrome.runtime.sendMessage as unknown as ReturnType<typeof vi.fn>;
   sendMessage.mockResolvedValue({ ok: true, code: '123456', period: 30, expiresAt: Date.now() + 30_000 });

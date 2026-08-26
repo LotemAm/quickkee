@@ -211,7 +211,7 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
           </div>
         )}
         {!isCard && field('URL', 'url')}
-        <TotpSetup initialConfig={initialTotp} issuer={e.title} account={e.username} resetKey={entryId}
+        <TotpSetup compact initialConfig={initialTotp} issuer={e.title} account={e.username} resetKey={entryId}
           onChange={(config, error) => { setTotp(config); setTotpError(error ?? ''); }}
           showPreview onCopy={copy} />
         <div className="section-title block">Additional fields</div>
