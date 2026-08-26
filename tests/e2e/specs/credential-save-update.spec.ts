@@ -32,33 +32,34 @@ function field(entry: kdbxweb.KdbxEntry, key: string): string {
   return value instanceof kdbxweb.ProtectedValue ? value.getText() : value?.toString() ?? '';
 }
 
-test('new submitted credentials require Save and persist exactly one root entry', async ({ context, extensionId, http }) => {
+test('signup submission offers Save and persists exactly one root entry', async ({ context, extensionId, http }) => {
   const seed = await unlock(context, extensionId);
   const site = await context.newPage();
-  await site.goto(http.newCredentialLoginUrl);
-  await site.locator('#username').fill('new-user');
-  await site.locator('#password').fill('new-password-value');
-  await site.getByRole('button', { name: 'Sign in' }).click();
+  await site.goto(http.credentialSignupUrl);
+  await site.locator('#email').fill('signup-user@example.test');
+  await site.locator('#password').fill('signup-password-value');
+  await site.locator('#confirm').fill('signup-password-value');
+  await site.getByRole('button', { name: 'Create account' }).click();
   await expect(site).toHaveURL(/\/credential-landing$/);
   await expect(site.locator('[data-quickkee-credential-prompt]')).toBeVisible();
 
   const promptText = await closedCredentialPromptText(site);
   expect(promptText).toContain('Save this login?');
   expect(promptText).toContain('127.0.0.1');
-  expect(promptText).not.toContain('new-password-value');
+  expect(promptText).not.toContain('signup-password-value');
   expect(promptText.toLowerCase()).not.toContain('succeeded');
 
   const { id: tabId } = await swCmd(seed, { cmd: 'tabId', url: site.url() });
   const safe = await swCmd(seed, { cmd: 'credentialPending', tabId, url: site.url() });
-  expect(JSON.stringify(safe.prompt)).not.toContain('new-password-value');
+  expect(JSON.stringify(safe.prompt)).not.toContain('signup-password-value');
 
   await clickClosedCredentialAction(site, 'primary');
   await expect(site.locator('[data-quickkee-credential-prompt]')).toHaveCount(0);
-  await expect.poll(async () => entries(await reReadKdbx(seed)).filter(entry => field(entry, 'UserName') === 'new-user').length).toBe(1);
+  await expect.poll(async () => entries(await reReadKdbx(seed)).filter(entry => field(entry, 'UserName') === 'signup-user@example.test').length).toBe(1);
   const db = await reReadKdbx(seed);
-  const saved = entries(db).find(entry => field(entry, 'UserName') === 'new-user')!;
+  const saved = entries(db).find(entry => field(entry, 'UserName') === 'signup-user@example.test')!;
   expect(field(saved, 'Title')).toBe('127.0.0.1');
-  expect(field(saved, 'Password')).toBe('new-password-value');
+  expect(field(saved, 'Password')).toBe('signup-password-value');
   expect(field(saved, 'URL')).toBe(`http://127.0.0.1:${http.port}/`);
   expect(db.getDefaultGroup().entries.map(entry => entry.uuid.id)).toContain(saved.uuid.id);
 });
@@ -73,8 +74,11 @@ test('password-change submission offers Update and preserves unrelated fields an
   await site.locator('#next').fill('changed-password-value');
   await site.locator('#confirm').fill('changed-password-value');
   await site.getByRole('button', { name: 'Change password' }).click();
+  await expect(site).toHaveURL(/\/credential-landing$/);
   await expect(site.locator('[data-quickkee-credential-prompt]')).toBeVisible();
-  expect(await closedCredentialPromptText(site)).toContain('Update this password?');
+  const promptText = await closedCredentialPromptText(site);
+  expect(promptText).toContain('Update this password?');
+  expect(promptText).not.toContain('changed-password-value');
 
   await clickClosedCredentialAction(site, 'primary');
   await expect(site.locator('[data-quickkee-credential-prompt]')).toHaveCount(0);
