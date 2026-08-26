@@ -1,4 +1,4 @@
-import { test, expect, openExtensionPage, installDb, openPopupForTab, swCmd } from '../helpers';
+import { test, expect, openExtensionPage, openEntryEditorMore, installDb, openPopupForTab, swCmd } from '../helpers';
 
 test('panel: Card Number field is masked by default and reveals via the eye toggle, independently of CVV', async ({ context, extensionId }) => {
   const popup = await openExtensionPage(context, extensionId, 'src/pages/popup/index.html');
@@ -13,6 +13,7 @@ test('panel: Card Number field is masked by default and reveals via the eye togg
   await panel.getByRole('button', { name: 'Localhost Login' }).click();
   await panel.getByRole('button', { name: 'Apply changes' }).waitFor();
 
+  await openEntryEditorMore(panel);
   await panel.getByLabel('Mark as credit card data').check();
   await expect(panel.getByText('Card Number')).toBeVisible();
 
@@ -60,6 +61,7 @@ test('panel and popup entry-list rows mask a card number to its last 4 digits', 
   await entryRow.click();
   await panel.getByRole('button', { name: 'Apply changes' }).waitFor();
 
+  await openEntryEditorMore(panel);
   await panel.getByLabel('Mark as credit card data').check();
   await panel.locator('div.mb-3', { hasText: 'Card Number' }).locator('input').fill('4111111111111111');
   await panel.getByRole('button', { name: 'Apply changes' }).click();

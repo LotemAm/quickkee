@@ -58,6 +58,16 @@ export async function openExtensionPage(
   return page;
 }
 
+export async function openEntryEditorMore(page: Page): Promise<void> {
+  const section = page.locator('details', {
+    has: page.locator('summary', { hasText: /^More/ }),
+  });
+  await expect(section).not.toHaveAttribute('open', '');
+  await section.locator('summary').click();
+  await expect(section).toHaveAttribute('open', '');
+  await expect(page.getByLabel('Mark as credit card data')).toBeVisible();
+}
+
 export async function installDb(page: Page, kdbxPath: string = E2E_KDBX): Promise<void> {
   const b64 = fs.readFileSync(kdbxPath).toString('base64');
   const name = path.basename(kdbxPath);
