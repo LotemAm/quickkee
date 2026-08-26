@@ -395,3 +395,59 @@ test('attachment bytes round-trip exactly through serialize + reload', async () 
   const roundTripped = v2.getAttachmentBytes(id, 'note.txt');
   expect(roundTripped && new TextDecoder().decode(roundTripped)).toBe('the quick brown fox');
 });
+
+test('importTotp assigns keys to existing entries and creates requested new entries', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const existingId = v.entriesForUrl('https://github.com')[0].id;
+  const rootId = v.getTree().groupId;
+
+  v.importTotp([
+    {
+      keyId: 'existing-key',
+      config: {
+        secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30,
+        issuer: 'GitHub', account: 'alice@example.com',
+      },
+      destination: { type: 'existing', entryId: existingId },
+    },
+    {
+      keyId: 'new-key',
+      config: {
+        secret: 'GEZDGNBVGY3TQOJQ', algorithm: 'SHA256', digits: 8, period: 30,
+        issuer: 'Acme', account: 'bob@example.com',
+      },
+      destination: {
+        type: 'new', groupId: rootId,
+        fields: { Title: 'Acme', UserName: 'bob@example.com', Password: '', URL: '' },
+      },
+    },
+  ]);
+
+  expect(v.getTotpConfig(existingId)).toMatchObject({ issuer: 'GitHub', account: 'alice@example.com' });
+  const created = v.getTree().entries.find(entry => entry.title === 'Acme');
+  expect(created?.hasTotp).toBe(true);
+  expect(v.getTotpConfig(created!.id)).toMatchObject({
+    secret: 'GEZDGNBVGY3TQOJQ', algorithm: 'SHA256', digits: 8,
+  });
+});
+
+test('importTotp validates every destination before changing the vault', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const existingId = v.entriesForUrl('https://github.com')[0].id;
+
+  expect(() => v.importTotp([
+    {
+      keyId: 'valid-first',
+      config: { secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30 },
+      destination: { type: 'existing', entryId: existingId },
+    },
+    {
+      keyId: 'invalid-second',
+      config: { secret: 'GEZDGNBVGY3TQOJQ', algorithm: 'SHA1', digits: 6, period: 30 },
+      destination: { type: 'new', groupId: 'missing-group', fields: { Title: 'Nope' } },
+    },
+  ])).toThrow('no group');
+
+  expect(v.getTotpConfig(existingId)).toBeNull();
+  expect(v.dirty).toBe(false);
+});

@@ -1580,6 +1580,40 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@zxing/browser@npm:^0.2.1":
+  version: 0.2.1
+  resolution: "@zxing/browser@npm:0.2.1"
+  dependencies:
+    "@zxing/text-encoding": "npm:^0.9.0"
+  peerDependencies:
+    "@zxing/library": ^0.23.0
+  dependenciesMeta:
+    "@zxing/text-encoding":
+      optional: true
+  checksum: 10c0/d9972c66b9149757c40daf9f29365027a37748a0e2a0494d5400aa4a1e03ce2bc0c9a9bc4919cdc5ea6dae0d6d56ef8f93897257c61b2776768807cb5d99d222
+  languageName: node
+  linkType: hard
+
+"@zxing/library@npm:^0.23.0":
+  version: 0.23.0
+  resolution: "@zxing/library@npm:0.23.0"
+  dependencies:
+    "@zxing/text-encoding": "npm:~0.9.0"
+    ts-custom-error: "npm:^3.3.1"
+  dependenciesMeta:
+    "@zxing/text-encoding":
+      optional: true
+  checksum: 10c0/6d147ac911dbed1f81ed15ef8d47b979fd9282d6c30c967e5b7aacc9e10f68f4d810640b33c87a65e1bc76dfe548cb3be749ac3dbcd22a34733e15fa76e1b44e
+  languageName: node
+  linkType: hard
+
+"@zxing/text-encoding@npm:^0.9.0, @zxing/text-encoding@npm:~0.9.0":
+  version: 0.9.0
+  resolution: "@zxing/text-encoding@npm:0.9.0"
+  checksum: 10c0/d15bff181d46c2ab709e7242801a8d40408aa8c19b44462e5f60e766bf59105b44957914ab6baab60d10d466a5e965f21fe890c67dfdb7d5c7f940df457b4d0d
+  languageName: node
+  linkType: hard
+
 "abbrev@npm:1":
   version: 1.1.1
   resolution: "abbrev@npm:1.1.1"
@@ -5701,6 +5735,8 @@ __metadata:
     "@types/react": "npm:^19.1.8"
     "@types/react-dom": "npm:^19.1.6"
     "@vitejs/plugin-react": "npm:^6.1.0"
+    "@zxing/browser": "npm:^0.2.1"
+    "@zxing/library": "npm:^0.23.0"
     bestzip: "npm:2.2.6"
     eslint: "npm:^9.32.0"
     eslint-plugin-import: "npm:^2.32.0"
@@ -6794,6 +6830,13 @@ __metadata:
   peerDependencies:
     typescript: ">=4.8.4"
   checksum: 10c0/767849383c114e7f1971fa976b20e73ac28fd0c70d8d65c0004790bf4d8f89888c7e4cf6d5949f9c1beae9bc3c64835bef77bbe27fddf45a3c7b60cebcf85c8c
+  languageName: node
+  linkType: hard
+
+"ts-custom-error@npm:^3.3.1":
+  version: 3.3.1
+  resolution: "ts-custom-error@npm:3.3.1"
+  checksum: 10c0/67cc807d03406d7eeb2b908408d455d253cc43b480d669e2e3ea028b9aaa2c78ad1b392425b86368bbbc3c43a15e4abe304312d87ed845091646ec1937bab982
   languageName: node
   linkType: hard
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Save, Loader2, FolderClosed, FolderOpen, FileText, CreditCard, X, Lock,
   ChevronRight, ChevronDown, Plus, Pencil, Trash2, Check, Search, Paperclip } from 'lucide-react';
 import { useStatus } from '../../shared/useStatus';
@@ -10,8 +10,13 @@ import { applyTheme } from '../../shared/theme';
 import { consumeOpenEntry, watchOpenEntry } from '../../shared/openEntry';
 import { maskCardNumber } from '../../shared/cardMask';
 import type { TreeNode } from '../../shared/entry';
+import { mergeTotpImportChunks, type TotpImportAssignment, type TotpImportResult } from '../../shared/totpImport';
+import { googleAuthenticatorImporter } from '../../background/totpImport';
 import { DEFAULT_PWGEN, type PwGenOpts } from '../../shared/pwgen';
 import { EntryEditor } from './EntryEditor';
+import { PanelActionsMenu } from './PanelActionsMenu';
+import { TotpImportDialog } from './TotpImportDialog';
+import { decodeQrImage } from './decodeQrImage';
 
 function findGroup(node: TreeNode, id: string): TreeNode | null {
   if (node.groupId === id) return node;
@@ -126,6 +131,11 @@ export function Panel() {
   const [editing, setEditing] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [pendingOpenEntry, setPendingOpenEntry] = useState<string | null>(null);
+  const [totpImport, setTotpImport] = useState<TotpImportResult | null>(null);
+  const [totpImportError, setTotpImportError] = useState('');
+  const [readingTotpQr, setReadingTotpQr] = useState(false);
+  const [savingTotpImport, setSavingTotpImport] = useState(false);
+  const totpFileInput = useRef<HTMLInputElement>(null);
   useEffect(() => { loadSettings().then(s => { applyTheme(s.theme); setClearSecs(s.clipboardClearSeconds); setPwgen(s.pwgen); }); }, []);
   const reload = () => sendToSW({ type: 'getTree' }).then(r => {
     if (!r.ok) return;
@@ -183,6 +193,50 @@ export function Panel() {
     const r = await sendToSW({ type: 'save' });
     setSaved(r.ok ? 'Saved' : 'Save failed'); refresh(); setSaving(false); setTimeout(() => setSaved(''), 2000); }
 
+  function beginTotpImport() {
+    setTotpImportError('');
+    if (!tree) {
+      setTotpImportError('Vault entries are still loading. Try again in a moment.');
+      return;
+    }
+    totpFileInput.current?.click();
+  }
+
+  async function readTotpExport(files: FileList | null) {
+    if (!files?.length) return;
+    setReadingTotpQr(true);
+    setTotpImportError('');
+    try {
+      const chunks = [];
+      for (const file of Array.from(files)) {
+        chunks.push(googleAuthenticatorImporter.parse(await decodeQrImage(file)));
+      }
+      setTotpImport(mergeTotpImportChunks(chunks));
+    } catch (error) {
+      setTotpImportError(error instanceof Error ? error.message : 'Could not import authenticator QR code');
+    } finally {
+      setReadingTotpQr(false);
+      if (totpFileInput.current) totpFileInput.current.value = '';
+    }
+  }
+
+  async function saveTotpAssignments(assignments: TotpImportAssignment[]) {
+    setSavingTotpImport(true);
+    setTotpImportError('');
+    try {
+      const result = await sendToSW({ type: 'importTotp', assignments });
+      if (result.ok) {
+        setTotpImport(null);
+        await reload();
+        refresh();
+      } else setTotpImportError(result.error);
+    } catch {
+      setTotpImportError('Could not import authenticator keys');
+    } finally {
+      setSavingTotpImport(false);
+    }
+  }
+
   const group = tree && selGroup ? findGroup(tree, selGroup) : null;
   const q = query.trim().toLowerCase();
   const searching = q.length > 0;
@@ -196,6 +250,9 @@ export function Panel() {
       <header className="app-header">
         <span className="app-title"><img src={chrome.runtime.getURL('icon-32.png')} alt="" className="app-logo" width={18} height={18} /> QuickKee</span>
         <div className="flex items-center gap-1">
+          <input ref={totpFileInput} className="hidden" type="file" accept="image/*" multiple
+            aria-label="Google Authenticator QR images"
+            onChange={event => void readTotpExport(event.target.files)} />
           <button className="btn-primary btn-xs" disabled={!dirty || saving} onClick={save}>
             {saving
               ? <><Loader2 size={13} className="animate-spin" /> Saving</>
@@ -204,8 +261,16 @@ export function Panel() {
           <button className="icon-btn" aria-label="Lock database" title="Lock database" onClick={() => lockVault(dirty).then(refresh)}>
             <Lock size={16} />
           </button>
+          <PanelActionsMenu importBusy={readingTotpQr} onImportTotp={beginTotpImport} />
         </div>
       </header>
+
+      {totpImportError && !totpImport && (
+        <div className="alert-error mx-3 mt-2 flex items-center justify-between gap-2" role="alert">
+          <span>{totpImportError}</span>
+          <button className="icon-btn-xs" aria-label="Dismiss import error" onClick={() => setTotpImportError('')}><X size={13} /></button>
+        </div>
+      )}
 
       <div className="flex flex-1 min-h-0">
         {/* Left: groups only */}
@@ -282,5 +347,11 @@ export function Panel() {
               onDeleted={() => { setSelEntry(null); refresh(); reload(); }} />
           </div>
         </div>)}
+      {totpImport && tree && (
+        <TotpImportDialog result={totpImport} tree={tree} defaultGroupId={selGroup ?? tree.groupId}
+          busy={savingTotpImport} error={totpImportError}
+          onCancel={() => { setTotpImport(null); setTotpImportError(''); }}
+          onConfirm={assignments => void saveTotpAssignments(assignments)} />
+      )}
     </div>);
 }

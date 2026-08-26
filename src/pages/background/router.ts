@@ -42,7 +42,7 @@ function isExtensionPage(sender: chrome.runtime.MessageSender, ...pages: Array<'
   if (!sender.url) return false;
   try {
     const url = new URL(sender.url);
-    if (url.protocol !== 'chrome-extension:') return false;
+    if (url.protocol !== 'chrome-extension:' && url.protocol !== 'moz-extension:') return false;
     const path = url.pathname;
     return pages.some(page => path.endsWith(`/src/pages/${page}/index.html`));
   } catch { return false; }
@@ -171,6 +171,12 @@ export function makeRouter(ctx: SwContext) {
         if (!isExtensionPage(sender, 'panel')) return { ok: false, error: 'forbidden' };
         try { return { ok: true, ...await generateTotp(req.config) }; }
         catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'invalidTotp' }; }
+      }
+      case 'importTotp': {
+        if (!isExtensionPage(sender, 'panel')) return { ok: false, error: 'forbidden' };
+        if (!ctx.vault.isOpen()) return { ok: false, error: 'locked' };
+        try { ctx.vault.importTotp(req.assignments); return { ok: true }; }
+        catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'importTotpFailed' }; }
       }
       case 'getTree':
         return ctx.vault.isOpen() ? { ok: true, tree: ctx.vault.getTree() } : { ok: false, error: 'locked' };

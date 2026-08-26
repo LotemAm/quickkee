@@ -3,6 +3,7 @@ import { registerArgon2 } from './crypto';
 import { urlMatches } from './matcher';
 import type { EntryView, EntryField, TreeNode, EntrySummary, AttachmentMeta } from '../shared/entry';
 import { CARD_FLAG_KEY, OTP_FIELD_KEY } from '../shared/entry';
+import type { TotpImportAssignment } from '../shared/totpImport';
 import { parseTotpInput, toOtpUri, type TotpConfig } from './totp';
 
 const TOTP_SEED_KEY = 'TOTP Seed';
@@ -180,8 +181,7 @@ export class Vault {
   setTotpConfig(id: string, config: TotpConfig | null): void {
     const e = this.findEntry(id); if (!e) throw new Error('no entry');
     const otpUri = config ? toOtpUri(config) : null;
-    for (const key of TOTP_KEYS) e.fields.delete(key);
-    if (otpUri) e.fields.set(OTP_FIELD_KEY, kdbxweb.ProtectedValue.fromString(otpUri));
+    this.replaceTotp(e, otpUri);
     e.times.update(); this.dirty = true;
   }
 
@@ -254,14 +254,51 @@ export class Vault {
     if (removeKeys) for (const k of removeKeys) if (!STD.has(k)) e.fields.delete(k);
     this.applyFields(e, fields);
     if (totp !== undefined) {
-      for (const key of TOTP_KEYS) e.fields.delete(key);
-      if (otpUri) e.fields.set(OTP_FIELD_KEY, kdbxweb.ProtectedValue.fromString(otpUri));
+      this.replaceTotp(e, otpUri);
     }
     if (expires !== undefined) {
       if (expires === null) { e.times.expires = false; }
       else { e.times.expires = true; e.times.expiryTime = new Date(expires); }
     }
     e.times.update(); this.dirty = true;
+  }
+
+  importTotp(assignments: TotpImportAssignment[]): void {
+    if (!this.db) throw new Error('locked');
+    if (assignments.length === 0) throw new Error('no TOTP keys');
+
+    const keyIds = new Set<string>();
+    const existingEntryIds = new Set<string>();
+    type PreparedImport =
+      | { kind: 'existing'; assignment: TotpImportAssignment; otpUri: string; entry: kdbxweb.KdbxEntry }
+      | { kind: 'new'; assignment: TotpImportAssignment; otpUri: string; group: kdbxweb.KdbxGroup };
+    const prepared: PreparedImport[] = assignments.map(assignment => {
+      if (keyIds.has(assignment.keyId)) throw new Error('duplicate TOTP key');
+      keyIds.add(assignment.keyId);
+      const otpUri = toOtpUri(assignment.config);
+      if (assignment.destination.type === 'existing') {
+        if (existingEntryIds.has(assignment.destination.entryId)) throw new Error('duplicate entry destination');
+        existingEntryIds.add(assignment.destination.entryId);
+        const entry = this.findEntry(assignment.destination.entryId);
+        if (!entry) throw new Error('no entry');
+        return { kind: 'existing', assignment, otpUri, entry };
+      }
+      const group = this.findGroup(assignment.destination.groupId);
+      if (!group) throw new Error('no group');
+      return { kind: 'new', assignment, otpUri, group };
+    });
+
+    for (const item of prepared) {
+      if (item.kind === 'existing') {
+        this.replaceTotp(item.entry, item.otpUri);
+        item.entry.times.update();
+      } else {
+        const entry = this.db.createEntry(item.group);
+        this.applyFields(entry, item.assignment.destination.type === 'new' ? item.assignment.destination.fields : {});
+        this.replaceTotp(entry, item.otpUri);
+      }
+    }
+    this.dirty = true;
   }
 
   updateGroup(id: string, fields: Record<string, string>): void {
@@ -321,6 +358,11 @@ export class Vault {
         || (e.fields.get(k) instanceof kdbxweb.ProtectedValue);
       e.fields.set(k, prot ? kdbxweb.ProtectedValue.fromString(val) : val);
     }
+  }
+
+  private replaceTotp(e: kdbxweb.KdbxEntry, otpUri: string | null): void {
+    for (const key of TOTP_KEYS) e.fields.delete(key);
+    if (otpUri) e.fields.set(OTP_FIELD_KEY, kdbxweb.ProtectedValue.fromString(otpUri));
   }
 
   /** Load remote bytes with the same credentials and merge them into the

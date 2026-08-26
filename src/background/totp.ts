@@ -17,6 +17,22 @@ export interface TotpCode {
 
 const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
+export function encodeBase32(bytes: Uint8Array): string {
+  let value = 0;
+  let bits = 0;
+  let encoded = '';
+  for (const byte of bytes) {
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      encoded += BASE32[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) encoded += BASE32[(value << (5 - bits)) & 31];
+  return encoded;
+}
+
 function normalizeSecret(value: string): string {
   const secret = value.toUpperCase().replace(/[\s-]/g, '').replace(/=+$/, '');
   if (!secret || !/^[A-Z2-7]+$/.test(secret)) throw new Error('Invalid Base32 secret');

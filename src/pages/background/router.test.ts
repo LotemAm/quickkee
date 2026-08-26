@@ -216,6 +216,28 @@ describe('mutations mark vault dirty', () => {
   });
 });
 
+describe('importTotp', () => {
+  test('is side-panel-only and applies the validated assignment batch', async () => {
+    const { ctx, handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    const entryId = ctx.vault.entriesForUrl('https://github.com')[0].id;
+    const request = {
+      type: 'importTotp' as const,
+      assignments: [{
+        keyId: 'google-key-1',
+        config: { secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1' as const, digits: 6, period: 30 },
+        destination: { type: 'existing' as const, entryId },
+      }],
+    };
+
+    expect(await handle_(request)).toEqual({ ok: false, error: 'forbidden' });
+    expect(ctx.vault.getTotpConfig(entryId)).toBeNull();
+    expect(await handle_(request, { url: 'chrome-extension://quickkee/src/pages/options/index.html' })).toEqual({ ok: false, error: 'forbidden' });
+    expect(await handle_(request, { url: 'moz-extension://quickkee/src/pages/panel/index.html' })).toEqual({ ok: true });
+    expect(ctx.vault.getTotpConfig(entryId)).toMatchObject({ secret: 'JBSWY3DPEHPK3PXP' });
+  });
+});
+
 describe('fillRequest', () => {
   test('nonexistent entry -> noEntry', async () => {
     const { handle_ } = makeCtx();

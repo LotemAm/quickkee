@@ -3,6 +3,7 @@ import type { PwGenOpts } from './pwgen';
 import type { RemoteFile } from '../background/sources/cloudProvider';
 import type { DbSource } from './dbSource';
 import type { TotpConfig, TotpCode } from '../background/totp';
+import type { TotpImportAssignment } from './totpImport';
 
 export interface CredentialPromptEntry {
   id: string;
@@ -31,6 +32,7 @@ export type Request =
   | { type: 'getTotpConfig'; entryId: string }
   | { type: 'getTotpCode'; entryId: string }
   | { type: 'previewTotp'; config: TotpConfig }
+  | { type: 'importTotp'; assignments: TotpImportAssignment[] }
   | { type: 'getTree' }
   | { type: 'createEntry'; groupId: string; fields: Record<string, string>; totp?: TotpConfig }
   | { type: 'updateEntry'; entryId: string; fields: Record<string, string>; expires?: number | null; removeKeys?: string[]; totp?: TotpConfig | null }
@@ -83,6 +85,7 @@ type OkFor = {
   getTotpConfig: Ok<{ config: TotpConfig | null }>;
   getTotpCode: Ok<TotpCode>;
   previewTotp: Ok<TotpCode>;
+  importTotp: Ok;
   scheduleClipboardClear: Ok;
   cancelClipboardClear: Ok;
   stageCredentialCapture: Ok<{ staged: boolean }>;
