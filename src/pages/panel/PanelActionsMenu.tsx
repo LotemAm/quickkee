@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { MoreVertical, QrCode } from 'lucide-react';
+import { MoreVertical, QrCode, Settings } from 'lucide-react';
 
 export function PanelActionsMenu({ onImportTotp, importBusy = false }: { onImportTotp: () => void; importBusy?: boolean }) {
   const [open, setOpen] = useState(false);
@@ -39,6 +39,13 @@ export function PanelActionsMenu({ onImportTotp, importBusy = false }: { onImpor
             onClick={() => { setOpen(false); onImportTotp(); }}>
             <QrCode size={15} style={{ color: 'var(--primary-text)' }} />
             {importBusy ? 'Reading TOTP…' : 'Import TOTP'}
+          </button>
+          <button type="button" role="menuitem"
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--btn-bg)]"
+            style={{ color: 'var(--text)' }}
+            onClick={() => { setOpen(false); void chrome.runtime.openOptionsPage(); }}>
+            <Settings size={15} style={{ color: 'var(--primary-text)' }} />
+            Settings
           </button>
         </div>
       )}
