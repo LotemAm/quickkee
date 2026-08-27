@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ShieldCheck, Monitor, Sun, Moon } from 'lucide-react';
+import { Check, ShieldCheck, Monitor, Sun, Moon } from 'lucide-react';
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, type Settings } from '../../shared/settings';
 import { applyTheme, type ThemeMode } from '../../shared/theme';
 import { sendToSW } from '../../shared/messages';
@@ -11,11 +11,48 @@ const THEME_OPTIONS: { value: ThemeMode; label: string; icon: typeof Monitor }[]
   { value: 'dark', label: 'Dark', icon: Moon },
 ];
 
+const CLOUD_PROVIDERS = [
+  { id: 'dropbox', label: 'Dropbox' },
+  { id: 'gdrive', label: 'Google Drive' },
+] as const;
+type CloudProviderId = typeof CLOUD_PROVIDERS[number]['id'];
+type ConnectionState = Record<CloudProviderId, boolean>;
+
 export function Options() {
   const [s, setS] = useState<Settings>(DEFAULT_SETTINGS);
-  useEffect(() => { loadSettings().then(v => { setS(v); applyTheme(v.theme); }); }, []);
+  const [connected, setConnected] = useState<ConnectionState>({ dropbox: false, gdrive: false });
+  const [busyProvider, setBusyProvider] = useState<CloudProviderId | null>(null);
+  const [signedOutProvider, setSignedOutProvider] = useState<CloudProviderId | null>(null);
+  useEffect(() => {
+    loadSettings().then(v => { setS(v); applyTheme(v.theme); });
+    sendToSW({ type: 'getCloudConnectionStatus' }).then(response => {
+      if (response.ok) setConnected(response.connected);
+    });
+  }, []);
   const update = (patch: Partial<Settings>) => { const next = { ...s, ...patch };
     setS(next); applyTheme(next.theme); void saveSettings(next); };
+
+  async function connect(provider: CloudProviderId) {
+    setBusyProvider(provider);
+    setSignedOutProvider(null);
+    try {
+      const response = await sendToSW({ type: 'connectCloud', provider });
+      if (response.ok) setConnected(current => ({ ...current, [provider]: true }));
+    } finally { setBusyProvider(null); }
+  }
+
+  async function signOut(provider: CloudProviderId) {
+    setBusyProvider(provider);
+    setSignedOutProvider(null);
+    try {
+      const response = await sendToSW({ type: 'disconnectCloud', provider });
+      if (response.ok) {
+        setConnected(current => ({ ...current, [provider]: false }));
+        setSignedOutProvider(provider);
+      }
+    } finally { setBusyProvider(null); }
+  }
+
   return (
     <div className="min-h-screen">
       <header className="app-header">
@@ -58,11 +95,25 @@ export function Options() {
 
         <section className="card space-y-3">
           <div className="section-title">Connected accounts</div>
-          {(['dropbox', 'gdrive'] as const).map(p => (
-            <div key={p} className="account-row">
-              <span>{p === 'dropbox' ? 'Dropbox' : 'Google Drive'}</span>
-              <button className="btn" onClick={() => { void sendToSW({ type: 'connectCloud', provider: p }); }}>Connect</button>
-              <button className="btn-secondary" onClick={() => { void sendToSW({ type: 'disconnectCloud', provider: p }); }}>Sign out</button>
+          {CLOUD_PROVIDERS.map(({ id, label }) => (
+            <div key={id} className="account-row">
+              <span>{label}</span>
+              <div className="account-actions">
+                {signedOutProvider === id && (
+                  <span className="account-success" role="status"><Check size={12} /> Signed out</span>
+                )}
+                {connected[id] ? (
+                  <span className="connected-pill" aria-label={`${label} connected`}><Check size={12} /> Connected</span>
+                ) : (
+                  <button className="btn" disabled={busyProvider === id} onClick={() => { void connect(id); }}>
+                    {busyProvider === id ? 'Connecting…' : 'Connect'}
+                  </button>
+                )}
+                <button className="btn-secondary" disabled={!connected[id] || busyProvider === id}
+                  onClick={() => { void signOut(id); }}>
+                  {busyProvider === id && connected[id] ? 'Signing out…' : 'Sign out'}
+                </button>
+              </div>
             </div>
           ))}
         </section>

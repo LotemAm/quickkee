@@ -48,6 +48,7 @@ export type Request =
   | { type: 'fillRequest'; entryId: string; tabId: number }
   | { type: 'fillTotpRequest'; entryId: string }
   | { type: 'connectCloud'; provider: 'dropbox' | 'gdrive' }
+  | { type: 'getCloudConnectionStatus' }
   | { type: 'listRemoteFiles'; provider: 'dropbox' | 'gdrive' }
   | { type: 'openRemote'; provider: 'dropbox' | 'gdrive'; fileId: string; fileName: string; password: string | null; keyFile: number[] | null }
   | { type: 'getSyncStatus' }
@@ -79,6 +80,7 @@ type OkFor = {
   removeAttachment: Ok;
   getAttachment: Ok<{ data: string }>;
   connectCloud: Ok;
+  getCloudConnectionStatus: Ok<{ connected: Record<'dropbox' | 'gdrive', boolean> }>;
   disconnectCloud: Ok;
   fillRequest: Ok;
   fillTotpRequest: Ok;

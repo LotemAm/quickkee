@@ -202,6 +202,15 @@ export async function getGoogleAccessToken(options: { interactive?: boolean } = 
   return hostedFlowPromise;
 }
 
+export async function isGoogleConnected(): Promise<boolean> {
+  const redirectUrl = chrome.identity.getRedirectURL();
+  const useHosted = shouldUseHostedGoogleOAuth(redirectUrl, chrome.runtime.id, await browserIsBrave());
+  if (useHosted) return (await getStoredHostedToken()) !== null;
+
+  try { return Boolean((await chrome.identity.getAuthToken({ interactive: false })).token); }
+  catch { return false; }
+}
+
 export async function handleHostedGoogleOAuthMessage(
   message: unknown,
   sender: chrome.runtime.MessageSender,

@@ -9,8 +9,8 @@ import { CARDHOLDER_NAME_KEY } from '../../shared/entry';
 import { arrayBufferToBase64, base64ToArrayBuffer } from '../../shared/bytes';
 import { providerFor, __hasOverride } from './cloudRouting';
 import { openCloud, saveCloud, type SyncDeps } from '../../background/sync';
-import { getAccessToken, disconnect, DROPBOX_OAUTH } from '../../background/sources/oauth';
-import { disconnectGoogle, getGoogleAccessToken } from '../../background/sources/googleOAuth';
+import { getAccessToken, disconnect, DROPBOX_OAUTH, hasStoredRefreshToken } from '../../background/sources/oauth';
+import { disconnectGoogle, getGoogleAccessToken, isGoogleConnected } from '../../background/sources/googleOAuth';
 import { getCache, cacheKey } from '../../background/cache';
 import type { CloudFileSource, DbSource } from '../../shared/dbSource';
 import { generateTotp } from '../../background/totp';
@@ -217,6 +217,13 @@ export function makeRouter(ctx: SwContext) {
           else await getGoogleAccessToken({ interactive: true });
           return { ok: true };
         } catch { return { ok: false, error: 'authRequired' }; }
+      }
+      case 'getCloudConnectionStatus': {
+        const [dropbox, gdrive] = await Promise.all([
+          hasStoredRefreshToken('dropbox'),
+          isGoogleConnected(),
+        ]);
+        return { ok: true, connected: { dropbox, gdrive } };
       }
       case 'listRemoteFiles': {
         try { return { ok: true, files: await providerFor(req.provider).listKdbxFiles() }; }

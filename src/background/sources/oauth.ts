@@ -76,6 +76,11 @@ async function getRefreshToken(provider: string): Promise<string | null> {
   const got = await chrome.storage.local.get(refreshKey(provider));
   return (got[refreshKey(provider)] as string | undefined) ?? null;
 }
+
+export async function hasStoredRefreshToken(provider: 'dropbox' | 'gdrive'): Promise<boolean> {
+  return (await getRefreshToken(provider)) !== null;
+}
+
 async function setRefreshToken(provider: string, token: string): Promise<void> {
   await chrome.storage.local.set({ [refreshKey(provider)]: token });
 }

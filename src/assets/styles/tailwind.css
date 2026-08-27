@@ -25,6 +25,9 @@
   --danger: #dc2626;
   --danger-tint: #fee2e2;
   --danger-text: #b91c1c;
+  --success-tint: #dcfce7;
+  --success-border: #bbf7d0;
+  --success-text: #15803d;
 }
 
 .dark {
@@ -47,6 +50,9 @@
   --danger: #f87171;
   --danger-tint: #7f1d1d;
   --danger-text: #fecaca;
+  --success-tint: #123b2a;
+  --success-border: #166534;
+  --success-text: #86efac;
 }
 
 @layer base {
@@ -379,6 +385,27 @@
   }
   .account-row:last-child { border-bottom: none; padding-bottom: 0; }
   .account-row > span { flex: 1; font-size: 14px; font-weight: 500; }
+  .account-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+  .connected-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid var(--success-border);
+    border-radius: 999px;
+    padding: 4px 9px;
+    background: var(--success-tint);
+    color: var(--success-text);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .account-success {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    color: var(--success-text);
+    font-size: 11px;
+    font-weight: 500;
+  }
 
   .btn-secondary {
     display: inline-flex;
@@ -395,5 +422,6 @@
     color: var(--text-muted);
     transition: background .15s, color .15s, border-color .15s;
   }
-  .btn-secondary:hover { color: var(--danger-text); border-color: var(--danger); }
+  .btn-secondary:hover:not(:disabled) { color: var(--danger-text); border-color: var(--danger); }
+  .btn-secondary:disabled { opacity: .5; cursor: not-allowed; }
 }
