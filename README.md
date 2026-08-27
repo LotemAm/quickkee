@@ -7,6 +7,7 @@ KeePass-compatible password manager for Chrome (Manifest V3). Open local or clou
 - Open local KeePass databases with a password, key file, or both.
 - Connect Dropbox or Google Drive vaults with offline caching, sync status, and automatic conflict merging.
 - Browse, search, create, edit, and delete entries and groups from the popup or side panel.
+- Audit an unlocked vault locally for empty, weak, or reused passwords and entries that are stale or expired.
 - Select matching logins, cards, or TOTP credentials from an inline picker; autofill also works inside frames.
 - Configure auto-lock, clipboard clearing, password rules, and system/light/dark themes.
 
