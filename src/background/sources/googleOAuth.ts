@@ -62,13 +62,26 @@ export function shouldUseHostedGoogleOAuth(redirectUrl: string, runtimeId: strin
   return isBrave || redirectUrl !== `https://${runtimeId}.chromiumapp.org/`;
 }
 
+function isHostedGoogleCallbackUrl(senderUrl: string | undefined): boolean {
+  if (!senderUrl) return false;
+  try {
+    const sender = new URL(senderUrl);
+    const callback = new URL(GOOGLE_HOSTED_CALLBACK_URL);
+    return sender.origin === callback.origin
+      && sender.pathname === callback.pathname
+      && sender.search === callback.search;
+  } catch {
+    return false;
+  }
+}
+
 export function validateHostedGoogleCallback(
   message: unknown,
   senderUrl: string | undefined,
   expectedState: string,
   now = Date.now(),
 ): HostedToken {
-  if (senderUrl !== GOOGLE_HOSTED_CALLBACK_URL || typeof message !== 'object' || message === null)
+  if (!isHostedGoogleCallbackUrl(senderUrl) || typeof message !== 'object' || message === null)
     throw new Error('authRequired');
 
   const callback = message as HostedGoogleCallback;
@@ -202,7 +215,7 @@ export async function handleHostedGoogleOAuthMessage(
     if (pending) await removePendingFlow(pending.state);
     return { ok: false, close: false, error: 'authRequired' };
   }
-  if (sender.url !== GOOGLE_HOSTED_CALLBACK_URL
+  if (!isHostedGoogleCallbackUrl(sender.url)
     || (message as Partial<HostedGoogleCallback>).state !== pending.state)
     return { ok: false, close: false, error: 'authRequired' };
 

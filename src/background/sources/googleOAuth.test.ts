@@ -45,6 +45,18 @@ test('accepts a valid token only from the hosted callback with matching state', 
   });
 });
 
+test('accepts the hosted callback when Chromium preserves its OAuth fragment in sender.url', () => {
+  expect(validateHostedGoogleCallback({
+    type: 'quickkee-google-oauth-callback',
+    state: 'STATE',
+    accessToken: 'ACCESS_TOKEN',
+    expiresIn: 3600,
+  }, `${GOOGLE_HOSTED_CALLBACK_URL}#state=STATE&access_token=ACCESS_TOKEN`, 'STATE', 1_000)).toEqual({
+    accessToken: 'ACCESS_TOKEN',
+    expiresAt: 3_601_000,
+  });
+});
+
 test.each([
   ['wrong origin', 'https://attacker.example/callback/', 'STATE'],
   ['wrong state', GOOGLE_HOSTED_CALLBACK_URL, 'OTHER'],
