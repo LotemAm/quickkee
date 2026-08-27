@@ -35,6 +35,8 @@ jobs:
           cache: 'yarn'
       - run: yarn install --immutable
       - run: yarn build:production
+        env:
+          VITE_GDRIVE_WEB_CLIENT_ID: ${{ secrets.VITE_GDRIVE_WEB_CLIENT_ID }}
       - uses: actions/upload-artifact@v7
         with:
           name: quickkee-chrome
