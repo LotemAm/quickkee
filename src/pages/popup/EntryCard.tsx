@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Copy, LogIn, ChevronDown, ChevronUp, PanelRight, CreditCard, KeyRound } from 'lucide-react';
+import { Copy, LogIn, ChevronDown, ChevronUp, PanelRight, CreditCard, KeyRound, UserRound, LockKeyhole } from 'lucide-react';
 import type { EntryView } from '../../shared/entry';
 import { sendToSW } from '../../shared/messages';
 import { requestOpenEntry } from '../../shared/openEntry';
@@ -26,22 +26,22 @@ export function EntryCard({ entry, tabId, onCopy, groupName }: {
           <div className="text-sm truncate" style={{ color: 'var(--text-muted)' }}>{entry.isCard ? maskCardNumber(entry.username) : entry.username}</div>
         </div>
         <div className="flex items-start gap-1 shrink-0">
-          <div className="flex flex-col items-end gap-1">
-            {entry.expired && <span className="badge-danger badge">EXPIRED</span>}
-            {groupName && <span className="badge max-w-[120px]"><span className="truncate">{groupName}</span></span>}
-          </div>
           <button className="icon-btn-xs" aria-label="Open in sidebar" title="Open in sidebar"
             onClick={() => { requestOpenEntry(entry.id); chrome.sidePanel.open({ tabId }); }}>
             <PanelRight size={12} />
           </button>
+          <div className="flex flex-col items-end gap-1">
+            {entry.expired && <span className="badge-danger badge">EXPIRED</span>}
+            {groupName && <span className="badge max-w-[120px]"><span className="truncate">{groupName}</span></span>}
+          </div>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-1.5 mt-2">
-        <button className="btn-xs" aria-label="Copy user" onClick={() => onCopy(entry.username, 'Username')}>
-          <Copy size={12} /> User
+        <button className="btn-xs" aria-label="Copy username" title="Copy username" onClick={() => onCopy(entry.username, 'Username')}>
+          <UserRound size={12} />
         </button>
-        <button className="btn-xs" aria-label="Copy pass" onClick={() => onCopy(entry.password, 'Password')}>
-          <Copy size={12} /> Pass
+        <button className="btn-xs" aria-label="Copy password" title="Copy password" onClick={() => onCopy(entry.password, 'Password')}>
+          <LockKeyhole size={12} />
         </button>
         <button className="btn-xs" aria-label="Autofill" onClick={() => sendToSW({ type: 'fillRequest', entryId: entry.id, tabId })}>
           <LogIn size={12} /> Autofill
