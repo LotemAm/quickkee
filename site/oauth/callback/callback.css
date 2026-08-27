@@ -19,16 +19,12 @@ main {
 }
 
 .mark {
-  display: grid;
-  place-items: center;
-  width: 3.5rem;
-  height: 3.5rem;
+  display: block;
+  width: 5rem;
+  height: 5rem;
   margin: 0 auto 1.25rem;
-  border-radius: 1rem;
-  background: #c9ff57;
-  color: #10131a;
-  font-size: 1.75rem;
-  font-weight: 800;
+  border-radius: 1.4rem;
+  box-shadow: 0 1rem 2.5rem rgb(0 0 0 / 35%);
 }
 
 h1 {
@@ -41,6 +37,3 @@ p {
   color: #bac3d5;
   line-height: 1.6;
 }
-
-.success .mark { background: #7ce7b2; }
-.error .mark { background: #ff8d8d; }

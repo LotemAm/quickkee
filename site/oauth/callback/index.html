@@ -3,14 +3,15 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
     <title>QuickKee · Google Drive</title>
+    <link rel="icon" href="../../icon-128.png">
     <link rel="stylesheet" href="callback.css">
     <script src="callback.js" defer></script>
   </head>
   <body>
     <main>
-      <div class="mark" aria-hidden="true">Q</div>
+      <img class="mark" src="../../icon-128.png" alt="QuickKee">
       <h1>Connecting Google Drive</h1>
       <p id="status" role="status" aria-live="polite">Returning securely to QuickKee…</p>
     </main>
