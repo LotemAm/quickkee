@@ -9,7 +9,8 @@ import { CARDHOLDER_NAME_KEY } from '../../shared/entry';
 import { arrayBufferToBase64, base64ToArrayBuffer } from '../../shared/bytes';
 import { providerFor, __hasOverride } from './cloudRouting';
 import { openCloud, saveCloud, type SyncDeps } from '../../background/sync';
-import { getAccessToken, disconnect, DROPBOX_OAUTH, GDRIVE_OAUTH } from '../../background/sources/oauth';
+import { getAccessToken, disconnect, DROPBOX_OAUTH } from '../../background/sources/oauth';
+import { disconnectGoogle, getGoogleAccessToken } from '../../background/sources/googleOAuth';
 import { getCache, cacheKey } from '../../background/cache';
 import type { CloudFileSource, DbSource } from '../../shared/dbSource';
 import { generateTotp } from '../../background/totp';
@@ -212,7 +213,8 @@ export function makeRouter(ctx: SwContext) {
         // In test mode with a fake provider installed, skip real OAuth.
         if (import.meta.env.VITE_QK_TEST === '1' && __hasOverride()) return { ok: true };
         try {
-          await getAccessToken(req.provider === 'dropbox' ? DROPBOX_OAUTH : GDRIVE_OAUTH);
+          if (req.provider === 'dropbox') await getAccessToken(DROPBOX_OAUTH);
+          else await getGoogleAccessToken({ interactive: true });
           return { ok: true };
         } catch { return { ok: false, error: 'authRequired' }; }
       }
@@ -250,7 +252,8 @@ export function makeRouter(ctx: SwContext) {
         };
       }
       case 'disconnectCloud': {
-        await disconnect(req.provider);
+        if (req.provider === 'gdrive') await disconnectGoogle();
+        else await disconnect(req.provider);
         // If the active vault is this provider's, lock so the next save can't route to a
         // now-credential-less provider (surprise OAuth popup). Local edits stay pendingUpload in cache.
         const currentSource = ctx.getCurrentSource();

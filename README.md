@@ -37,9 +37,16 @@ Then open `chrome://extensions`, enable **Developer mode**, choose **Load unpack
 
 Open QuickKee's options, connect Dropbox or Google Drive, and choose a `.kdbx` file. QuickKee shows whether the vault is synced, waiting to upload, or working from its offline cache. If local and remote changes overlap, the vaults are merged on save.
 
+### Google OAuth setup
+
+- Google Chrome uses the Chrome Extension OAuth client declared in `manifest.json`.
+- Brave and Ungoogled Chromium use the hosted callback at `https://lotemam.github.io/quickkee/oauth/callback/`.
+- In Google Cloud Console, create an OAuth client of type **Web application**, register that exact callback as an authorized redirect URI, and set its client ID as `VITE_GDRIVE_WEB_CLIENT_ID` (see `.env.example`). No client secret belongs in the extension.
+- GitHub Pages deploys the static callback from `site/` using `.github/workflows/deploy-oauth-callback.yml`.
+
 ## Security and limitations
 
 - The master password and key material remain in the service worker's memory only while the vault is unlocked and are cleared on lock.
 - Local and cloud vaults remain encrypted as `.kdbx` files.
-- OAuth refresh tokens are stored in `chrome.storage.local` and are not encrypted at rest. Signing out removes them.
-- Chrome is the supported browser. A Firefox build configuration exists but is not currently tested or supported.
+- Dropbox refresh tokens are stored in `chrome.storage.local` and are not encrypted at rest. Hosted Google access tokens are short-lived and stored in `chrome.storage.session`. Signing out removes them.
+- Chrome, Brave, and Ungoogled Chromium are supported. A Firefox build configuration exists but is not currently tested or supported.

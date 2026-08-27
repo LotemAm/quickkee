@@ -1,5 +1,6 @@
 {
   "manifest_version": 3,
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzvGemsMQJvPrbHnI0lufAFrxmHiRxryXXN0SGNIB9287or4y8ceDYzGzzv8CgAbiJ48/jLs2s9pjTW7pRon6tq7eEJGVtF9NUI3xFffnYTl0zzvOZELgGcU+MKMtrUABQxeWuVCJJpDmxrVxefEDVgpPAFthSlBVCvDQTQRmv565HY7N+VtPWTOcrcCcbuuA91aqY815JBAv/MpB71u7eO0cV+3YZnNK/vdl4RgLs5F3c9F7iSdO4XHCDf0qxtz7CfVW8d1BkFjSDsHqVRURFq2TXXGKEzgB2xDwnZz/4wUn2HU5lmNVmy+YDAeR8VtPMwONcE3rXs9goR73UxAfSQIDAQAB",
   "name": "QuickKee",
   "description": "KeePass-compatible password manager as a Chrome extension.",
   "options_page": "src/pages/options/index.html",
@@ -32,6 +33,11 @@
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "externally_connectable": {
+    "matches": [
+      "https://lotemam.github.io/quickkee/oauth/callback/*"
+    ]
   },
   "side_panel": {
     "default_path": "src/pages/panel/index.html"

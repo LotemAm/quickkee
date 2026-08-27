@@ -1,12 +1,12 @@
 import type { CloudProvider, RemoteFile, UploadResult } from './cloudProvider';
-import { getAccessToken, GDRIVE_OAUTH } from './oauth';
+import { getGoogleAccessToken } from './googleOAuth';
 
 const API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
 
 export class GDriveProvider implements CloudProvider {
   readonly id = 'gdrive' as const;
-  constructor(private getToken: () => Promise<string> = () => getAccessToken(GDRIVE_OAUTH)) {}
+  constructor(private getToken: () => Promise<string> = () => getGoogleAccessToken()) {}
 
   private async authHeader(): Promise<Record<string, string>> {
     return { Authorization: `Bearer ${await this.getToken()}` };

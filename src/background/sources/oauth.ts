@@ -16,14 +16,6 @@ export const DROPBOX_OAUTH: ProviderOAuthConfig = {
   scope: 'files.content.read files.content.write files.metadata.read',
 };
 
-export const GDRIVE_OAUTH: ProviderOAuthConfig = {
-  provider: 'gdrive',
-  clientId: import.meta.env.VITE_GDRIVE_CLIENT_ID ?? 'GDRIVE_CLIENT_ID',
-  authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
-  tokenUrl: 'https://oauth2.googleapis.com/token',
-  scope: 'https://www.googleapis.com/auth/drive.file',
-};
-
 function b64url(bytes: ArrayBuffer | Uint8Array): string {
   const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   let s = '';

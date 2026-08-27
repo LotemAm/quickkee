@@ -9,6 +9,10 @@ import { clearAllDrafts } from '../../shared/createDraft';
 import { makeRouter, depsFor, CLIPBOARD_CLEAR_ALARM, type SwContext } from './router';
 import { registerTestCommands } from './testCommands';
 import { CredentialCaptureStore } from '../../background/credentialCaptureStore';
+import {
+  GOOGLE_HOSTED_CALLBACK_MESSAGE,
+  handleHostedGoogleOAuthMessage,
+} from '../../background/sources/googleOAuth';
 
 const vault = new Vault();
 const credentialCaptures = new CredentialCaptureStore();
@@ -88,6 +92,18 @@ chrome.runtime.onMessage.addListener((req: Request, sender, sendResponse) => {
   if ((req as unknown as { __qkOffscreen?: boolean }).__qkOffscreen) return false;
   handle_(req, sender).then(sendResponse).catch(e => sendResponse({ ok: false, error: String(e) }));
   return true; // async
+});
+
+chrome.runtime.onMessageExternal.addListener((message: unknown, sender, sendResponse) => {
+  if (typeof message !== 'object' || message === null
+    || (message as { type?: unknown }).type !== GOOGLE_HOSTED_CALLBACK_MESSAGE) return false;
+  handleHostedGoogleOAuthMessage(message, sender).then(response => {
+    sendResponse(response);
+    if (response.close && sender.tab?.id != null) {
+      setTimeout(() => { void chrome.tabs.remove(sender.tab!.id!).catch(() => {}); }, 150);
+    }
+  }).catch(() => sendResponse({ ok: false, close: false, error: 'authRequired' }));
+  return true;
 });
 
 // keepalive: alarm heartbeat keeps the SW from idling out while unlocked.
