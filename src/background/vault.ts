@@ -5,6 +5,8 @@ import type { EntryView, EntryField, TreeNode, EntrySummary, AttachmentMeta } fr
 import { CARD_FLAG_KEY, OTP_FIELD_KEY } from '../shared/entry';
 import type { TotpImportAssignment } from '../shared/totpImport';
 import { parseTotpInput, toOtpUri, type TotpConfig } from './totp';
+import { analyzePasswordHealth, type PasswordHealthInput } from './passwordHealth';
+import type { PasswordHealthReport } from '../shared/passwordHealth';
 
 const TOTP_SEED_KEY = 'TOTP Seed';
 const TOTP_SETTINGS_KEY = 'TOTP Settings';
@@ -72,9 +74,9 @@ export class Vault {
     yield g; for (const c of g.groups) yield* this.allGroups(c);
   }
 
-  private isExpired(e: kdbxweb.KdbxEntry): boolean {
+  private isExpired(e: kdbxweb.KdbxEntry, now = Date.now()): boolean {
     return e.times.expires === true && e.times.expiryTime
-      ? e.times.expiryTime.getTime() < Date.now()
+      ? e.times.expiryTime.getTime() < now
       : false;
   }
 
@@ -235,6 +237,29 @@ export class Vault {
       children: g.groups.filter(c => !this.isRecycleBin(c)).map(build),
     });
     return build(this.root);
+  }
+
+  getPasswordHealthReport(now = Date.now()): PasswordHealthReport {
+    const inputs: PasswordHealthInput[] = [];
+    for (const group of this.allGroups(this.root)) for (const entry of group.entries) {
+      const isCard = str(entry.fields.get(CARD_FLAG_KEY)) === '1';
+      if (isCard) continue;
+      const username = str(entry.fields.get('UserName'));
+      const url = str(entry.fields.get('URL'));
+      const password = str(entry.fields.get('Password'));
+      if (!username && !url && !password) continue;
+      inputs.push({
+        entryId: entry.uuid.id,
+        title: str(entry.fields.get('Title')),
+        username,
+        url,
+        password,
+        modifiedAt: entry.times.lastModTime?.getTime() ?? null,
+        expired: this.isExpired(entry, now),
+        isCard,
+      });
+    }
+    return analyzePasswordHealth(inputs, now);
   }
 
   createEntry(groupId: string, fields: Record<string, string>, totp?: TotpConfig): string {

@@ -181,6 +181,11 @@ export function makeRouter(ctx: SwContext) {
       }
       case 'getTree':
         return ctx.vault.isOpen() ? { ok: true, tree: ctx.vault.getTree() } : { ok: false, error: 'locked' };
+      case 'getPasswordHealthReport':
+        if (!isExtensionPage(sender, 'panel')) return { ok: false, error: 'forbidden' };
+        return ctx.vault.isOpen()
+          ? { ok: true, report: ctx.vault.getPasswordHealthReport() }
+          : { ok: false, error: 'locked' };
       case 'createEntry':
         return { ok: true, entryId: ctx.vault.createEntry(req.groupId, req.fields, req.totp) };
       case 'updateEntry': ctx.vault.updateEntry(req.entryId, req.fields, req.expires, req.removeKeys, req.totp); return { ok: true };

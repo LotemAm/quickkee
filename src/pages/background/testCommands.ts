@@ -1,6 +1,7 @@
 import type { SwContext } from './router';
 import type { FakeCloudProvider } from '../../background/sources/fakeCloudProvider';
 import { __makeFake, __setProviderOverride } from './cloudRouting';
+import { CARD_FLAG_KEY } from '../../shared/entry';
 
 interface TestCommandMessage {
   __qk?: string;
@@ -63,6 +64,30 @@ export function registerTestCommands(ctx: SwContext & { warnedTabs: Set<number> 
         }
         case 'credentialPending': {
           send({ prompt: req.tabId == null || !req.url ? null : await ctx.credentialCaptures.pendingForPage(req.tabId, req.url) });
+          break;
+        }
+        case 'passwordHealthPrepare': {
+          const existing = ctx.vault.entriesForUrl('http://localhost')[0];
+          if (!existing) { send({ ok: false }); break; }
+          const groupId = ctx.vault.getTree().groupId;
+          const reusePassword = 'K8z-Mosaic-Copper-River-938475';
+          ctx.vault.updateEntry(existing.id, { Password: reusePassword });
+
+          ctx.vault.createEntry(groupId, {
+            Title: 'Reused Login', UserName: 'reuse-user', Password: reusePassword, URL: 'https://reuse.test',
+          });
+          ctx.vault.createEntry(groupId, {
+            Title: 'Weak Login', UserName: 'weak-user', Password: 'qwerty123', URL: 'https://weak.test',
+          });
+          ctx.vault.createEntry(groupId, {
+            Title: 'Strong Login', UserName: 'strong-user', Password: 'K9v-Mosaic-Copper-River-246810', URL: 'https://strong.test',
+          });
+          ctx.vault.createEntry(groupId, {
+            Title: 'Excluded Card', UserName: '4111111111111111', Password: reusePassword, [CARD_FLAG_KEY]: '1',
+          });
+          ctx.vault.createEntry(groupId, { Title: 'Excluded note', Notes: 'not a login' });
+          ctx.vault.dirty = false;
+          send({ ok: true });
           break;
         }
         case 'cloudInstall': {

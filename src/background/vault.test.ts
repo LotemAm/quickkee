@@ -451,3 +451,74 @@ test('importTotp validates every destination before changing the vault', async (
   expect(v.getTotpConfig(existingId)).toBeNull();
   expect(v.dirty).toBe(false);
 });
+
+describe('password health report', () => {
+  const NOW = Date.UTC(2026, 7, 27);
+  const DAY = 24 * 60 * 60 * 1000;
+
+  test('reads real protected password fields and returns only redacted reuse findings', async () => {
+    const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+    const root = v.getTree().groupId;
+    const secret = 'Vault-Only-Reuse-Fixture-938475';
+    const first = v.createEntry(root, { Title: 'Alpha', UserName: 'alpha', URL: 'https://alpha.test', Password: secret });
+    const second = v.createEntry(root, { Title: 'Beta', UserName: 'beta', URL: 'https://beta.test', Password: secret });
+
+    const db = v['db'] as import('kdbxweb').Kdbx;
+    for (const id of [first, second]) {
+      const raw = db.getDefaultGroup().entries.find(entry => entry.uuid.id === id)!;
+      expect(raw.fields.get('Password')).toBeInstanceOf((await import('kdbxweb')).ProtectedValue);
+    }
+
+    const report = v.getPasswordHealthReport(NOW);
+    expect(report.counts['reused-password']).toBe(2);
+    expect(report.entries.filter(entry => entry.entryId === first || entry.entryId === second)
+      .map(entry => entry.issues.find(issue => issue.code === 'reused-password')?.reuseGroupId))
+      .toEqual(['reuse-1', 'reuse-1']);
+    expect(JSON.stringify(report)).not.toContain(secret);
+  });
+
+  test('excludes cards, pure notes, and entries moved to the recycle bin', async () => {
+    const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+    const baselineTotal = v.getPasswordHealthReport(NOW).totalEntries;
+    const root = v.getTree().groupId;
+    const card = v.createEntry(root, {
+      Title: 'Card', UserName: '4111111111111111', Password: '123', [CARD_FLAG_KEY]: '1',
+    });
+    const note = v.createEntry(root, { Title: 'Secure note', Notes: 'remember this' });
+    const deleted = v.createEntry(root, {
+      Title: 'Deleted login', UserName: 'deleted', Password: 'password', URL: 'https://deleted.test',
+    });
+    v.deleteEntry(deleted);
+
+    const report = v.getPasswordHealthReport(NOW);
+    expect(report.entries.map(entry => entry.entryId)).not.toEqual(expect.arrayContaining([card, note, deleted]));
+    expect(report.totalEntries).toBe(baselineTotal);
+  });
+
+  test('surfaces last-modified time and computes stale and expiry relative to the requested time', async () => {
+    const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+    const id = v.entriesForUrl('https://github.com')[0].id;
+    const modifiedAt = NOW - 366 * DAY;
+    const db = v['db'] as import('kdbxweb').Kdbx;
+    const raw = db.getDefaultGroup().groups.flatMap(group => group.entries).find(entry => entry.uuid.id === id)!;
+    raw.times.lastModTime = new Date(modifiedAt);
+    raw.times.expires = true;
+    raw.times.expiryTime = new Date(NOW - 1);
+
+    const result = v.getPasswordHealthReport(NOW).entries.find(entry => entry.entryId === id)!;
+    expect(result.modifiedAt).toBe(modifiedAt);
+    expect(result.issues.map(issue => issue.code)).toEqual(expect.arrayContaining(['stale-entry', 'expired-entry']));
+  });
+
+  test('does not mutate the serialized database model or dirty state', async () => {
+    const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+    expect(v.dirty).toBe(false);
+    const db = v['db'] as import('kdbxweb').Kdbx;
+    const before = await db.saveXml();
+
+    v.getPasswordHealthReport(NOW);
+
+    expect(v.dirty).toBe(false);
+    expect(await db.saveXml()).toBe(before);
+  });
+});

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Save, Loader2, FolderClosed, FolderOpen, FileText, CreditCard, X, Lock,
-  ChevronRight, ChevronDown, Plus, Pencil, Trash2, Check, Search, Paperclip, KeyRound } from 'lucide-react';
+  ChevronRight, ChevronDown, Plus, Pencil, Trash2, Check, Search, Paperclip, KeyRound,
+  Database, ShieldCheck } from 'lucide-react';
 import { useStatus } from '../../shared/useStatus';
 import { UnlockScreen } from '../../shared/UnlockScreen';
 import { sendToSW } from '../../shared/messages';
@@ -17,6 +18,7 @@ import { EntryEditor } from './EntryEditor';
 import { PanelActionsMenu } from './PanelActionsMenu';
 import { TotpImportDialog } from './TotpImportDialog';
 import { decodeQrImage } from './decodeQrImage';
+import { PasswordHealthCenter } from './PasswordHealthCenter';
 
 function findGroup(node: TreeNode, id: string): TreeNode | null {
   if (node.groupId === id) return node;
@@ -151,14 +153,17 @@ export function Panel() {
   const [totpImportError, setTotpImportError] = useState('');
   const [readingTotpQr, setReadingTotpQr] = useState(false);
   const [savingTotpImport, setSavingTotpImport] = useState(false);
+  const [view, setView] = useState<'vault' | 'health'>('vault');
   const totpFileInput = useRef<HTMLInputElement>(null);
   useEffect(() => { loadSettings().then(s => { applyTheme(s.theme); setClearSecs(s.clipboardClearSeconds); setPwgen(s.pwgen); }); }, []);
-  const reload = () => sendToSW({ type: 'getTree' }).then(r => {
-    if (!r.ok) return;
+  const reload = async (): Promise<TreeNode | null> => {
+    const r = await sendToSW({ type: 'getTree' });
+    if (!r.ok) return null;
     setTree(r.tree);
     setSelGroup(g => g ?? r.tree.groupId);
     setExpanded(e => e.size ? e : new Set([r.tree.groupId]));
-  });
+    return r.tree;
+  };
 
   const toggle = (id: string) => setExpanded(e => {
     const n = new Set(e); if (n.has(id)) n.delete(id); else n.add(id); return n;
@@ -196,8 +201,9 @@ export function Panel() {
     if (found) {
       setSelGroup(found.groupId);
       setExpanded(e => new Set([...e, ...found.ancestors]));
+      setView('vault');
+      setSelEntry(pendingOpenEntry);
     }
-    setSelEntry(pendingOpenEntry);
     setCreatingEntry(false);
     setPendingOpenEntry(null);
   }, [pendingOpenEntry, tree]);
@@ -209,8 +215,22 @@ export function Panel() {
     const r = await sendToSW({ type: 'save' });
     setSaved(r.ok ? 'Saved' : 'Save failed'); refresh(); setSaving(false); setTimeout(() => setSaved(''), 2000); }
 
+  async function openHealthEntry(entryId: string): Promise<boolean> {
+    const latestTree = await reload();
+    if (!latestTree) return false;
+    const found = findEntryGroup(latestTree, entryId);
+    if (!found) return false;
+    setView('vault');
+    setSelGroup(found.groupId);
+    setExpanded(current => new Set([...current, ...found.ancestors]));
+    setSelEntry(entryId);
+    setCreatingEntry(false);
+    return true;
+  }
+
   function beginTotpImport() {
     setTotpImportError('');
+    setView('vault');
     if (!tree) {
       setTotpImportError('Vault entries are still loading. Try again in a moment.');
       return;
@@ -265,6 +285,12 @@ export function Panel() {
     <div className="flex flex-col h-screen" style={{ background: 'var(--bg)' }}>
       <header className="app-header">
         <span className="app-title"><img src={chrome.runtime.getURL('icon-32.png')} alt="" className="app-logo" width={18} height={18} /> QuickKee</span>
+        <nav className="segmented" aria-label="Panel view">
+          <button className="segmented-item" aria-label="Vault view" aria-pressed={view === 'vault'}
+            onClick={() => setView('vault')}><Database size={13} /> Vault</button>
+          <button className="segmented-item" aria-label="Health view" aria-pressed={view === 'health'}
+            onClick={() => setView('health')}><ShieldCheck size={13} /> Health</button>
+        </nav>
         <div className="flex items-center gap-1">
           <input ref={totpFileInput} className="hidden" type="file" accept="image/*" multiple
             aria-label="Google Authenticator QR images"
@@ -288,6 +314,9 @@ export function Panel() {
         </div>
       )}
 
+      {view === 'health' ? (
+        <PasswordHealthCenter onOpenEntry={openHealthEntry} />
+      ) : (<>
       <div className="flex flex-1 min-h-0">
         {/* Left: groups only */}
         <div className="w-56 shrink-0 overflow-auto py-2" style={{ borderRight: '1px solid var(--border)' }}>
@@ -362,6 +391,7 @@ export function Panel() {
               onDeleted={() => { setSelEntry(null); refresh(); reload(); }} />
           </div>
         </div>)}
+      </>)}
       {totpImport && tree && (
         <TotpImportDialog result={totpImport} tree={tree} defaultGroupId={selGroup ?? tree.groupId}
           busy={savingTotpImport} error={totpImportError}

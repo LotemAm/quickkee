@@ -13,6 +13,7 @@ test('sendToSW is typed per-request (type-level only, no runtime assertions)', (
   expectTypeOf(sendToSW({ type: 'getTree' })).resolves.toEqualTypeOf<ResponseFor<'getTree'>>();
   expectTypeOf(sendToSW({ type: 'getEntriesForUrl', url: 'x' })).resolves.toEqualTypeOf<ResponseFor<'getEntriesForUrl'>>();
   expectTypeOf(sendToSW({ type: 'getPendingCredentialPrompt' })).resolves.toEqualTypeOf<ResponseFor<'getPendingCredentialPrompt'>>();
+  expectTypeOf(sendToSW({ type: 'getPasswordHealthReport' })).resolves.toEqualTypeOf<ResponseFor<'getPasswordHealthReport'>>();
 
   const r = {} as ResponseFor<'getTree'>;
   if (r.ok) {
@@ -24,5 +25,11 @@ test('sendToSW is typed per-request (type-level only, no runtime assertions)', (
   if (prompt.ok && prompt.prompt) {
     // @ts-expect-error — staged passwords never appear in safe content-script metadata
     void prompt.prompt.password;
+  }
+
+  const health = {} as ResponseFor<'getPasswordHealthReport'>;
+  if (health.ok) {
+    // @ts-expect-error — password values never cross the password-health boundary
+    void health.report.entries[0].password;
   }
 });

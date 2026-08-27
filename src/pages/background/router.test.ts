@@ -441,6 +441,39 @@ describe('getCardEntrySummariesForUrl', () => {
   });
 });
 
+describe('getPasswordHealthReport', () => {
+  const panelSender = { url: 'chrome-extension://quickkee/src/pages/panel/index.html' } as chrome.runtime.MessageSender;
+
+  test('is panel-only and returns locked while the vault is closed', async () => {
+    const { handle_ } = makeCtx();
+    const request = { type: 'getPasswordHealthReport' as const };
+    expect(await handle_(request, panelSender)).toEqual({ ok: false, error: 'locked' });
+
+    await unlockHappyPath(handle_);
+    expect(await handle_(request, contentSender())).toEqual({ ok: false, error: 'forbidden' });
+    expect(await handle_(request, { url: 'chrome-extension://quickkee/src/pages/options/index.html' }))
+      .toEqual({ ok: false, error: 'forbidden' });
+  });
+
+  test('returns a redacted exact report without changing dirty state', async () => {
+    const { ctx, handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    expect(ctx.vault.dirty).toBe(false);
+
+    const response = await handle_({ type: 'getPasswordHealthReport' }, panelSender);
+
+    expect(response.ok).toBe(true);
+    expect(Object.keys(response).sort()).toEqual(['ok', 'report']);
+    const report = (response as unknown as { report: Record<string, unknown> }).report;
+    expect(Object.keys(report).sort()).toEqual([
+      'counts', 'entries', 'generatedAt', 'needsAttention', 'reviewCount', 'totalEntries',
+    ]);
+    expect(JSON.stringify(response)).not.toContain('s3cr3t');
+    expect(JSON.stringify(response)).not.toContain('abc123');
+    expect(ctx.vault.dirty).toBe(false);
+  });
+});
+
 describe('attachments', () => {
   test('addAttachment/getAttachment/removeAttachment locked -> locked error', async () => {
     const { handle_ } = makeCtx();

@@ -4,6 +4,7 @@ import type { RemoteFile } from '../background/sources/cloudProvider';
 import type { DbSource } from './dbSource';
 import type { TotpConfig, TotpCode } from '../background/totp';
 import type { TotpImportAssignment } from './totpImport';
+import type { PasswordHealthReport } from './passwordHealth';
 
 export interface CredentialPromptEntry {
   id: string;
@@ -34,6 +35,7 @@ export type Request =
   | { type: 'previewTotp'; config: TotpConfig }
   | { type: 'importTotp'; assignments: TotpImportAssignment[] }
   | { type: 'getTree' }
+  | { type: 'getPasswordHealthReport' }
   | { type: 'createEntry'; groupId: string; fields: Record<string, string>; totp?: TotpConfig }
   | { type: 'updateEntry'; entryId: string; fields: Record<string, string>; expires?: number | null; removeKeys?: string[]; totp?: TotpConfig | null }
   | { type: 'updateGroup'; groupId: string; fields: Record<string, string> }
@@ -100,6 +102,7 @@ type OkFor = {
   getCardEntrySummariesForUrl: Ok<{ summaries: EntrySummary[] }>;
   getEntry: Ok<{ entry: EntryView | null }>;
   getTree: Ok<{ tree: TreeNode }>;
+  getPasswordHealthReport: Ok<{ report: PasswordHealthReport }>;
   createEntry: Ok<{ entryId: string }>;
   createGroup: Ok<{ groupId: string }>;
   save: Ok<{ merged?: boolean }>;
