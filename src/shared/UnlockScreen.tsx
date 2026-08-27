@@ -100,7 +100,7 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: () => void }) {
         </label>
         {useKey && <button className="btn w-full" onClick={async () => { try { setKeyName(await pickKeyFile()); } catch (e) { if ((e as DOMException).name !== 'AbortError') throw e; } }}>
           <KeyRound size={15} /> {keyName ? `Key file: ${keyName}` : 'Choose key file…'}</button>}
-        <input type="password" className="input" placeholder="Master password" value={pwd}
+        <input type="password" className="input" placeholder="Master password" value={pwd} autoFocus
           onChange={e => setPwd(e.target.value)} onKeyDown={e => e.key === 'Enter' && canUnlock && !unlocking && unlock()} />
         {err && <p className="alert-error">{err}</p>}
         {cloudErr && src !== 'local' && (

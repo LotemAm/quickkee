@@ -5,7 +5,9 @@ test('first run: install db, enter password, vault opens', async ({ context, ext
   await installDb(popup);
   await popup.reload();
 
-  await popup.getByPlaceholder('Master password').fill('correct horse');
+  const password = popup.getByPlaceholder('Master password');
+  await expect(password).toBeFocused();
+  await password.fill('correct horse');
   await popup.getByRole('button', { name: 'Unlock' }).click();
 
   // Locked view shows the Unlock button; unlocked view shows the search box.
