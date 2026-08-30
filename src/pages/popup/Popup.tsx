@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Search, Settings, Cloud, CloudOff, RefreshCw, PanelRight, Lock, Plus, X } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Search, Settings, Cloud, CloudOff, RefreshCw, PanelRight, Lock, Plus, X, QrCode, Loader2 } from 'lucide-react';
 import { useStatus } from '../../shared/useStatus';
 import { UnlockScreen } from '../../shared/UnlockScreen';
 import { sendToSW } from '../../shared/messages';
@@ -13,6 +13,9 @@ import { CreateForm } from './CreateForm';
 import { useClipboardTimer } from '../../shared/useClipboardTimer';
 import { ClipboardBar } from '../../shared/ClipboardBar';
 import { loadDraft } from '../../shared/createDraft';
+import { isScannablePageUrl, scanVisibleTabForTotp, UNSUPPORTED_PAGE_MESSAGE, type ScannedPageTotp } from './scanVisibleTabForTotp';
+import { ScannedTotpDialog } from './ScannedTotpDialog';
+import { saveScannedTotp, type ScannedTotpDestination } from './saveScannedTotp';
 
 function collectEntries(node: TreeNode, acc: { id: string; title: string; username: string; url: string }[] = []) {
   for (const e of node.entries) acc.push(e);
@@ -43,23 +46,63 @@ export function Popup() {
   const [sync, setSync] = useState<{ source: string | null; pendingUpload: boolean; online: boolean } | null>(null);
   const [creating, setCreating] = useState(false);
   const [unlockNotice, setUnlockNotice] = useState('');
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState('');
+  const [scanned, setScanned] = useState<ScannedPageTotp | null>(null);
+  const [notice, setNotice] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
+
+  const reloadVaultData = useCallback(async (url: string): Promise<boolean> => {
+    const [entryResult, treeResult] = await Promise.all([
+      sendToSW({ type: 'getEntriesForUrl', url }),
+      sendToSW({ type: 'getTree' }),
+    ]);
+    if (entryResult.ok) setEntries(entryResult.entries);
+    if (treeResult.ok) {
+      setTree(treeResult.tree);
+      setRootGroup(treeResult.tree.groupId);
+    }
+    return entryResult.ok && treeResult.ok;
+  }, []);
 
   useEffect(() => { loadSettings().then(s => { applyTheme(s.theme); setClearSecs(s.clipboardClearSeconds); setPwgen(s.pwgen); }); }, []);
   useEffect(() => {
     const p = new URLSearchParams(location.search);
-    if (import.meta.env.VITE_QK_TEST === '1' && p.get('qkurl')) {
-      setTab({ id: Number(p.get('qktab')), url: p.get('qkurl')! });
+    if (import.meta.env.VITE_QK_TEST === '1') {
+      if (p.get('qkurl')) {
+        setTab({ id: Number(p.get('qktab')), url: p.get('qkurl')! });
+      } else {
+        void chrome.tabs.query({ active: true, currentWindow: true })
+          .then(([current]) => setTab(current?.id != null && current.url ? { id: current.id, url: current.url } : null));
+      }
       return;
     }
-    chrome.tabs.query({ active: true, currentWindow: true })
-      .then(([t]) => t?.id && t.url && setTab({ id: t.id, url: t.url }));
+    const loadCurrentTab = () => chrome.tabs.query({ active: true, currentWindow: true })
+      .then(([current]) => setTab(current?.id != null && current.url ? { id: current.id, url: current.url } : null));
+    void loadCurrentTab();
+    const onActivated = () => { void loadCurrentTab(); };
+    const onUpdated: Parameters<typeof chrome.tabs.onUpdated.addListener>[0] = (_tabId, change, updated) => {
+      if (updated.active && (change.url || change.status === 'complete')) void loadCurrentTab();
+    };
+    chrome.tabs.onActivated.addListener(onActivated);
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    return () => {
+      chrome.tabs.onActivated.removeListener(onActivated);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+    };
   }, []);
   useEffect(() => { if (locked || !tab) return;
     setCreating(false);
-    sendToSW({ type: 'getEntriesForUrl', url: tab.url }).then(r => r.ok && setEntries(r.entries));
-    sendToSW({ type: 'getTree' }).then(r => { if (r.ok) { setTree(r.tree); setRootGroup(r.tree.groupId); } });
+    void reloadVaultData(tab.url);
     loadDraft(tab.url).then(d => d && setCreating(true));
-  }, [locked, tab]);
+  }, [locked, tab, reloadVaultData]);
+  useEffect(() => {
+    if (locked) {
+      setScanned(null);
+      setScanError('');
+      return;
+    }
+    setScanned(current => current && (current.tabId !== tab?.id || current.pageUrl !== tab?.url) ? null : current);
+  }, [locked, tab?.id, tab?.url]);
   useEffect(() => {
     const query = q.trim().toLowerCase();
     if (!query || !tree) { setSearchResults([]); return; }
@@ -83,6 +126,49 @@ export function Popup() {
   }, [locked]);
 
   const { copy, state: clipState, cancel } = useClipboardTimer(clearSecs);
+
+  async function scanPage() {
+    if (scanning) return;
+    setScanning(true);
+    setScanError('');
+    setNotice(null);
+    setScanned(null);
+    try {
+      const result = await scanVisibleTabForTotp();
+      const loaded = await reloadVaultData(result.pageUrl);
+      if (!loaded) throw new Error('Could not load vault entries for this page.');
+      setTab({ id: result.tabId, url: result.pageUrl });
+      setCreating(false);
+      setScanned(result);
+    } catch (error) {
+      setScanError(error instanceof Error ? error.message : 'Could not scan the visible page. Try again.');
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  async function confirmScanned(destination: ScannedTotpDestination): Promise<string | null> {
+    if (!scanned) return 'The scanned code is no longer available. Scan the page again.';
+    const result = await saveScannedTotp(scanned.config, destination);
+    if (result.status === 'failed') return 'Could not add the authenticator code. The vault was not changed.';
+
+    setScanned(null);
+    await Promise.allSettled([reloadVaultData(scanned.pageUrl), refresh()]);
+    if (result.status === 'saved') {
+      setNotice({ kind: 'success', message: 'Authenticator code saved.' });
+    } else if (result.status === 'unsaved') {
+      setNotice({
+        kind: 'error',
+        message: 'Authenticator code was added in memory, but saving failed. The vault still has unsaved changes.',
+      });
+    } else {
+      setNotice({
+        kind: 'error',
+        message: 'Could not confirm whether the authenticator code was added. Check the vault before retrying.',
+      });
+    }
+    return null;
+  }
 
   if (locked) return <UnlockScreen onUnlocked={notice => {
     setUnlockNotice(notice ?? '');
@@ -118,15 +204,26 @@ export function Popup() {
       {clipState && <ClipboardBar state={clipState} onCancel={cancel} />}
       {unlockNotice && <p role="status" className="mx-3 mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>{unlockNotice}</p>}
       <div className="p-3">
+        <button className="btn-secondary w-full mb-2" aria-label="Scan page QR"
+          title={isScannablePageUrl(tab?.url) ? 'Scan the visible tab locally.' : UNSUPPORTED_PAGE_MESSAGE}
+          disabled={!isScannablePageUrl(tab?.url) || scanning} onClick={() => void scanPage()}>
+          {scanning ? <><Loader2 size={15} className="animate-spin" /> Scanning visible page…</> : <><QrCode size={15} /> Scan page QR</>}
+        </button>
+        {tab && !isScannablePageUrl(tab.url) && (
+          <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>{UNSUPPORTED_PAGE_MESSAGE}</p>
+        )}
+        {scanError && <p className="alert-error mb-2" role="alert">{scanError}</p>}
+        {notice && <p className={notice.kind === 'error' ? 'alert-error mb-2' : 'card mb-2 text-sm'}
+          role={notice.kind === 'error' ? 'alert' : 'status'}>{notice.message}</p>}
         {creating && tab && rootGroup && tree ? (
           <>
             <button className="btn-secondary mb-2" onClick={() => setCreating(false)}>
               <X size={15} /> Cancel
             </button>
-            <CreateForm url={tab.url} tabId={tab.id} groups={flattenGroups(tree)} defaultGroupId={rootGroup}
+            <CreateForm key={tab.url} url={tab.url} tabId={tab.id} groups={flattenGroups(tree)} defaultGroupId={rootGroup}
               clearSecs={clearSecs} pwgen={pwgen} onCreated={() => {
                 setCreating(false);
-                sendToSW({ type: 'getEntriesForUrl', url: tab.url }).then(r => r.ok && setEntries(r.entries));
+                void reloadVaultData(tab.url);
               }} />
           </>
         ) : (
@@ -139,9 +236,9 @@ export function Popup() {
             {searching && shown.length === 0 &&
               <div className="empty-state mt-6">No entries match your search.</div>}
             {!searching && entries.length === 0 && tab && rootGroup && tree &&
-              <CreateForm url={tab.url} tabId={tab.id} groups={flattenGroups(tree)} defaultGroupId={rootGroup}
+              <CreateForm key={tab.url} url={tab.url} tabId={tab.id} groups={flattenGroups(tree)} defaultGroupId={rootGroup}
                 clearSecs={clearSecs} pwgen={pwgen} onCreated={() =>
-                sendToSW({ type: 'getEntriesForUrl', url: tab.url }).then(r => r.ok && setEntries(r.entries))} />}
+                void reloadVaultData(tab.url)} />}
             {!searching && entries.length > 0 && tab && rootGroup && tree && (
               <button className="btn-secondary w-full mt-2" onClick={() => setCreating(true)}>
                 <Plus size={15} /> Add entry
@@ -150,6 +247,11 @@ export function Popup() {
           </>
         )}
       </div>
+      {scanned && tree && rootGroup && (
+        <ScannedTotpDialog config={scanned.config} pageUrl={scanned.pageUrl} entries={entries}
+          groups={flattenGroups(tree)} defaultGroupId={rootGroup}
+          onCancel={() => setScanned(null)} onConfirm={confirmScanned} />
+      )}
     </div>
   );
 }

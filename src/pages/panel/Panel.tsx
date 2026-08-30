@@ -17,7 +17,7 @@ import { DEFAULT_PWGEN, type PwGenOpts } from '../../shared/pwgen';
 import { EntryEditor } from './EntryEditor';
 import { PanelActionsMenu } from './PanelActionsMenu';
 import { TotpImportDialog } from './TotpImportDialog';
-import { decodeQrImage } from './decodeQrImage';
+import { decodeQrImage } from '../../shared/decodeQrImage';
 import { PasswordHealthCenter } from './PasswordHealthCenter';
 
 function findGroup(node: TreeNode, id: string): TreeNode | null {

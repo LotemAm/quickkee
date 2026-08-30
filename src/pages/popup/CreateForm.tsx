@@ -7,10 +7,7 @@ import { loadDraft, saveDraft, clearDraft } from '../../shared/createDraft';
 import { PasswordRulesPanel } from '../../shared/PasswordRulesPanel';
 import { TotpSetup } from '../../shared/TotpSetup';
 import type { TotpConfig } from '../../background/totp';
-
-function baseUrl(url: string) {
-  try { return new URL(url).origin + '/'; } catch { return url; }
-}
+import { canonicalPageOrigin } from '../../shared/entryDefaults';
 
 export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwgen, onCreated }: {
   url: string;
@@ -24,7 +21,7 @@ export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwge
   const [title, setTitle] = useState(''); const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [groupId, setGroupId] = useState(defaultGroupId);
-  const [entryUrl, setEntryUrl] = useState(() => baseUrl(url));
+  const [entryUrl, setEntryUrl] = useState(() => canonicalPageOrigin(url));
   const [opts, setOpts] = useState<PwGenOpts>(pwgen);
   const [showRules, setShowRules] = useState(false);
   const [hydrated, setHydrated] = useState(false);
@@ -49,7 +46,7 @@ export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwge
         setGroupId(groups.some(g => g.groupId === d.groupId) ? d.groupId : defaultGroupId);
         setEntryUrl(d.entryUrl); setOpts(d.opts); setRestored(true);
       } else {
-        setEntryUrl(baseUrl(url)); setGroupId(defaultGroupId); regenerate(pwgen);
+        setEntryUrl(canonicalPageOrigin(url)); setGroupId(defaultGroupId); regenerate(pwgen);
       }
       setHydrated(true);
     });
@@ -75,7 +72,7 @@ export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwge
   async function discardDraft() {
     await clearDraft(url);
     setTitle(''); setUsername(''); setGroupId(defaultGroupId);
-    setEntryUrl(baseUrl(url)); setOpts(pwgen); regenerate(pwgen);
+    setEntryUrl(canonicalPageOrigin(url)); setOpts(pwgen); regenerate(pwgen);
     setTotp(null); setTotpError(''); setTotpReset(n => n + 1);
     setRestored(false);
   }

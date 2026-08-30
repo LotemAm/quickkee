@@ -2,6 +2,58 @@ import http from 'node:http';
 import https from 'node:https';
 import selfsigned from 'selfsigned';
 import type { AddressInfo } from 'node:net';
+import { BarcodeFormat, EncodeHintType, QRCodeWriter } from '@zxing/library';
+
+export const SCANNED_TOTP_SECRET = 'JBSWY3DPEHPK3PXP';
+const SCANNED_TOTP_URI = `otpauth://totp/QuickKee%20E2E:qr-user%40localhost?secret=${SCANNED_TOTP_SECRET}&issuer=QuickKee%20E2E`;
+
+function qrSvg(value: string): string {
+  const matrix = new QRCodeWriter().encode(
+    value,
+    BarcodeFormat.QR_CODE,
+    0,
+    0,
+    new Map([[EncodeHintType.MARGIN, 4]]),
+  );
+  const path: string[] = [];
+  for (let y = 0; y < matrix.getHeight(); y++) {
+    let x = 0;
+    while (x < matrix.getWidth()) {
+      if (!matrix.get(x, y)) { x++; continue; }
+      const start = x;
+      while (x < matrix.getWidth() && matrix.get(x, y)) x++;
+      path.push(`M${start} ${y}h${x - start}v1h-${x - start}z`);
+    }
+  }
+  return `<svg id="totp-qr" role="img" aria-label="Authenticator setup QR code"
+    viewBox="0 0 ${matrix.getWidth()} ${matrix.getHeight()}" xmlns="http://www.w3.org/2000/svg"
+    shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path d="${path.join('')}" fill="#111827"/></svg>`;
+}
+
+const TOTP_QR_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Account security</title>
+<style>
+  *{box-sizing:border-box} body{margin:0;background:#f3f6fb;color:#172033;font:15px system-ui,sans-serif}
+  header{height:64px;background:#172033;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 34px}
+  nav{display:flex;gap:22px;color:#cbd5e1}.avatar{width:34px;height:34px;border-radius:50%;background:#60a5fa;display:grid;place-items:center;font-weight:700}
+  main{max-width:1080px;margin:26px auto;padding:0 24px}.eyebrow{color:#64748b;font-size:13px}.title-row{display:flex;align-items:center;justify-content:space-between}
+  button{border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:9px 13px;color:#172033}.primary{background:#2563eb;color:#fff;border-color:#2563eb}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:20px 0}.stat,.card{background:#fff;border:1px solid #dbe3ef;border-radius:13px;box-shadow:0 2px 8px #1e293b0c}
+  .stat{padding:15px}.stat strong{display:block;font-size:20px;margin-top:5px}.grid{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:18px}
+  .card{padding:20px}.method{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid #e8edf5}.method:last-child{border:0}
+  .method p,.muted{margin:4px 0 0;color:#64748b;font-size:13px}.qr-card{text-align:center}.qr-card svg{display:block;width:280px;height:280px;margin:12px auto;background:#fff}
+  .notice{background:#eff6ff;border-radius:8px;padding:10px;color:#1e40af;font-size:13px;text-align:left}.activity{margin-top:18px}.activity-row{display:grid;grid-template-columns:1fr 1fr 90px;padding:11px 0;border-top:1px solid #e8edf5;color:#475569}
+</style></head><body>
+<header><strong>Northstar Workspace</strong><nav><span>Dashboard</span><span>Projects</span><span>Billing</span><span>Security</span></nav><div class="avatar">QA</div></header>
+<main><div class="title-row"><div><div class="eyebrow">Settings / Account</div><h1>Security overview</h1></div><button>Download recovery codes</button></div>
+<section class="stats" aria-label="Security summary"><div class="stat">Security score<strong>86%</strong></div><div class="stat">Active sessions<strong>3</strong></div><div class="stat">Trusted devices<strong>2</strong></div></section>
+<div class="grid"><section class="card"><h2>Sign-in methods</h2><div class="method"><div><strong>Password</strong><p>Last changed 18 days ago</p></div><button>Change</button></div>
+<div class="method"><div><strong>Passkeys</strong><p>Use biometrics or a hardware key</p></div><button>Set up</button></div>
+<div class="method"><div><strong>Recovery email</strong><p>qa-team@example.test</p></div><button>Update</button></div>
+<div class="activity"><h2>Recent sign-ins</h2><div class="activity-row"><span>Chrome on Windows</span><span>Tel Aviv, Israel</span><span>Now</span></div><div class="activity-row"><span>Mobile app</span><span>Jerusalem, Israel</span><span>Yesterday</span></div></div></section>
+<aside class="card qr-card"><span class="eyebrow">Authenticator app</span><h2>Scan to finish setup</h2><p class="muted">Use your password manager or authenticator app.</p>${qrSvg(SCANNED_TOTP_URI)}
+<div class="notice">Keep this page open until setup is confirmed.</div><p><button class="primary">Verify and continue</button></p></aside></div></main></body></html>`;
 
 const LOGIN_PAGE = `<!doctype html><html><body>
 <h1>Login</h1>
@@ -150,6 +202,7 @@ export async function startHttpFixture() {
     res.writeHead(200, { 'content-type': 'text/html' });
     if (req.url === '/single') res.end(SINGLE_STEP_PAGE);
     else if (req.url === '/otp') res.end(OTP_PAGE);
+    else if (req.url === '/totp-qr') res.end(TOTP_QR_PAGE);
     else if (req.url === '/step1') res.end(STEP1_PAGE);
     else if (req.url?.startsWith('/step2')) res.end(STEP2_PAGE);
     else if (req.url === '/card') res.end(CARD_PAGE);
@@ -170,6 +223,7 @@ export async function startHttpFixture() {
     altUrl: `http://127.0.0.1:${port}/`,
     singleUrl: `http://localhost:${port}/single`,
     otpUrl: `http://localhost:${port}/otp`,
+    totpQrUrl: `http://localhost:${port}/totp-qr`,
     step1Url: `http://localhost:${port}/step1`,
     cardUrl: `http://localhost:${port}/card`,
     cardSelectUrl: `http://localhost:${port}/card-select`,

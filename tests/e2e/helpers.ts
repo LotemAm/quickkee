@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import { startHttpFixture, startHttpsFixture } from './servers';
+export { SCANNED_TOTP_SECRET } from './servers';
 import kdbxweb from 'kdbxweb';
 import { argon2id, argon2d } from 'hash-wasm';
 
