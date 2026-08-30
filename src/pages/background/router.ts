@@ -22,7 +22,8 @@ import {
   saveQuickUnlockEnrollment,
 } from '../../background/quickUnlockStore';
 import { unwrapQuickUnlockMaterial, wrapQuickUnlockMaterial } from '../../background/quickUnlockCrypto';
-import type { QuickUnlockSource } from '../../shared/quickUnlock';
+import { quickUnlockSourceMatches, type QuickUnlockSource, type QuickUnlockSourceIdentity } from '../../shared/quickUnlock';
+import { quickUnlockInfo, quickUnlockWarn } from '../../shared/quickUnlockDebug';
 
 /** Name of the alarm used to schedule a deferred clipboard clear (shared with lifecycle wiring in index.ts). */
 export const CLIPBOARD_CLEAR_ALARM = 'clipboard-clear';
@@ -97,8 +98,14 @@ async function openCloudVault(
 
 function sourceMatchesActive(source: QuickUnlockSource, ctx: SwContext): boolean {
   const active = ctx.getCurrentSource();
-  if (source.kind === 'local') return active?.kind === 'local' && ctx.getHandle()?.name === source.label;
-  return active?.kind === 'cloud' && active.provider === source.provider && active.fileId === source.fileId;
+  let selected: QuickUnlockSourceIdentity | null = null;
+  if (active?.kind === 'local') {
+    const label = ctx.getHandle()?.name;
+    if (label) selected = { kind: 'local', label };
+  } else if (active?.kind === 'cloud') {
+    selected = { kind: 'cloud', provider: active.provider, fileId: active.fileId };
+  }
+  return quickUnlockSourceMatches(source, selected);
 }
 
 async function cloudConnected(ctx: SwContext, provider: 'dropbox' | 'gdrive'): Promise<boolean> {
@@ -361,21 +368,50 @@ export function makeRouter(ctx: SwContext) {
         } catch { return { ok: true, enrolled: false, corrupt: true, source: null }; }
       }
       case 'enrollQuickUnlock': {
-        if (!isExtensionPage(sender, 'popup', 'panel')) return { ok: false, error: 'forbidden' };
-        if (!ctx.vault.isOpen()) return { ok: false, error: 'locked' };
-        if (!sourceMatchesActive(req.source, ctx)) return { ok: false, error: 'sourceMismatch' };
+        quickUnlockInfo('background.enrollment-requested', {
+          sourceKind: req.source.kind,
+          hasPassword: req.password !== null,
+          hasKeyFile: req.keyFile !== null,
+          keyFileBytes: req.keyFile?.length ?? 0,
+          prfOutputBytes: req.prfOutput.length,
+          replaceExisting: req.replaceExisting,
+        });
+        if (!isExtensionPage(sender, 'popup', 'panel')) {
+          quickUnlockWarn('background.enrollment-rejected', undefined, { reason: 'forbidden' });
+          return { ok: false, error: 'forbidden' };
+        }
+        if (!ctx.vault.isOpen()) {
+          quickUnlockWarn('background.enrollment-rejected', undefined, { reason: 'locked' });
+          return { ok: false, error: 'locked' };
+        }
+        if (!sourceMatchesActive(req.source, ctx)) {
+          quickUnlockWarn('background.enrollment-rejected', undefined, { reason: 'sourceMismatch' });
+          return { ok: false, error: 'sourceMismatch' };
+        }
         if ((req.password === null && req.keyFile === null)
           || (req.keyFile !== null && !validSecretBytes(req.keyFile))
-          || !validSecretBytes(req.prfOutput, 32)) return { ok: false, error: 'invalidEnrollment' };
+          || !validSecretBytes(req.prfOutput, 32)) {
+          quickUnlockWarn('background.enrollment-rejected', undefined, { reason: 'invalidEnrollment' });
+          return { ok: false, error: 'invalidEnrollment' };
+        }
         const keyFile = req.keyFile ? new Uint8Array(req.keyFile) : null;
         const prfOutput = new Uint8Array(req.prfOutput);
+        let stage = 'existing-enrollment-check';
         try {
           try {
             const existing = await loadQuickUnlockEnrollment();
-            if (existing && !req.replaceExisting) return { ok: false, error: 'replacementConfirmationRequired' };
+            if (existing && !req.replaceExisting) {
+              quickUnlockWarn('background.enrollment-rejected', undefined, { reason: 'replacementConfirmationRequired' });
+              return { ok: false, error: 'replacementConfirmationRequired' };
+            }
           } catch {
-            if (!req.replaceExisting) return { ok: false, error: 'corruptEnrollment' };
+            if (!req.replaceExisting) {
+              quickUnlockWarn('background.enrollment-rejected', undefined, { reason: 'corruptEnrollment' });
+              return { ok: false, error: 'corruptEnrollment' };
+            }
           }
+          stage = 'wrap-material';
+          quickUnlockInfo('background.enrollment-wrapping', { sourceKind: req.source.kind });
           const record = await wrapQuickUnlockMaterial({
             credentialId: req.credentialId,
             prfInput: req.prfInput,
@@ -383,9 +419,15 @@ export function makeRouter(ctx: SwContext) {
             source: req.source,
             material: { password: req.password, keyFile },
           });
+          stage = 'persist-enrollment';
+          quickUnlockInfo('background.enrollment-persisting', { sourceKind: req.source.kind });
           await saveQuickUnlockEnrollment(record, req.source.kind === 'local' ? ctx.getHandle() : null);
+          quickUnlockInfo('background.enrollment-saved', { sourceKind: req.source.kind });
           return { ok: true };
-        } catch { return { ok: false, error: 'enrollmentFailed' }; }
+        } catch (error) {
+          quickUnlockWarn('background.enrollment-failed', error, { stage });
+          return { ok: false, error: 'enrollmentFailed' };
+        }
         finally {
           keyFile?.fill(0);
           prfOutput.fill(0);

@@ -12,7 +12,13 @@ import {
   getDevicePrfOutput,
   isDeviceQuickUnlockAvailable,
 } from './deviceQuickUnlock';
-import type { QuickUnlockSource, QuickUnlockStatus } from './quickUnlock';
+import {
+  quickUnlockSourceMatches,
+  type QuickUnlockSource,
+  type QuickUnlockSourceIdentity,
+  type QuickUnlockStatus,
+} from './quickUnlock';
+import { quickUnlockInfo, quickUnlockWarn } from './quickUnlockDebug';
 
 function deviceError(error: unknown): string {
   const code = error instanceof DeviceQuickUnlockError ? error.code
@@ -83,6 +89,11 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: (notice?: string) => 
   const canUnlock = src !== 'local'
     ? (picked !== null) && ((pwd.length > 0) || (useKey && !!keyName))
     : (pwd.length > 0) || (useKey && !!keyName);
+  const selectedSource: QuickUnlockSourceIdentity | null = src === 'local'
+    ? dbName ? { kind: 'local', label: dbName } : null
+    : picked ? { kind: 'cloud', provider: src, fileId: picked.fileId } : null;
+  const selectedHasQuickUnlock = quickStatus?.enrolled === true && !!quickStatus.source
+    && quickUnlockSourceMatches(quickStatus.source, selectedSource);
   async function unlock() {
     setErr(''); setCloudErr(false); setUnlocking(true);
     let keyBytes: number[] | null = null;
@@ -121,6 +132,12 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: (notice?: string) => 
         }
         let proof: Awaited<ReturnType<typeof createDeviceCredential>> | null = null;
         try {
+          quickUnlockInfo('ui.enrollment-started', {
+            sourceKind: source.kind,
+            hasPassword: pwd.length > 0,
+            hasKeyFile: keyBytes !== null,
+            replaceExisting,
+          });
           proof = await createDeviceCredential();
           const enrolled = await sendToSW({
             type: 'enrollQuickUnlock',
@@ -133,10 +150,12 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: (notice?: string) => 
             replaceExisting,
           });
           if (!enrolled.ok) {
+            quickUnlockWarn('ui.enrollment-rejected', undefined, { responseError: enrolled.error });
             unlockNotice = 'Your vault is open, but device quick unlock was not set up.';
             setQuickErr(unlockNotice);
-          }
+          } else quickUnlockInfo('ui.enrollment-completed');
         } catch (error) {
+          quickUnlockWarn('ui.enrollment-failed', error);
           unlockNotice = `Your vault is open, but quick unlock was not set up. ${deviceError(error)}`;
           setQuickErr(unlockNotice);
         } finally { proof?.prfOutput.fill(0); }
@@ -172,18 +191,6 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: (notice?: string) => 
         <div className="app-title justify-center text-base">
           <ShieldCheck size={20} className="app-logo" /> QuickKee
         </div>
-        {quickStatus?.enrolled && deviceAvailable && quickStatus.source && (
-          <div className="space-y-2">
-            <button className="btn-primary w-full" disabled={quickBusy} onClick={() => { void unlockWithDevice(); }}>
-              {quickBusy
-                ? <><Loader2 size={15} className="animate-spin" /> Waiting for device verification…</>
-                : <><ShieldCheck size={15} /> Unlock “{quickStatus.source.label}” with device</>}
-            </button>
-            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              Use Windows Hello or your device verification. Your enrolled vault is opened directly.
-            </p>
-          </div>
-        )}
         {quickStatus?.enrolled && !deviceAvailable && (
           <p role="status" className="text-xs" style={{ color: 'var(--text-muted)' }}>
             Device verification is unavailable here. Manual unlock remains available.
@@ -230,15 +237,16 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: (notice?: string) => 
         <div className="flex gap-2">
           <input type="password" className="input min-w-0 flex-1" placeholder="Master password" value={pwd} autoFocus
             onChange={e => setPwd(e.target.value)} onKeyDown={e => e.key === 'Enter' && canUnlock && !unlocking && unlock()} />
-          {deviceAvailable && (
-            <IconTooltipButton className="icon-btn btn-toggle"
-              label="Set up device quick unlock after this unlock" aria-pressed={setupQuickUnlock}
-              tooltipId="quick-unlock-tooltip" tooltipTitle="Quick unlock"
-              tooltipDescription="Stores an encrypted copy of your master password and/or key-file material on this device."
-              onClick={() => setSetupQuickUnlock(enabled => !enabled)}>
-              <ShieldCheck size={15} />
-            </IconTooltipButton>
-          )}
+          <IconTooltipButton className="icon-btn btn-toggle"
+            label="Set up device quick unlock after this unlock" aria-pressed={setupQuickUnlock}
+            tooltipId="quick-unlock-tooltip" tooltipTitle="Quick unlock"
+            tooltipDescription={deviceAvailable
+              ? 'Stores an encrypted copy of your master password and/or key-file material on this device.'
+              : 'Quick unlock is not supported by this browser or device.'}
+            disabled={!deviceAvailable}
+            onClick={() => setSetupQuickUnlock(enabled => !enabled)}>
+            <ShieldCheck size={15} />
+          </IconTooltipButton>
         </div>
         {err && <p className="alert-error">{err}</p>}
         {cloudErr && src !== 'local' && (
@@ -246,11 +254,26 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: (notice?: string) => 
             <Cloud size={15} /> Reconnect account
           </button>
         )}
-        <button className="btn-primary w-full" disabled={!canUnlock || unlocking || (src === 'local' && !dbName)} onClick={unlock}>
-          {unlocking
-            ? <><Loader2 size={15} className="animate-spin" /> Unlocking</>
-            : <><Lock size={15} /> Unlock</>}
-        </button>
+        <div className="flex gap-2">
+          <button className="btn-primary min-w-0 flex-1"
+            disabled={!canUnlock || unlocking || (src === 'local' && !dbName)} onClick={unlock}>
+            {unlocking
+              ? <><Loader2 size={15} className="animate-spin" /> Unlocking</>
+              : <><Lock size={15} /> Unlock</>}
+          </button>
+          {selectedHasQuickUnlock && quickStatus.source && (
+            <IconTooltipButton className="btn-quick-unlock" anchorClassName="quick-unlock-action"
+              label={`Quick unlock “${quickStatus.source.label}” with device`}
+              tooltipId="saved-quick-unlock-tooltip" tooltipTitle="Quick unlock"
+              tooltipPlacement="top"
+              tooltipDescription="Unlock this database with Windows Hello or your device verification."
+              disabled={quickBusy || !deviceAvailable}
+              onClick={() => { void unlockWithDevice(); }}>
+              {quickBusy ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />}
+              {quickBusy ? 'Unlocking' : 'Quick'}
+            </IconTooltipButton>
+          )}
+        </div>
       </div>
     </div>
   );

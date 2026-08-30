@@ -86,6 +86,16 @@ describe('device quick unlock UI', () => {
     expect(optIn).toHaveAttribute('aria-pressed', 'true');
   });
 
+  test('disables quick unlock when the browser or device does not support it', async () => {
+    mocks.isDeviceQuickUnlockAvailable.mockResolvedValue(false);
+    render(<UnlockScreen onUnlocked={vi.fn()} />);
+
+    const optIn = await screen.findByRole('button', { name: /set up device quick unlock/i });
+    expect(optIn).toBeDisabled();
+    expect(optIn).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('tooltip')).toHaveTextContent(/not supported by this browser or device/i);
+  });
+
   test('sets up only after manual unlock succeeds and does not expose secrets in the DOM', async () => {
     const onUnlocked = vi.fn();
     render(<UnlockScreen onUnlocked={onUnlocked} />);
@@ -118,6 +128,9 @@ describe('device quick unlock UI', () => {
 
   test('names and unlocks the enrolled vault while retaining the manual path', async () => {
     const onUnlocked = vi.fn();
+    mocks.loadLastCloud.mockResolvedValue({
+      provider: 'dropbox', fileId: 'file-1', fileName: 'Work.kdbx',
+    });
     mocks.sendToSW.mockImplementation(async (request: { type: string }) => {
       if (request.type === 'getQuickUnlockStatus') return {
         ok: true,
@@ -131,14 +144,22 @@ describe('device quick unlock UI', () => {
     });
     render(<UnlockScreen onUnlocked={onUnlocked} />);
 
-    const quickButton = await screen.findByRole('button', { name: 'Unlock “Work.kdbx” with device' });
-    expect(screen.getByRole('button', { name: 'Unlock' })).toBeVisible();
-    expect(screen.getByText(/Windows Hello or your device verification/i)).toBeVisible();
+    const quickButton = await screen.findByRole('button', { name: 'Quick unlock “Work.kdbx” with device' });
+    const manualButton = screen.getByRole('button', { name: 'Unlock' });
+    expect(manualButton.parentElement).toContainElement(quickButton);
+    expect(quickButton).toHaveClass('btn-quick-unlock');
+    expect(quickButton).toHaveTextContent(/^Quick$/);
+    const tooltip = document.getElementById('saved-quick-unlock-tooltip');
+    expect(tooltip).toHaveClass('tooltip-content-top');
+    expect(tooltip).toHaveTextContent(/Windows Hello/i);
     fireEvent.click(quickButton);
 
     await waitFor(() => expect(mocks.getDevicePrfOutput).toHaveBeenCalledWith('credential-id', 'prf-input'));
     expect(mocks.sendToSW.mock.calls.some(([request]) => request.type === 'quickUnlock')).toBe(true);
     expect(onUnlocked).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole('tab', { name: /local file/i }));
+    expect(screen.queryByRole('button', { name: /quick unlock “Work\.kdbx”/i })).not.toBeInTheDocument();
   });
 
   test('shows safe retry guidance for a revoked local-file permission', async () => {
@@ -151,7 +172,7 @@ describe('device quick unlock UI', () => {
       return { ok: true };
     });
     render(<UnlockScreen onUnlocked={vi.fn()} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Unlock “Vault.kdbx” with device' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Quick unlock “Vault.kdbx” with device' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/grant file access.*manual unlock/i);
   });
 });

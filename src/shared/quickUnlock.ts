@@ -17,6 +17,20 @@ export interface QuickUnlockCloudSource {
 
 export type QuickUnlockSource = QuickUnlockLocalSource | QuickUnlockCloudSource;
 
+export type QuickUnlockSourceIdentity =
+  | Pick<QuickUnlockLocalSource, 'kind' | 'label'>
+  | Pick<QuickUnlockCloudSource, 'kind' | 'provider' | 'fileId'>;
+
+export function quickUnlockSourceMatches(
+  enrolled: QuickUnlockSource,
+  selected: QuickUnlockSourceIdentity | null,
+): boolean {
+  if (!selected || enrolled.kind !== selected.kind) return false;
+  if (enrolled.kind === 'local' && selected.kind === 'local') return enrolled.label === selected.label;
+  return enrolled.kind === 'cloud' && selected.kind === 'cloud'
+    && enrolled.provider === selected.provider && enrolled.fileId === selected.fileId;
+}
+
 export interface QuickUnlockRecord {
   version: typeof QUICK_UNLOCK_VERSION;
   credentialId: string;

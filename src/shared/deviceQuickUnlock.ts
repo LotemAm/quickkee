@@ -1,5 +1,8 @@
+import { quickUnlockInfo, quickUnlockWarn } from './quickUnlockDebug';
+
 const CEREMONY_TIMEOUT_MS = 60_000;
 const RANDOM_BYTES = 32;
+const PRF_UNSUPPORTED_CACHE_KEY = 'quickkee.quickUnlock.prfUnsupported.v1';
 
 export type DeviceQuickUnlockErrorCode =
   | 'cancelled'
@@ -33,8 +36,26 @@ interface PrfClientInputs {
 interface PrfClientOutputs {
   prf?: {
     enabled?: boolean;
-    results?: { first?: ArrayBuffer };
+    results?: { first?: BufferSource };
   };
+}
+
+interface PublicKeyCredentialCapabilities {
+  getClientCapabilities?: () => Promise<Record<string, boolean>>;
+}
+
+function browserFingerprint(): string {
+  return navigator.userAgent || 'unknown-browser';
+}
+
+function hasCachedPrfFailure(): boolean {
+  try { return localStorage.getItem(PRF_UNSUPPORTED_CACHE_KEY) === browserFingerprint(); }
+  catch { return false; }
+}
+
+function cachePrfFailure(): void {
+  try { localStorage.setItem(PRF_UNSUPPORTED_CACHE_KEY, browserFingerprint()); }
+  catch { /* Capability caching must not affect manual unlock. */ }
 }
 
 function randomBytes(length = RANDOM_BYTES): Uint8Array {
@@ -64,21 +85,82 @@ export function base64UrlToBytes(value: string): Uint8Array {
 }
 
 export async function isDeviceQuickUnlockAvailable(): Promise<boolean> {
-  if (typeof PublicKeyCredential === 'undefined' || !navigator.credentials?.create || !navigator.credentials?.get)
+  const publicKeyCredentialAvailable = typeof PublicKeyCredential !== 'undefined';
+  const createAvailable = !!navigator.credentials?.create;
+  const getAvailable = !!navigator.credentials?.get;
+  if (!publicKeyCredentialAvailable || !createAvailable || !getAvailable) {
+    quickUnlockInfo('webauthn.capability-check', {
+      publicKeyCredentialAvailable,
+      createAvailable,
+      getAvailable,
+      platformAuthenticatorAvailable: false,
+    });
     return false;
+  }
+  if (hasCachedPrfFailure()) {
+    quickUnlockInfo('webauthn.capability-check', {
+      publicKeyCredentialAvailable,
+      createAvailable,
+      getAvailable,
+      platformAuthenticatorAvailable: null,
+      prfClientAvailable: null,
+      cachedPrfFailure: true,
+    });
+    return false;
+  }
   try {
-    return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-  } catch { return false; }
+    const credentialApi = PublicKeyCredential as typeof PublicKeyCredential & PublicKeyCredentialCapabilities;
+    const getClientCapabilities = credentialApi.getClientCapabilities?.bind(credentialApi);
+    const [platformAuthenticatorAvailable, capabilities] = await Promise.all([
+      PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(),
+      getClientCapabilities?.(),
+    ]);
+    const prfClientAvailable = capabilities ? capabilities['extension:prf'] === true : null;
+    quickUnlockInfo('webauthn.capability-check', {
+      publicKeyCredentialAvailable,
+      createAvailable,
+      getAvailable,
+      platformAuthenticatorAvailable,
+      prfClientAvailable,
+      userAgent: navigator.userAgent,
+    });
+    return platformAuthenticatorAvailable && prfClientAvailable !== false;
+  } catch (error) {
+    quickUnlockWarn('webauthn.capability-check-failed', error);
+    return false;
+  }
 }
 
 function extensionResults(credential: PublicKeyCredential): PrfClientOutputs {
   return credential.getClientExtensionResults() as AuthenticationExtensionsClientOutputs & PrfClientOutputs;
 }
 
-function requirePrfOutput(credential: PublicKeyCredential): Uint8Array {
+function prfMetadata(credential: PublicKeyCredential): {
+  prfExtensionPresent: boolean;
+  prfEnabled: boolean | null;
+  prfResultPresent: boolean;
+  prfResultType: string;
+  prfResultBytes: number | null;
+} {
+  const prf = extensionResults(credential).prf;
+  const first = prf?.results?.first;
+  return {
+    prfExtensionPresent: prf !== undefined,
+    prfEnabled: typeof prf?.enabled === 'boolean' ? prf.enabled : null,
+    prfResultPresent: first !== undefined,
+    prfResultType: first instanceof ArrayBuffer
+      ? 'ArrayBuffer'
+      : ArrayBuffer.isView(first) ? first.constructor.name : first === undefined ? 'missing' : typeof first,
+    prfResultBytes: first instanceof ArrayBuffer || ArrayBuffer.isView(first) ? first.byteLength : null,
+  };
+}
+
+function requirePrfOutput(credential: PublicKeyCredential, ceremony: 'registration' | 'assertion'): Uint8Array {
   const first = extensionResults(credential).prf?.results?.first;
-  if (!(first instanceof ArrayBuffer) || first.byteLength !== RANDOM_BYTES)
+  if (!(first instanceof ArrayBuffer) || first.byteLength !== RANDOM_BYTES) {
+    quickUnlockWarn(`webauthn.${ceremony}-prf-invalid`, undefined, prfMetadata(credential));
     throw new DeviceQuickUnlockError('prfUnsupported');
+  }
   return new Uint8Array(first.slice(0));
 }
 
@@ -86,21 +168,28 @@ async function runCeremony<T>(operation: 'create' | 'get', options: CredentialCr
   const controller = new AbortController();
   let timedOut = false;
   const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, CEREMONY_TIMEOUT_MS);
+  quickUnlockInfo(`webauthn.${operation}-started`);
   try {
     const result = operation === 'create'
       ? await navigator.credentials.create({ ...(options as CredentialCreationOptions), signal: controller.signal })
       : await navigator.credentials.get({ ...(options as CredentialRequestOptions), signal: controller.signal });
     if (!result) throw new DeviceQuickUnlockError(operation === 'get' ? 'unknownCredential' : 'failed');
+    quickUnlockInfo(`webauthn.${operation}-completed`);
     return result as T;
   } catch (error) {
-    if (error instanceof DeviceQuickUnlockError) throw error;
-    if (timedOut) throw new DeviceQuickUnlockError('timedOut');
-    const name = error instanceof DOMException ? error.name : '';
-    if (name === 'AbortError' || name === 'NotAllowedError') throw new DeviceQuickUnlockError('cancelled');
-    if (name === 'NotSupportedError' || name === 'SecurityError')
-      throw new DeviceQuickUnlockError('authenticatorUnavailable');
-    if (operation === 'get' && name === 'InvalidStateError') throw new DeviceQuickUnlockError('unknownCredential');
-    throw new DeviceQuickUnlockError('failed');
+    let mapped: DeviceQuickUnlockError;
+    if (error instanceof DeviceQuickUnlockError) mapped = error;
+    else if (timedOut) mapped = new DeviceQuickUnlockError('timedOut');
+    else {
+      const name = error instanceof DOMException ? error.name : '';
+      if (name === 'AbortError' || name === 'NotAllowedError') mapped = new DeviceQuickUnlockError('cancelled');
+      else if (name === 'NotSupportedError' || name === 'SecurityError')
+        mapped = new DeviceQuickUnlockError('authenticatorUnavailable');
+      else if (operation === 'get' && name === 'InvalidStateError') mapped = new DeviceQuickUnlockError('unknownCredential');
+      else mapped = new DeviceQuickUnlockError('failed');
+    }
+    quickUnlockWarn(`webauthn.${operation}-failed`, error, { mappedCode: mapped.code });
+    throw mapped;
   } finally { clearTimeout(timeout); }
 }
 
@@ -115,7 +204,8 @@ async function requestPrf(credentialId: string, rawId: Uint8Array, prfInput: Uin
     } as AuthenticationExtensionsClientInputs & PrfClientInputs,
   };
   const assertion = await runCeremony<PublicKeyCredential>('get', { publicKey });
-  return requirePrfOutput(assertion);
+  quickUnlockInfo('webauthn.assertion-received', prfMetadata(assertion));
+  return requirePrfOutput(assertion, 'assertion');
 }
 
 /**
@@ -152,10 +242,20 @@ export async function createDeviceCredential(): Promise<NewDeviceCredential> {
   const rawId = new Uint8Array(credential.rawId.slice(0));
   const credentialId = bytesToBase64Url(rawId);
   const outputs = extensionResults(credential).prf;
-  if (outputs?.enabled !== true) throw new DeviceQuickUnlockError('prfUnsupported');
+  quickUnlockInfo('webauthn.credential-created', {
+    authenticatorAttachment: credential.authenticatorAttachment ?? 'unknown',
+    ...prfMetadata(credential),
+  });
+  if (outputs?.enabled !== true) {
+    cachePrfFailure();
+    quickUnlockWarn('webauthn.registration-prf-unsupported', undefined, prfMetadata(credential));
+    throw new DeviceQuickUnlockError('prfUnsupported');
+  }
+  if (!outputs.results?.first) quickUnlockInfo('webauthn.registration-prf-fallback-started');
   const output = outputs.results?.first
-    ? requirePrfOutput(credential)
+    ? requirePrfOutput(credential, 'registration')
     : await requestPrf(credentialId, rawId, prfInput);
+  quickUnlockInfo('webauthn.enrollment-proof-ready', { prfResultBytes: output.byteLength });
   return { credentialId, prfInput: bytesToBase64Url(prfInput), prfOutput: output };
 }
 

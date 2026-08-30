@@ -2,6 +2,7 @@ import { openQuickKeeDb, tx } from './idb';
 import { assertQuickUnlockRecord } from './quickUnlockCrypto';
 import { QUICK_UNLOCK_LOCAL_HANDLE_KEY, type QuickUnlockRecord } from '../shared/quickUnlock';
 import { loadHandle } from './fileHandle';
+import { quickUnlockInfo, quickUnlockWarn } from '../shared/quickUnlockDebug';
 
 const RECORD_KEY = 'quickUnlock';
 const TEST = import.meta.env.VITE_QK_TEST === '1';
@@ -30,17 +31,26 @@ export async function saveQuickUnlockEnrollment(
   recordValue: QuickUnlockRecord,
   localHandle: FileSystemFileHandle | null,
 ): Promise<void> {
-  const record = assertQuickUnlockRecord(recordValue);
-  if (record.source.kind === 'local' && !localHandle) throw new Error('local quick unlock requires a file handle');
-  await mutateStore(store => {
-    if (record.source.kind === 'local') {
-      // Test builds use an IndexedDB-backed fake handle whose methods cannot be
-      // structured-cloned. Production always stores the real FileSystemFileHandle.
-      store.put(TEST ? { testHandle: true } : localHandle, QUICK_UNLOCK_LOCAL_HANDLE_KEY);
-    }
-    else store.delete(QUICK_UNLOCK_LOCAL_HANDLE_KEY);
-    store.put(record, RECORD_KEY);
-  });
+  let sourceKind: 'local' | 'cloud' | 'unknown' = 'unknown';
+  try {
+    const record = assertQuickUnlockRecord(recordValue);
+    sourceKind = record.source.kind;
+    quickUnlockInfo('store.save-started', { sourceKind, localHandlePresent: localHandle !== null });
+    if (record.source.kind === 'local' && !localHandle) throw new Error('local quick unlock requires a file handle');
+    await mutateStore(store => {
+      if (record.source.kind === 'local') {
+        // Test builds use an IndexedDB-backed fake handle whose methods cannot be
+        // structured-cloned. Production always stores the real FileSystemFileHandle.
+        store.put(TEST ? { testHandle: true } : localHandle, QUICK_UNLOCK_LOCAL_HANDLE_KEY);
+      }
+      else store.delete(QUICK_UNLOCK_LOCAL_HANDLE_KEY);
+      store.put(record, RECORD_KEY);
+    });
+    quickUnlockInfo('store.save-completed', { sourceKind });
+  } catch (error) {
+    quickUnlockWarn('store.save-failed', error, { sourceKind, localHandlePresent: localHandle !== null });
+    throw error;
+  }
 }
 
 export async function loadQuickUnlockEnrollment(): Promise<QuickUnlockEnrollment | null> {

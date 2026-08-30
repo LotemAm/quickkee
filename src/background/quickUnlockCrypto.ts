@@ -5,6 +5,7 @@ import {
   type QuickUnlockRecord,
   type QuickUnlockSource,
 } from '../shared/quickUnlock';
+import { quickUnlockInfo, quickUnlockWarn } from '../shared/quickUnlockDebug';
 
 const PRF_BYTES = 32;
 const SALT_BYTES = 32;
@@ -107,6 +108,13 @@ export async function wrapQuickUnlockMaterial(input: {
   material: QuickUnlockMaterial;
   now?: number;
 }): Promise<QuickUnlockRecord> {
+  quickUnlockInfo('crypto.wrap-started', {
+    sourceKind: input.source.kind,
+    hasPassword: input.material.password !== null,
+    hasKeyFile: input.material.keyFile !== null,
+    keyFileBytes: input.material.keyFile?.byteLength ?? 0,
+    prfOutputBytes: input.prfOutput.byteLength,
+  });
   const now = input.now ?? Date.now();
   const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
   const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
@@ -133,6 +141,7 @@ export async function wrapQuickUnlockMaterial(input: {
       key,
       plaintext,
     );
+    quickUnlockInfo('crypto.wrap-completed', { sourceKind: input.source.kind });
     return {
       ...recordBase,
       prfInput: input.prfInput,
@@ -143,6 +152,7 @@ export async function wrapQuickUnlockMaterial(input: {
       updatedAt: now,
     };
   } catch (error) {
+    quickUnlockWarn('crypto.wrap-failed', error);
     if (error instanceof QuickUnlockCryptoError) throw error;
     throw new QuickUnlockCryptoError();
   } finally { plaintext.fill(0); }

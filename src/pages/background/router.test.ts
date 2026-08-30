@@ -795,6 +795,25 @@ describe('device quick unlock routing', () => {
     expect(saveQuickUnlockEnrollment).toHaveBeenCalledWith(quickRecord, expect.objectContaining({ name: 'vault.kdbx' }));
   });
 
+  test('logs enrollment stages without unlock material or credential identifiers', async () => {
+    const { handle_ } = makeCtx();
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    try {
+      await unlockHappyPath(handle_);
+      expect(await handle_(enrollRequest(), quickPopupSender)).toEqual({ ok: true });
+      const logged = JSON.stringify([...info.mock.calls, ...warn.mock.calls]);
+      expect(logged).toContain('background.enrollment-saved');
+      expect(logged).not.toContain(PW);
+      expect(logged).not.toContain(quickRecord.credentialId);
+      expect(logged).not.toContain(JSON.stringify(Array(32).fill(7)));
+    } finally {
+      info.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
   test('requires explicit confirmation before replacing an enrollment', async () => {
     const { handle_ } = makeCtx();
     await unlockHappyPath(handle_);

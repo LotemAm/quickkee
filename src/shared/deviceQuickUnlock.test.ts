@@ -6,6 +6,7 @@ import {
   bytesToBase64Url,
   createDeviceCredential,
   getDevicePrfOutput,
+  isDeviceQuickUnlockAvailable,
 } from './deviceQuickUnlock';
 
 function credential(rawId: Uint8Array, extensions: AuthenticationExtensionsClientOutputs): PublicKeyCredential {
@@ -39,7 +40,8 @@ describe('WebAuthn PRF adapter', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubGlobal('navigator', { credentials: { create, get } });
+    localStorage.clear();
+    vi.stubGlobal('navigator', { credentials: { create, get }, userAgent: 'QuickKee Test Browser/1' });
     vi.stubGlobal('PublicKeyCredential', class {
       static isUserVerifyingPlatformAuthenticatorAvailable = vi.fn(async () => true);
     });
@@ -108,5 +110,58 @@ describe('WebAuthn PRF adapter', () => {
     get.mockResolvedValue(credential(rawId, { prf: { results: {} } } as AuthenticationExtensionsClientOutputs));
     await expect(getDevicePrfOutput(bytesToBase64Url(rawId), bytesToBase64Url(new Uint8Array(32))))
       .rejects.toMatchObject({ code: 'prfUnsupported' });
+  });
+
+  test('rejects a browser that reports no PRF client capability', async () => {
+    vi.stubGlobal('PublicKeyCredential', class {
+      static isUserVerifyingPlatformAuthenticatorAvailable = vi.fn(async () => true);
+      static getClientCapabilities = vi.fn(async () => ({ 'extension:prf': false }));
+    });
+
+    await expect(isDeviceQuickUnlockAvailable()).resolves.toBe(false);
+  });
+
+  test('remembers a definitive PRF enrollment failure for this browser version', async () => {
+    const rawId = new Uint8Array([7, 7, 7]);
+    const uvpaa = vi.fn(async () => true);
+    vi.stubGlobal('PublicKeyCredential', class {
+      static isUserVerifyingPlatformAuthenticatorAvailable = uvpaa;
+      static getClientCapabilities = vi.fn(async () => ({ 'extension:prf': true }));
+    });
+    create.mockResolvedValue(credential(rawId, { prf: { enabled: false } } as AuthenticationExtensionsClientOutputs));
+
+    await expect(createDeviceCredential()).rejects.toMatchObject({ code: 'prfUnsupported' });
+    uvpaa.mockClear();
+    await expect(isDeviceQuickUnlockAvailable()).resolves.toBe(false);
+    expect(uvpaa).not.toHaveBeenCalled();
+
+    vi.stubGlobal('navigator', {
+      credentials: { create, get },
+      userAgent: 'QuickKee Test Browser/2',
+    });
+    await expect(isDeviceQuickUnlockAvailable()).resolves.toBe(true);
+    expect(uvpaa).toHaveBeenCalledOnce();
+  });
+
+  test('logs PRF capability metadata without credential or PRF material', async () => {
+    const rawId = new Uint8Array([19, 37, 73, 91]);
+    const prfOutput = new Uint8Array(32).fill(173);
+    create.mockResolvedValue(credential(rawId, {
+      prf: { enabled: true, results: { first: prfOutput.buffer } },
+    } as AuthenticationExtensionsClientOutputs));
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    try {
+      await createDeviceCredential();
+      const logged = JSON.stringify([...info.mock.calls, ...warn.mock.calls]);
+      expect(logged).toContain('webauthn.credential-created');
+      expect(logged).toContain('prfEnabled');
+      expect(logged).not.toContain(bytesToBase64Url(rawId));
+      expect(logged).not.toContain(bytesToBase64Url(prfOutput));
+    } finally {
+      info.mockRestore();
+      warn.mockRestore();
+    }
   });
 });
