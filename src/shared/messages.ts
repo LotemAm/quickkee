@@ -5,6 +5,7 @@ import type { DbSource } from './dbSource';
 import type { TotpConfig, TotpCode } from '../background/totp';
 import type { TotpImportAssignment } from './totpImport';
 import type { PasswordHealthReport } from './passwordHealth';
+import type { QuickUnlockSource, QuickUnlockStatus } from './quickUnlock';
 
 export interface CredentialPromptEntry {
   id: string;
@@ -54,7 +55,20 @@ export type Request =
   | { type: 'listRemoteFiles'; provider: 'dropbox' | 'gdrive' }
   | { type: 'openRemote'; provider: 'dropbox' | 'gdrive'; fileId: string; fileName: string; password: string | null; keyFile: number[] | null }
   | { type: 'getSyncStatus' }
-  | { type: 'disconnectCloud'; provider: 'dropbox' | 'gdrive' }
+  | { type: 'disconnectCloud'; provider: 'dropbox' | 'gdrive'; removeQuickUnlock?: boolean }
+  | { type: 'getQuickUnlockStatus' }
+  | {
+      type: 'enrollQuickUnlock';
+      source: QuickUnlockSource;
+      password: string | null;
+      keyFile: number[] | null;
+      credentialId: string;
+      prfInput: string;
+      prfOutput: number[];
+      replaceExisting: boolean;
+    }
+  | { type: 'quickUnlock'; credentialId: string; prfOutput: number[] }
+  | { type: 'disableQuickUnlock' }
   | { type: 'scheduleClipboardClear'; textHash: string; seconds: number }
   | { type: 'cancelClipboardClear' }
   | { type: 'stageCredentialCapture'; username: string; password: string; kind: 'login' | 'password-change' }
@@ -84,6 +98,10 @@ type OkFor = {
   connectCloud: Ok;
   getCloudConnectionStatus: Ok<{ connected: Record<'dropbox' | 'gdrive', boolean> }>;
   disconnectCloud: Ok;
+  getQuickUnlockStatus: Ok<QuickUnlockStatus>;
+  enrollQuickUnlock: Ok;
+  quickUnlock: Ok<{ merged?: boolean }>;
+  disableQuickUnlock: Ok;
   fillRequest: Ok;
   fillTotpRequest: Ok;
   getTotpConfig: Ok<{ config: TotpConfig | null }>;

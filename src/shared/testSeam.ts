@@ -1,4 +1,5 @@
 import { saveTestBytes } from '../background/fileHandle';
+import { createDeviceCredential, getDevicePrfOutput } from './deviceQuickUnlock';
 
 if (import.meta.env.VITE_QK_TEST === '1') {
   (globalThis as unknown as { __qkTest: unknown }).__qkTest = {
@@ -8,5 +9,7 @@ if (import.meta.env.VITE_QK_TEST === '1') {
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       await saveTestBytes(name, bytes.buffer);
     },
+    createDeviceCredential,
+    getDevicePrfOutput,
   };
 }

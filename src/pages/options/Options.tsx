@@ -4,6 +4,7 @@ import { loadSettings, saveSettings, DEFAULT_SETTINGS, type Settings } from '../
 import { applyTheme, type ThemeMode } from '../../shared/theme';
 import { sendToSW } from '../../shared/messages';
 import { PasswordRulesPanel } from '../../shared/PasswordRulesPanel';
+import type { QuickUnlockStatus } from '../../shared/quickUnlock';
 
 const THEME_OPTIONS: { value: ThemeMode; label: string; icon: typeof Monitor }[] = [
   { value: 'system', label: 'System', icon: Monitor },
@@ -23,10 +24,16 @@ export function Options() {
   const [connected, setConnected] = useState<ConnectionState>({ dropbox: false, gdrive: false });
   const [busyProvider, setBusyProvider] = useState<CloudProviderId | null>(null);
   const [signedOutProvider, setSignedOutProvider] = useState<CloudProviderId | null>(null);
+  const [quickUnlock, setQuickUnlock] = useState<QuickUnlockStatus | null>(null);
+  const [quickUnlockBusy, setQuickUnlockBusy] = useState(false);
+  const [quickUnlockNotice, setQuickUnlockNotice] = useState('');
   useEffect(() => {
     loadSettings().then(v => { setS(v); applyTheme(v.theme); });
     sendToSW({ type: 'getCloudConnectionStatus' }).then(response => {
       if (response.ok) setConnected(response.connected);
+    });
+    sendToSW({ type: 'getQuickUnlockStatus' }).then(response => {
+      if (response.ok) setQuickUnlock(response);
     });
   }, []);
   const update = (patch: Partial<Settings>) => { const next = { ...s, ...patch };
@@ -42,15 +49,38 @@ export function Options() {
   }
 
   async function signOut(provider: CloudProviderId) {
+    const removesQuickUnlock = quickUnlock?.corrupt === true || (quickUnlock?.enrolled === true
+      && quickUnlock.source?.kind === 'cloud'
+      && quickUnlock.source.provider === provider);
+    if (removesQuickUnlock && !window.confirm(
+      `Disconnect ${provider === 'dropbox' ? 'Dropbox' : 'Google Drive'} and remove ${quickUnlock?.corrupt
+        ? 'the damaged device quick-unlock enrollment'
+        : `device quick unlock for “${quickUnlock?.source?.label}”`}?`,
+    )) return;
     setBusyProvider(provider);
     setSignedOutProvider(null);
     try {
-      const response = await sendToSW({ type: 'disconnectCloud', provider });
+      const response = await sendToSW({
+        type: 'disconnectCloud', provider, ...(removesQuickUnlock ? { removeQuickUnlock: true } : {}),
+      });
       if (response.ok) {
         setConnected(current => ({ ...current, [provider]: false }));
         setSignedOutProvider(provider);
+        if (removesQuickUnlock) setQuickUnlock({ enrolled: false, corrupt: false, source: null });
       }
     } finally { setBusyProvider(null); }
+  }
+
+  async function disableQuickUnlock() {
+    if (!window.confirm('Disable device quick unlock on this device? Manual unlock will remain available.')) return;
+    setQuickUnlockBusy(true); setQuickUnlockNotice('');
+    try {
+      const response = await sendToSW({ type: 'disableQuickUnlock' });
+      if (response.ok) {
+        setQuickUnlock({ enrolled: false, corrupt: false, source: null });
+        setQuickUnlockNotice('Device quick unlock disabled');
+      } else setQuickUnlockNotice('Could not disable device quick unlock.');
+    } finally { setQuickUnlockBusy(false); }
   }
 
   return (
@@ -91,6 +121,30 @@ export function Options() {
             <input type="checkbox" checked={s.offerToSaveCredentials}
               onChange={e => update({ offerToSaveCredentials: e.target.checked })} />
           </label>
+          <div className="space-y-2 rounded-md p-2" style={{ background: 'var(--surface-2, var(--bg))' }}>
+            <div className="text-sm">Device quick unlock</div>
+            {quickUnlock?.enrolled && quickUnlock.source ? (
+              <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                <div>{quickUnlock.source.label}</div>
+                <div>{quickUnlock.source.kind === 'local'
+                  ? 'Local vault'
+                  : `${quickUnlock.source.provider === 'dropbox' ? 'Dropbox' : 'Google Drive'} vault`}</div>
+              </div>
+            ) : quickUnlock?.corrupt ? (
+              <p className="alert-error">Enrollment data is damaged. Reset it to use quick unlock again.</p>
+            ) : (
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Not enrolled</p>
+            )}
+            {(quickUnlock?.enrolled || quickUnlock?.corrupt) && (
+              <button className="btn-secondary" disabled={quickUnlockBusy}
+                onClick={() => { void disableQuickUnlock(); }}>
+                {quickUnlockBusy ? 'Disabling…' : 'Disable device quick unlock'}
+              </button>
+            )}
+            {quickUnlockNotice && (
+              <span role="status" aria-label={quickUnlockNotice} className="account-success">{quickUnlockNotice}</span>
+            )}
+          </div>
         </section>
 
         <section className="card space-y-3">

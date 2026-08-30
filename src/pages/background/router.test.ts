@@ -21,6 +21,7 @@ import { CredentialCaptureStore } from '../../background/credentialCaptureStore'
 vi.mock('../../background/fileHandle', () => ({
   loadHandle: vi.fn(),
   ensurePermission: vi.fn(),
+  hasPermission: vi.fn(),
   readBytes: vi.fn(),
   writeBytes: vi.fn(),
 }));
@@ -35,16 +36,44 @@ vi.mock('../../background/sync', () => ({
   openCloud: vi.fn(),
   saveCloud: vi.fn(),
 }));
+vi.mock('../../background/quickUnlockStore', () => ({
+  loadQuickUnlockEnrollment: vi.fn(),
+  saveQuickUnlockEnrollment: vi.fn(),
+  clearQuickUnlockEnrollment: vi.fn(),
+}));
+vi.mock('../../background/quickUnlockCrypto', () => ({
+  wrapQuickUnlockMaterial: vi.fn(),
+  unwrapQuickUnlockMaterial: vi.fn(),
+  QuickUnlockCryptoError: class QuickUnlockCryptoError extends Error {},
+}));
 
-import { loadHandle, ensurePermission, readBytes, writeBytes } from '../../background/fileHandle';
+import { loadHandle, ensurePermission, hasPermission, readBytes, writeBytes } from '../../background/fileHandle';
 import { loadSettings } from '../../shared/settings';
 import { getCache, type CacheRecord } from '../../background/cache';
-import { saveCloud } from '../../background/sync';
+import { openCloud, saveCloud } from '../../background/sync';
 import type { CloudFileSource } from '../../shared/dbSource';
+import {
+  clearQuickUnlockEnrollment,
+  loadQuickUnlockEnrollment,
+  saveQuickUnlockEnrollment,
+} from '../../background/quickUnlockStore';
+import { unwrapQuickUnlockMaterial, wrapQuickUnlockMaterial } from '../../background/quickUnlockCrypto';
+import type { QuickUnlockRecord } from '../../shared/quickUnlock';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = resolve(__dirname, '../../test/fixtures/test.kdbx');
 const PW = 'correct horse';
+const quickRecord: QuickUnlockRecord = {
+  version: 1,
+  credentialId: 'AQIDBA',
+  prfInput: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+  salt: 'SALT_MARKER',
+  iv: 'AAAAAAAAAAAAAAAA',
+  ciphertext: 'CIPHERTEXT_MARKER',
+  source: { kind: 'local', label: 'vault.kdbx' },
+  createdAt: 1,
+  updatedAt: 1,
+};
 
 function fixture(): ArrayBuffer {
   const buf = readFileSync(FIXTURE_PATH);
@@ -83,6 +112,7 @@ function makeCtx() {
     doLock,
     refreshAllIcons,
     online,
+    cloudConnected: vi.fn(async () => true),
     persistPendingClipboardHash,
   };
   return { ctx, handle_: makeRouter(ctx), doLock, refreshAllIcons };
@@ -96,12 +126,26 @@ async function unlockHappyPath(handle_: ReturnType<typeof makeRouter>) {
   return handle_({ type: 'unlock', password: PW, keyFile: null });
 }
 
-let chromeMock: { tabs: { get: ReturnType<typeof vi.fn>; sendMessage: ReturnType<typeof vi.fn> }; alarms: { create: ReturnType<typeof vi.fn>; clear: ReturnType<typeof vi.fn> } };
+let chromeMock: {
+  runtime: { id: string };
+  tabs: { get: ReturnType<typeof vi.fn>; sendMessage: ReturnType<typeof vi.fn> };
+  alarms: { create: ReturnType<typeof vi.fn>; clear: ReturnType<typeof vi.fn> };
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
-  chromeMock = { tabs: { get: vi.fn(), sendMessage: vi.fn() }, alarms: { create: vi.fn(), clear: vi.fn() } };
+  chromeMock = {
+    runtime: { id: 'quickkee' },
+    tabs: { get: vi.fn(), sendMessage: vi.fn() },
+    alarms: { create: vi.fn(), clear: vi.fn() },
+  };
   vi.stubGlobal('chrome', chromeMock);
+  vi.mocked(loadQuickUnlockEnrollment).mockResolvedValue(null);
+  vi.mocked(saveQuickUnlockEnrollment).mockResolvedValue(undefined);
+  vi.mocked(clearQuickUnlockEnrollment).mockResolvedValue(undefined);
+  vi.mocked(wrapQuickUnlockMaterial).mockResolvedValue(quickRecord);
+  vi.mocked(unwrapQuickUnlockMaterial).mockResolvedValue({ password: PW, keyFile: null });
+  vi.mocked(hasPermission).mockResolvedValue(true);
 });
 
 function contentSender(url = 'https://github.com/login', tabId = 7, frameId = 0): chrome.runtime.MessageSender {
@@ -673,5 +717,183 @@ describe('credential capture', () => {
     const captureId = (prompt as { ok: true; prompt: { captureId: string } }).prompt.captureId;
     expect(await handle_({ type: 'commitCredentialCapture', captureId }, contentSender('https://evil.test/', 7))).toEqual({ ok: false, error: 'forbidden' });
     expect(await handle_({ type: 'dismissCredentialCapture', captureId }, contentSender('https://github.com/account', 8))).toEqual({ ok: false, error: 'forbidden' });
+  });
+});
+
+const quickPopupSender = { url: 'chrome-extension://quickkee/src/pages/popup/index.html' } as chrome.runtime.MessageSender;
+const quickPanelSender = { url: 'chrome-extension://quickkee/src/pages/panel/index.html' } as chrome.runtime.MessageSender;
+const quickOptionsSender = { url: 'chrome-extension://quickkee/src/pages/options/index.html' } as chrome.runtime.MessageSender;
+
+function enrollRequest(overrides: Partial<Extract<import('../../shared/messages').Request, { type: 'enrollQuickUnlock' }>> = {}) {
+  return {
+    type: 'enrollQuickUnlock' as const,
+    source: { kind: 'local' as const, label: 'vault.kdbx' },
+    password: PW,
+    keyFile: null,
+    credentialId: quickRecord.credentialId,
+    prfInput: quickRecord.prfInput,
+    prfOutput: Array(32).fill(7) as number[],
+    replaceExisting: false,
+    ...overrides,
+  };
+}
+
+describe('device quick unlock routing', () => {
+  test.each([quickPopupSender, quickPanelSender, quickOptionsSender])('returns only safe enrollment metadata to an allowed extension page', async sender => {
+    const { handle_ } = makeCtx();
+    vi.mocked(loadQuickUnlockEnrollment).mockResolvedValue({ record: quickRecord, localHandle: fakeHandle() });
+    const response = await handle_({ type: 'getQuickUnlockStatus' }, sender);
+    expect(response).toEqual({
+      ok: true,
+      enrolled: true,
+      corrupt: false,
+      source: quickRecord.source,
+      credentialId: quickRecord.credentialId,
+      prfInput: quickRecord.prfInput,
+      createdAt: quickRecord.createdAt,
+      updatedAt: quickRecord.updatedAt,
+    });
+    expect(JSON.stringify(response)).not.toContain(quickRecord.ciphertext);
+    expect(JSON.stringify(response)).not.toContain(quickRecord.salt);
+  });
+
+  test.each([
+    contentSender(),
+    { url: 'chrome-extension://evil/src/pages/popup/index.html' } as chrome.runtime.MessageSender,
+    { url: 'chrome-extension://quickkee/src/pages/offscreen/index.html' } as chrome.runtime.MessageSender,
+    {} as chrome.runtime.MessageSender,
+  ])('denies status, enrollment, unlock, and disable to an unauthorized sender', async sender => {
+    const { handle_ } = makeCtx();
+    for (const request of [
+      { type: 'getQuickUnlockStatus' as const },
+      enrollRequest(),
+      { type: 'quickUnlock' as const, credentialId: quickRecord.credentialId, prfOutput: Array(32).fill(1) },
+      { type: 'disableQuickUnlock' as const },
+    ]) expect(await handle_(request, sender)).toEqual({ ok: false, error: 'forbidden' });
+  });
+
+  test('reports a corrupt stored record without exposing it', async () => {
+    const { handle_ } = makeCtx();
+    vi.mocked(loadQuickUnlockEnrollment).mockRejectedValue(new Error('invalid record'));
+    expect(await handle_({ type: 'getQuickUnlockStatus' }, quickPopupSender))
+      .toEqual({ ok: true, enrolled: false, corrupt: true, source: null });
+  });
+
+  test('enrolls only an open vault whose active source matches', async () => {
+    const { handle_ } = makeCtx();
+    expect(await handle_(enrollRequest(), quickPopupSender)).toEqual({ ok: false, error: 'locked' });
+
+    await unlockHappyPath(handle_);
+    expect(await handle_(enrollRequest({ source: { kind: 'cloud', provider: 'dropbox', fileId: 'other', label: 'Other.kdbx' } }), quickPopupSender))
+      .toEqual({ ok: false, error: 'sourceMismatch' });
+    expect(await handle_(enrollRequest(), quickPopupSender)).toEqual({ ok: true });
+    expect(wrapQuickUnlockMaterial).toHaveBeenCalledWith(expect.objectContaining({
+      credentialId: quickRecord.credentialId,
+      source: { kind: 'local', label: 'vault.kdbx' },
+      material: { password: PW, keyFile: null },
+    }));
+    expect(saveQuickUnlockEnrollment).toHaveBeenCalledWith(quickRecord, expect.objectContaining({ name: 'vault.kdbx' }));
+  });
+
+  test('requires explicit confirmation before replacing an enrollment', async () => {
+    const { handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    vi.mocked(loadQuickUnlockEnrollment).mockResolvedValue({ record: quickRecord, localHandle: fakeHandle() });
+    expect(await handle_(enrollRequest(), quickPanelSender))
+      .toEqual({ ok: false, error: 'replacementConfirmationRequired' });
+    expect(await handle_(enrollRequest({ replaceExisting: true }), quickPanelSender)).toEqual({ ok: true });
+  });
+
+  test('opens the enrolled local handle and maps permission, credential, and stale-material failures', async () => {
+    const { handle_, ctx } = makeCtx();
+    const enrolledHandle = fakeHandle('vault.kdbx');
+    vi.mocked(loadQuickUnlockEnrollment).mockResolvedValue({ record: quickRecord, localHandle: enrolledHandle });
+    vi.mocked(hasPermission).mockResolvedValue(false);
+    const request = { type: 'quickUnlock' as const, credentialId: quickRecord.credentialId, prfOutput: Array(32).fill(3) };
+    expect(await handle_(request, quickPopupSender)).toEqual({ ok: false, error: 'permissionRequired' });
+
+    vi.mocked(hasPermission).mockResolvedValue(true);
+    vi.mocked(readBytes).mockResolvedValue(fixture());
+    vi.mocked(loadSettings).mockResolvedValue(DEFAULT_SETTINGS_STUB);
+    expect(await handle_({ ...request, credentialId: 'wrong' }, quickPopupSender))
+      .toEqual({ ok: false, error: 'unknownCredential' });
+    vi.mocked(unwrapQuickUnlockMaterial).mockResolvedValueOnce({ password: 'wrong', keyFile: null });
+    expect(await handle_(request, quickPopupSender)).toEqual({ ok: false, error: 'staleCredentials' });
+
+    vi.mocked(unwrapQuickUnlockMaterial).mockResolvedValueOnce({ password: PW, keyFile: null });
+    expect(await handle_(request, quickPopupSender)).toEqual({ ok: true });
+    expect(ctx.getHandle()).toBe(enrolledHandle);
+    expect(ctx.getCurrentSource()).toEqual({ kind: 'local', handleId: 'db' });
+  });
+
+  test.each(['dropbox', 'gdrive'] as const)('opens the enrolled %s source through the shared cloud path', async provider => {
+    const { handle_, ctx } = makeCtx();
+    const cloudRecord: QuickUnlockRecord = {
+      ...quickRecord,
+      source: { kind: 'cloud', provider, fileId: `${provider}-id`, label: `${provider}.kdbx` },
+    };
+    vi.mocked(loadQuickUnlockEnrollment).mockResolvedValue({ record: cloudRecord, localHandle: null });
+    vi.mocked(openCloud).mockResolvedValue({ basedOnRev: 'r2', merged: false, offline: false });
+    vi.mocked(loadSettings).mockResolvedValue(DEFAULT_SETTINGS_STUB);
+
+    expect(await handle_({ type: 'quickUnlock', credentialId: cloudRecord.credentialId, prfOutput: Array(32).fill(3) }, quickPanelSender))
+      .toEqual({ ok: true });
+    expect(openCloud).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'cloud', provider, fileId: `${provider}-id` }),
+      expect.anything(),
+      PW,
+      null,
+    );
+    expect(ctx.getCurrentSource()).toEqual(expect.objectContaining({ kind: 'cloud', provider, fileId: `${provider}-id` }));
+  });
+
+  test('requires cloud authorization before decrypting stored material', async () => {
+    const { handle_, ctx } = makeCtx();
+    const cloudRecord: QuickUnlockRecord = {
+      ...quickRecord,
+      source: { kind: 'cloud', provider: 'gdrive', fileId: 'drive-id', label: 'Drive.kdbx' },
+    };
+    vi.mocked(loadQuickUnlockEnrollment).mockResolvedValue({ record: cloudRecord, localHandle: null });
+    ctx.cloudConnected = vi.fn(async () => false);
+    expect(await handle_({ type: 'quickUnlock', credentialId: cloudRecord.credentialId, prfOutput: Array(32).fill(3) }, quickPanelSender))
+      .toEqual({ ok: false, error: 'authRequired' });
+    expect(unwrapQuickUnlockMaterial).not.toHaveBeenCalled();
+  });
+
+  test('maps tampered envelopes to a safe error and clears an enrollment only explicitly', async () => {
+    const { handle_ } = makeCtx();
+    vi.mocked(loadQuickUnlockEnrollment).mockResolvedValue({ record: quickRecord, localHandle: fakeHandle() });
+    vi.mocked(unwrapQuickUnlockMaterial).mockRejectedValue(new Error('operation failed'));
+    expect(await handle_({ type: 'quickUnlock', credentialId: quickRecord.credentialId, prfOutput: Array(32).fill(3) }, quickPopupSender))
+      .toEqual({ ok: false, error: 'corruptEnrollment' });
+    expect(clearQuickUnlockEnrollment).not.toHaveBeenCalled();
+    expect(await handle_({ type: 'disableQuickUnlock' }, quickOptionsSender)).toEqual({ ok: true });
+    expect(clearQuickUnlockEnrollment).toHaveBeenCalledOnce();
+  });
+
+  test('normal lock preserves enrollment', async () => {
+    const { handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    expect(await handle_({ type: 'lock' })).toEqual({ ok: true });
+    expect(clearQuickUnlockEnrollment).not.toHaveBeenCalled();
+  });
+
+  test('cloud disconnect requires confirmation and removes a matching enrollment atomically', async () => {
+    const { handle_ } = makeCtx();
+    (chromeMock as typeof chromeMock & { storage: { local: { remove: ReturnType<typeof vi.fn> } } }).storage = {
+      local: { remove: vi.fn() },
+    };
+    const cloudRecord: QuickUnlockRecord = {
+      ...quickRecord,
+      source: { kind: 'cloud', provider: 'dropbox', fileId: 'dbx', label: 'Cloud.kdbx' },
+    };
+    vi.mocked(loadQuickUnlockEnrollment).mockResolvedValue({ record: cloudRecord, localHandle: null });
+    expect(await handle_({ type: 'disconnectCloud', provider: 'dropbox', removeQuickUnlock: true }, contentSender()))
+      .toEqual({ ok: false, error: 'forbidden' });
+    expect(await handle_({ type: 'disconnectCloud', provider: 'dropbox' }, quickOptionsSender))
+      .toEqual({ ok: false, error: 'quickUnlockConfirmationRequired' });
+    expect(await handle_({ type: 'disconnectCloud', provider: 'dropbox', removeQuickUnlock: true }, quickOptionsSender))
+      .toEqual({ ok: true });
+    expect(clearQuickUnlockEnrollment).toHaveBeenCalledOnce();
   });
 });

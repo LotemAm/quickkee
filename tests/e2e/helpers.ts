@@ -58,6 +58,25 @@ export async function openExtensionPage(
   return page;
 }
 
+/** A real Chromium WebAuthn implementation backed by CDP's internal virtual
+ * authenticator. This proves browser PRF behavior, not physical hardware. */
+export async function addPrfAuthenticator(page: Page): Promise<void> {
+  const client = await page.context().newCDPSession(page);
+  await client.send('WebAuthn.enable');
+  await client.send('WebAuthn.addVirtualAuthenticator', {
+    options: {
+      protocol: 'ctap2',
+      ctap2Version: 'ctap2_1',
+      transport: 'internal',
+      hasResidentKey: true,
+      hasUserVerification: true,
+      hasPrf: true,
+      automaticPresenceSimulation: true,
+      isUserVerified: true,
+    },
+  });
+}
+
 export async function openEntryEditorMore(page: Page): Promise<void> {
   const section = page.locator('details', {
     has: page.locator('summary', { hasText: /^More/ }),

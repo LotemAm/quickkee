@@ -42,6 +42,7 @@ export function Popup() {
   const [pwgen, setPwgen] = useState<PwGenOpts>(DEFAULT_PWGEN);
   const [sync, setSync] = useState<{ source: string | null; pendingUpload: boolean; online: boolean } | null>(null);
   const [creating, setCreating] = useState(false);
+  const [unlockNotice, setUnlockNotice] = useState('');
 
   useEffect(() => { loadSettings().then(s => { applyTheme(s.theme); setClearSecs(s.clipboardClearSeconds); setPwgen(s.pwgen); }); }, []);
   useEffect(() => {
@@ -83,7 +84,10 @@ export function Popup() {
 
   const { copy, state: clipState, cancel } = useClipboardTimer(clearSecs);
 
-  if (locked) return <UnlockScreen onUnlocked={refresh} />;
+  if (locked) return <UnlockScreen onUnlocked={notice => {
+    setUnlockNotice(notice ?? '');
+    void refresh();
+  }} />;
   const searching = q.trim().length > 0;
   const shown = searching ? searchResults : entries;
   const groupNames = tree ? buildGroupNames(tree) : new Map<string, string>();
@@ -112,6 +116,7 @@ export function Popup() {
         </div>
       </header>
       {clipState && <ClipboardBar state={clipState} onCancel={cancel} />}
+      {unlockNotice && <p role="status" className="mx-3 mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>{unlockNotice}</p>}
       <div className="p-3">
         {creating && tab && rootGroup && tree ? (
           <>

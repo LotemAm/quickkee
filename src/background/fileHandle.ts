@@ -74,6 +74,16 @@ export async function ensurePermission(h: FileSystemFileHandle, mode: 'read' | '
   return (await h.requestPermission(opts)) === 'granted';
 }
 
+/** Query only: safe for quick unlock in the service worker, where permission
+ * prompts have no user gesture and must fall back to manual reselection. */
+export async function hasPermission(h: FileSystemFileHandle, mode: 'read' | 'readwrite'): Promise<boolean> {
+  try {
+    const opts = { mode } as { mode: 'read' | 'readwrite' };
+    // @ts-expect-error: queryPermission is experimental
+    return (await h.queryPermission(opts)) === 'granted';
+  } catch { return false; }
+}
+
 export async function readBytes(h: FileSystemFileHandle): Promise<ArrayBuffer> {
   const file = await h.getFile(); return file.arrayBuffer();
 }

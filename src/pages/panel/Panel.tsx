@@ -154,6 +154,7 @@ export function Panel() {
   const [readingTotpQr, setReadingTotpQr] = useState(false);
   const [savingTotpImport, setSavingTotpImport] = useState(false);
   const [view, setView] = useState<'vault' | 'health'>('vault');
+  const [unlockNotice, setUnlockNotice] = useState('');
   const totpFileInput = useRef<HTMLInputElement>(null);
   useEffect(() => { loadSettings().then(s => { applyTheme(s.theme); setClearSecs(s.clipboardClearSeconds); setPwgen(s.pwgen); }); }, []);
   const reload = async (): Promise<TreeNode | null> => {
@@ -209,7 +210,10 @@ export function Panel() {
   }, [pendingOpenEntry, tree]);
   if (locked) return (
     <div className="min-h-screen flex flex-col justify-center" style={{ background: 'var(--bg)' }}>
-      <UnlockScreen onUnlocked={refresh} />
+      <UnlockScreen onUnlocked={notice => {
+        setUnlockNotice(notice ?? '');
+        void refresh();
+      }} />
     </div>);
   async function save() { setSaving(true);
     const r = await sendToSW({ type: 'save' });
@@ -306,6 +310,8 @@ export function Panel() {
           <PanelActionsMenu importBusy={readingTotpQr} onImportTotp={beginTotpImport} />
         </div>
       </header>
+
+      {unlockNotice && <p role="status" className="mx-3 mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>{unlockNotice}</p>}
 
       {totpImportError && !totpImport && (
         <div className="alert-error mx-3 mt-2 flex items-center justify-between gap-2" role="alert">

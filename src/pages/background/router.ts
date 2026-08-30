@@ -1,6 +1,6 @@
 import { Vault, isInvalidKey } from '../../background/vault';
 import { AutoLock } from '../../background/autolock';
-import { loadHandle, ensurePermission, readBytes, writeBytes } from '../../background/fileHandle';
+import { loadHandle, ensurePermission, hasPermission, readBytes, writeBytes } from '../../background/fileHandle';
 import { loadSettings } from '../../shared/settings';
 import { generatePassword, DEFAULT_PWGEN } from '../../shared/pwgen';
 import { urlMatches } from '../../background/matcher';
@@ -16,6 +16,13 @@ import type { CloudFileSource, DbSource } from '../../shared/dbSource';
 import { generateTotp } from '../../background/totp';
 import type { CredentialCaptureStore, CredentialCaptureRecord } from '../../background/credentialCaptureStore';
 import type { CredentialPromptEntry, CredentialPromptMetadata, ResponseFor } from '../../shared/messages';
+import {
+  clearQuickUnlockEnrollment,
+  loadQuickUnlockEnrollment,
+  saveQuickUnlockEnrollment,
+} from '../../background/quickUnlockStore';
+import { unwrapQuickUnlockMaterial, wrapQuickUnlockMaterial } from '../../background/quickUnlockCrypto';
+import type { QuickUnlockSource } from '../../shared/quickUnlock';
 
 /** Name of the alarm used to schedule a deferred clipboard clear (shared with lifecycle wiring in index.ts). */
 export const CLIPBOARD_CLEAR_ALARM = 'clipboard-clear';
@@ -32,6 +39,7 @@ export interface SwContext {
   doLock(): void;
   refreshAllIcons(): void;
   online(): boolean;
+  cloudConnected?(provider: 'dropbox' | 'gdrive'): Promise<boolean>;
   persistPendingClipboardHash(hash: string | null): Promise<void>;
 }
 
@@ -39,14 +47,64 @@ export function depsFor(ctx: SwContext, src: CloudFileSource): SyncDeps {
   return { vault: ctx.vault, provider: providerFor(src.provider), online: ctx.online };
 }
 
-function isExtensionPage(sender: chrome.runtime.MessageSender, ...pages: Array<'popup' | 'panel'>): boolean {
+function isExtensionPage(sender: chrome.runtime.MessageSender, ...pages: Array<'popup' | 'panel' | 'options'>): boolean {
   if (!sender.url) return false;
   try {
     const url = new URL(sender.url);
     if (url.protocol !== 'chrome-extension:' && url.protocol !== 'moz-extension:') return false;
+    if (url.protocol === 'chrome-extension:' && url.hostname !== chrome.runtime.id) return false;
     const path = url.pathname;
     return pages.some(page => path.endsWith(`/src/pages/${page}/index.html`));
   } catch { return false; }
+}
+
+function validSecretBytes(bytes: number[], expectedLength?: number): boolean {
+  return Array.isArray(bytes)
+    && (expectedLength === undefined || bytes.length === expectedLength)
+    && bytes.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255);
+}
+
+async function finishOpen(ctx: SwContext): Promise<void> {
+  const settings = await loadSettings();
+  ctx.autolock.arm(settings.autoCloseHours);
+  ctx.refreshAllIcons();
+}
+
+async function openLocalVault(
+  ctx: SwContext,
+  handle: FileSystemFileHandle,
+  password: string | null,
+  keyFile: ArrayBuffer | null,
+): Promise<void> {
+  await ctx.vault.open(await readBytes(handle), password, keyFile);
+  ctx.setHandle(handle);
+  ctx.setCurrentSource({ kind: 'local', handleId: 'db' });
+  await finishOpen(ctx);
+}
+
+async function openCloudVault(
+  ctx: SwContext,
+  source: CloudFileSource,
+  password: string | null,
+  keyFile: ArrayBuffer | null,
+) {
+  const outcome = await openCloud(source, depsFor(ctx, source), password, keyFile);
+  ctx.setHandle(null);
+  ctx.setCurrentSource(source);
+  await finishOpen(ctx);
+  return outcome;
+}
+
+function sourceMatchesActive(source: QuickUnlockSource, ctx: SwContext): boolean {
+  const active = ctx.getCurrentSource();
+  if (source.kind === 'local') return active?.kind === 'local' && ctx.getHandle()?.name === source.label;
+  return active?.kind === 'cloud' && active.provider === source.provider && active.fileId === source.fileId;
+}
+
+async function cloudConnected(ctx: SwContext, provider: 'dropbox' | 'gdrive'): Promise<boolean> {
+  if (ctx.cloudConnected) return ctx.cloudConnected(provider);
+  if (import.meta.env.VITE_QK_TEST === '1' && __hasOverride()) return true;
+  return provider === 'dropbox' ? hasStoredRefreshToken('dropbox') : isGoogleConnected();
 }
 
 function contentAuthority(sender: chrome.runtime.MessageSender): { tabId: number; url: string } | null {
@@ -127,19 +185,19 @@ export function makeRouter(ctx: SwContext) {
     switch (req.type) {
       case 'unlock': {
         const handle = await loadHandle();
-        ctx.setHandle(handle);
         if (!handle) return { ok: false, error: 'noFile' };
         if (!(await ensurePermission(handle, 'readwrite'))) return { ok: false, error: 'permission' };
+        const keyBytes = req.keyFile ? new Uint8Array(req.keyFile) : null;
         try {
-          const bytes = await readBytes(handle);
-          const keyFile = req.keyFile ? new Uint8Array(req.keyFile).buffer : null;
-          await ctx.vault.open(bytes, req.password, keyFile);
+          const keyFile = keyBytes
+            ? keyBytes.buffer.slice(keyBytes.byteOffset, keyBytes.byteOffset + keyBytes.byteLength) as ArrayBuffer
+            : null;
+          await openLocalVault(ctx, handle, req.password, keyFile);
         } catch (e) {
           if (isInvalidKey(e)) return { ok: false, error: 'badCredentials' };
           // Surface non-credential failures (corrupt file, missing WASM/CSP, runtime) instead of masking them.
           return { ok: false, error: `unlockFailed: ${e instanceof Error ? e.message : String(e)}` };
-        }
-        const s = await loadSettings(); ctx.autolock.arm(s.autoCloseHours); ctx.refreshAllIcons();
+        } finally { keyBytes?.fill(0); req.keyFile?.fill(0); }
         return { ok: true };
       }
       case 'lock': ctx.doLock(); return { ok: true };
@@ -236,16 +294,17 @@ export function makeRouter(ctx: SwContext) {
       }
       case 'openRemote': {
         const src: CloudFileSource = { kind: 'cloud', provider: req.provider, fileId: req.fileId, basedOnRev: '' };
+        const keyBytes = req.keyFile ? new Uint8Array(req.keyFile) : null;
         try {
-          const keyFile = req.keyFile ? new Uint8Array(req.keyFile).buffer : null;
-          const out = await openCloud(src, depsFor(ctx, src), req.password, keyFile);
-          ctx.setCurrentSource(src);
-          const s = await loadSettings(); ctx.autolock.arm(s.autoCloseHours); ctx.refreshAllIcons();
+          const keyFile = keyBytes
+            ? keyBytes.buffer.slice(keyBytes.byteOffset, keyBytes.byteOffset + keyBytes.byteLength) as ArrayBuffer
+            : null;
+          const out = await openCloudVault(ctx, src, req.password, keyFile);
           return out.merged ? { ok: true, merged: true } : { ok: true };
         } catch (e) {
           if (isInvalidKey(e)) return { ok: false, error: 'badCredentials' };
           return { ok: false, error: `openFailed: ${e instanceof Error ? e.message : String(e)}` };
-        }
+        } finally { keyBytes?.fill(0); req.keyFile?.fill(0); }
       }
       case 'getSyncStatus': {
         let currentSource = ctx.getCurrentSource();
@@ -264,6 +323,17 @@ export function makeRouter(ctx: SwContext) {
         };
       }
       case 'disconnectCloud': {
+        if (!isExtensionPage(sender, 'options')) return { ok: false, error: 'forbidden' };
+        let enrollment;
+        try { enrollment = await loadQuickUnlockEnrollment(); }
+        catch {
+          if (!req.removeQuickUnlock) return { ok: false, error: 'quickUnlockConfirmationRequired' };
+          await clearQuickUnlockEnrollment();
+        }
+        if (enrollment?.record.source.kind === 'cloud' && enrollment.record.source.provider === req.provider) {
+          if (!req.removeQuickUnlock) return { ok: false, error: 'quickUnlockConfirmationRequired' };
+          await clearQuickUnlockEnrollment();
+        }
         if (req.provider === 'gdrive') await disconnectGoogle();
         else await disconnect(req.provider);
         // If the active vault is this provider's, lock so the next save can't route to a
@@ -272,6 +342,113 @@ export function makeRouter(ctx: SwContext) {
         if (currentSource?.kind === 'cloud' && currentSource.provider === req.provider) ctx.doLock();
         return { ok: true };
       }
+      case 'getQuickUnlockStatus': {
+        if (!isExtensionPage(sender, 'popup', 'panel', 'options')) return { ok: false, error: 'forbidden' };
+        try {
+          const enrollment = await loadQuickUnlockEnrollment();
+          if (!enrollment) return { ok: true, enrolled: false, corrupt: false, source: null };
+          const { record } = enrollment;
+          return {
+            ok: true,
+            enrolled: true,
+            corrupt: false,
+            source: record.source,
+            credentialId: record.credentialId,
+            prfInput: record.prfInput,
+            createdAt: record.createdAt,
+            updatedAt: record.updatedAt,
+          };
+        } catch { return { ok: true, enrolled: false, corrupt: true, source: null }; }
+      }
+      case 'enrollQuickUnlock': {
+        if (!isExtensionPage(sender, 'popup', 'panel')) return { ok: false, error: 'forbidden' };
+        if (!ctx.vault.isOpen()) return { ok: false, error: 'locked' };
+        if (!sourceMatchesActive(req.source, ctx)) return { ok: false, error: 'sourceMismatch' };
+        if ((req.password === null && req.keyFile === null)
+          || (req.keyFile !== null && !validSecretBytes(req.keyFile))
+          || !validSecretBytes(req.prfOutput, 32)) return { ok: false, error: 'invalidEnrollment' };
+        const keyFile = req.keyFile ? new Uint8Array(req.keyFile) : null;
+        const prfOutput = new Uint8Array(req.prfOutput);
+        try {
+          try {
+            const existing = await loadQuickUnlockEnrollment();
+            if (existing && !req.replaceExisting) return { ok: false, error: 'replacementConfirmationRequired' };
+          } catch {
+            if (!req.replaceExisting) return { ok: false, error: 'corruptEnrollment' };
+          }
+          const record = await wrapQuickUnlockMaterial({
+            credentialId: req.credentialId,
+            prfInput: req.prfInput,
+            prfOutput,
+            source: req.source,
+            material: { password: req.password, keyFile },
+          });
+          await saveQuickUnlockEnrollment(record, req.source.kind === 'local' ? ctx.getHandle() : null);
+          return { ok: true };
+        } catch { return { ok: false, error: 'enrollmentFailed' }; }
+        finally {
+          keyFile?.fill(0);
+          prfOutput.fill(0);
+          req.keyFile?.fill(0);
+          req.prfOutput.fill(0);
+        }
+      }
+      case 'quickUnlock': {
+        if (!isExtensionPage(sender, 'popup', 'panel')) return { ok: false, error: 'forbidden' };
+        if (ctx.vault.isOpen()) return { ok: false, error: 'alreadyUnlocked' };
+        if (!validSecretBytes(req.prfOutput, 32)) return { ok: false, error: 'invalidPrfOutput' };
+        const prfOutput = new Uint8Array(req.prfOutput);
+        let keyFile: Uint8Array | null = null;
+        try {
+          let enrollment;
+          try { enrollment = await loadQuickUnlockEnrollment(); }
+          catch { return { ok: false, error: 'corruptEnrollment' }; }
+          if (!enrollment) return { ok: false, error: 'notEnrolled' };
+          if (req.credentialId !== enrollment.record.credentialId) return { ok: false, error: 'unknownCredential' };
+          if (enrollment.record.source.kind === 'cloud'
+            && !(await cloudConnected(ctx, enrollment.record.source.provider)))
+            return { ok: false, error: 'authRequired' };
+          let material;
+          try { material = await unwrapQuickUnlockMaterial(enrollment.record, prfOutput); }
+          catch { return { ok: false, error: 'corruptEnrollment' }; }
+          keyFile = material.keyFile;
+          const keyBuffer = keyFile ? keyFile.buffer.slice(keyFile.byteOffset, keyFile.byteOffset + keyFile.byteLength) as ArrayBuffer : null;
+          if (enrollment.record.source.kind === 'local') {
+            if (!enrollment.localHandle) return { ok: false, error: 'corruptEnrollment' };
+            const permitted = await hasPermission(enrollment.localHandle, 'readwrite');
+            if (!permitted) return { ok: false, error: 'permissionRequired' };
+            try { await openLocalVault(ctx, enrollment.localHandle, material.password, keyBuffer); }
+            catch (error) {
+              return isInvalidKey(error)
+                ? { ok: false, error: 'staleCredentials' }
+                : { ok: false, error: 'sourceUnavailable' };
+            }
+            return { ok: true };
+          }
+          const source: CloudFileSource = {
+            kind: 'cloud',
+            provider: enrollment.record.source.provider,
+            fileId: enrollment.record.source.fileId,
+            basedOnRev: '',
+          };
+          try {
+            const outcome = await openCloudVault(ctx, source, material.password, keyBuffer);
+            return outcome.merged ? { ok: true, merged: true } : { ok: true };
+          } catch (error) {
+            if (isInvalidKey(error)) return { ok: false, error: 'staleCredentials' };
+            if (error instanceof Error && error.message === 'offlineNoCache') return { ok: false, error: 'offlineNoCache' };
+            return { ok: false, error: 'authRequired' };
+          }
+        } finally {
+          keyFile?.fill(0);
+          prfOutput.fill(0);
+          req.prfOutput.fill(0);
+        }
+      }
+      case 'disableQuickUnlock':
+        if (!isExtensionPage(sender, 'popup', 'panel', 'options')) return { ok: false, error: 'forbidden' };
+        await clearQuickUnlockEnrollment();
+        return { ok: true };
       case 'generatePassword':
         return { ok: true, password: generatePassword(req.opts ?? DEFAULT_PWGEN) };
       case 'fillRequest': {

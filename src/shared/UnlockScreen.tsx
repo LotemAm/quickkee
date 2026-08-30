@@ -5,8 +5,43 @@ import { pickAndStoreDb, pickKeyFile, readStoredKeyBytes } from './pickFile';
 import { loadHandle, ensurePermission, loadKeyHandle, clearKeyHandle, loadLastCloud, saveLastCloud, clearLastCloud } from '../background/fileHandle';
 import { CloudConnect } from './CloudConnect';
 import type { RemoteFile } from '../background/sources/cloudProvider';
+import {
+  createDeviceCredential,
+  DeviceQuickUnlockError,
+  getDevicePrfOutput,
+  isDeviceQuickUnlockAvailable,
+} from './deviceQuickUnlock';
+import type { QuickUnlockSource, QuickUnlockStatus } from './quickUnlock';
 
-export function UnlockScreen({ onUnlocked }: { onUnlocked: () => void }) {
+function deviceError(error: unknown): string {
+  const code = error instanceof DeviceQuickUnlockError ? error.code
+    : error instanceof DOMException ? error.name : 'failed';
+  return ({
+    cancelled: 'Device verification was cancelled. You can retry or unlock manually.',
+    NotAllowedError: 'Device verification was cancelled. You can retry or unlock manually.',
+    timedOut: 'Device verification timed out. You can retry or unlock manually.',
+    authenticatorUnavailable: 'Device verification is unavailable. Unlock manually instead.',
+    prfUnsupported: 'This device cannot securely support quick unlock. Unlock manually instead.',
+    unknownCredential: 'The saved device credential is unavailable. Unlock manually, then replace or disable quick unlock.',
+    invalidData: 'The saved quick-unlock data is invalid. Unlock manually, then disable quick unlock.',
+    failed: 'Device verification failed. You can retry or unlock manually.',
+  } as Record<string, string>)[code] ?? 'Device verification failed. You can retry or unlock manually.';
+}
+
+function quickUnlockError(code: string): string {
+  return ({
+    permissionRequired: 'Grant file access with manual unlock to continue.',
+    authRequired: 'Reconnect the enrolled cloud account or unlock manually.',
+    offlineNoCache: 'This vault is not available offline. Reconnect or unlock manually.',
+    staleCredentials: 'The stored unlock material no longer opens this vault. Unlock manually, then replace or disable quick unlock.',
+    unknownCredential: 'The saved device credential is unavailable. Unlock manually, then replace or disable quick unlock.',
+    corruptEnrollment: 'Quick-unlock data is damaged or was changed. Unlock manually, then disable quick unlock.',
+    notEnrolled: 'Device quick unlock is no longer enrolled. Unlock manually.',
+    sourceUnavailable: 'The enrolled vault could not be opened. Unlock it manually.',
+  } as Record<string, string>)[code] ?? 'Quick unlock failed. Unlock manually or try again.';
+}
+
+export function UnlockScreen({ onUnlocked }: { onUnlocked: (notice?: string) => void }) {
   const [src, setSrc] = useState<'local' | 'dropbox' | 'gdrive'>('local');
   const [picked, setPicked] = useState<RemoteFile | null>(null);
   const [dbName, setDbName] = useState<string | null>(null);
@@ -16,6 +51,11 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: () => void }) {
   const [err, setErr] = useState('');
   const [cloudErr, setCloudErr] = useState(false); // open failed for a non-credential reason (likely auth)
   const [unlocking, setUnlocking] = useState(false);
+  const [quickStatus, setQuickStatus] = useState<QuickUnlockStatus | null>(null);
+  const [deviceAvailable, setDeviceAvailable] = useState(false);
+  const [setupQuickUnlock, setSetupQuickUnlock] = useState(false);
+  const [quickBusy, setQuickBusy] = useState(false);
+  const [quickErr, setQuickErr] = useState('');
   useEffect(() => { void loadHandle().then(h => setDbName(h?.name ?? null)); }, []);
   // Auto-select the last loaded cloud database, if any.
   useEffect(() => {
@@ -29,14 +69,24 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: () => void }) {
   useEffect(() => {
     void loadKeyHandle().then(h => { if (h) { setUseKey(true); setKeyName(h.name); } });
   }, []);
+  useEffect(() => {
+    void Promise.all([
+      sendToSW({ type: 'getQuickUnlockStatus' }),
+      isDeviceQuickUnlockAvailable(),
+    ]).then(([status, available]) => {
+      if (status.ok) setQuickStatus(status);
+      setDeviceAvailable(available);
+    });
+  }, []);
 
   const canUnlock = src !== 'local'
     ? (picked !== null) && ((pwd.length > 0) || (useKey && !!keyName))
     : (pwd.length > 0) || (useKey && !!keyName);
   async function unlock() {
     setErr(''); setCloudErr(false); setUnlocking(true);
+    let keyBytes: number[] | null = null;
+    let unlockNotice: string | undefined;
     try {
-      let keyBytes: number[] | null = null;
       if (useKey) {
         keyBytes = await readStoredKeyBytes();
         if (!keyBytes) { setErr('Re-select the key file'); return; }
@@ -46,18 +96,73 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: () => void }) {
         if (!h) { setErr('Pick a database file first'); return; }
         if (!(await ensurePermission(h, 'readwrite'))) { setErr('Grant file access to continue'); return; }
         const r = await sendToSW({ type: 'unlock', password: pwd || null, keyFile: keyBytes });
-        if (r.ok) { await clearLastCloud(); onUnlocked(); }
+        if (r.ok) await clearLastCloud();
         else setErr({ badCredentials: 'Wrong password or key file', permission: 'Grant file access to continue',
           noFile: 'Pick a database file first' }[r.error as string] ?? r.error);
+        if (!r.ok) return;
       } else {
         const r = await sendToSW({ type: 'openRemote', provider: src, fileId: picked!.fileId, fileName: picked!.name, password: pwd || null, keyFile: keyBytes });
-        if (r.ok) { await saveLastCloud({ provider: src, fileId: picked!.fileId, fileName: picked!.name }); onUnlocked(); }
+        if (r.ok) await saveLastCloud({ provider: src, fileId: picked!.fileId, fileName: picked!.name });
         else if (r.ok === false && r.error === 'badCredentials') setErr('Wrong password or key file.');
         else { setErr('Could not open the database — your account may need to reconnect.'); setCloudErr(true); }
+        if (!r.ok) return;
       }
+
+      if (setupQuickUnlock) {
+        const source: QuickUnlockSource = src === 'local'
+          ? { kind: 'local', label: dbName! }
+          : { kind: 'cloud', provider: src, fileId: picked!.fileId, label: picked!.name };
+        const replaceExisting = quickStatus?.enrolled === true;
+        if (replaceExisting && !window.confirm(
+          `Replace device quick unlock for “${quickStatus.source?.label ?? 'the enrolled vault'}” with “${source.label}”?`,
+        )) {
+          setPwd(''); onUnlocked(); return;
+        }
+        let proof: Awaited<ReturnType<typeof createDeviceCredential>> | null = null;
+        try {
+          proof = await createDeviceCredential();
+          const enrolled = await sendToSW({
+            type: 'enrollQuickUnlock',
+            source,
+            password: pwd || null,
+            keyFile: keyBytes,
+            credentialId: proof.credentialId,
+            prfInput: proof.prfInput,
+            prfOutput: Array.from(proof.prfOutput),
+            replaceExisting,
+          });
+          if (!enrolled.ok) {
+            unlockNotice = 'Your vault is open, but device quick unlock was not set up.';
+            setQuickErr(unlockNotice);
+          }
+        } catch (error) {
+          unlockNotice = `Your vault is open, but quick unlock was not set up. ${deviceError(error)}`;
+          setQuickErr(unlockNotice);
+        } finally { proof?.prfOutput.fill(0); }
+      }
+      setPwd('');
+      onUnlocked(unlockNotice);
     } finally {
+      keyBytes?.fill(0);
       setUnlocking(false);
     }
+  }
+
+  async function unlockWithDevice() {
+    if (!quickStatus?.enrolled || !quickStatus.credentialId || !quickStatus.prfInput || quickBusy) return;
+    setQuickErr(''); setQuickBusy(true);
+    let output: Uint8Array | null = null;
+    try {
+      output = await getDevicePrfOutput(quickStatus.credentialId, quickStatus.prfInput);
+      const result = await sendToSW({
+        type: 'quickUnlock',
+        credentialId: quickStatus.credentialId,
+        prfOutput: Array.from(output),
+      });
+      if (result.ok) onUnlocked();
+      else setQuickErr(quickUnlockError(result.error));
+    } catch (error) { setQuickErr(deviceError(error)); }
+    finally { output?.fill(0); setQuickBusy(false); }
   }
 
   return (
@@ -66,6 +171,27 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: () => void }) {
         <div className="app-title justify-center text-base">
           <ShieldCheck size={20} className="app-logo" /> QuickKee
         </div>
+        {quickStatus?.enrolled && deviceAvailable && quickStatus.source && (
+          <div className="space-y-2">
+            <button className="btn-primary w-full" disabled={quickBusy} onClick={() => { void unlockWithDevice(); }}>
+              {quickBusy
+                ? <><Loader2 size={15} className="animate-spin" /> Waiting for device verification…</>
+                : <><ShieldCheck size={15} /> Unlock “{quickStatus.source.label}” with device</>}
+            </button>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              Use Windows Hello or your device verification. Your enrolled vault is opened directly.
+            </p>
+          </div>
+        )}
+        {quickStatus?.enrolled && !deviceAvailable && (
+          <p role="status" className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            Device verification is unavailable here. Manual unlock remains available.
+          </p>
+        )}
+        {quickStatus?.corrupt && (
+          <p role="alert" className="alert-error">Quick-unlock data is damaged. Unlock manually, then disable it in Settings.</p>
+        )}
+        {quickErr && <p role="alert" className="alert-error">{quickErr}</p>}
         <div className="source-picker" role="tablist">
           <button role="tab" aria-selected={src === 'local'} onClick={() => { setSrc('local'); setPicked(null); setCloudErr(false); setErr(''); }}>
             <HardDrive size={17} /> Local file
@@ -102,6 +228,18 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: () => void }) {
           <KeyRound size={15} /> {keyName ? `Key file: ${keyName}` : 'Choose key file…'}</button>}
         <input type="password" className="input" placeholder="Master password" value={pwd} autoFocus
           onChange={e => setPwd(e.target.value)} onKeyDown={e => e.key === 'Enter' && canUnlock && !unlocking && unlock()} />
+        {deviceAvailable && (
+          <div className="space-y-1">
+            <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-muted)' }}>
+              <input type="checkbox" checked={setupQuickUnlock}
+                onChange={event => setSetupQuickUnlock(event.target.checked)} />
+              Set up device quick unlock after this unlock
+            </label>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              Stores an encrypted copy of your master password and/or key-file material on this device.
+            </p>
+          </div>
+        )}
         {err && <p className="alert-error">{err}</p>}
         {cloudErr && src !== 'local' && (
           <button className="btn w-full" onClick={() => { setPicked(null); setCloudErr(false); setErr(''); }}>
