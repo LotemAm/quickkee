@@ -5,7 +5,7 @@ test('single-step login: autofill fills email-only field when no password field 
   await installDb(seed);
   await seed.reload();
   await seed.getByPlaceholder('Master password').fill('correct horse');
-  await seed.getByRole('button', { name: 'Unlock' }).click();
+  await seed.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(seed.getByPlaceholder('Search…')).toBeVisible();
 
   const site = await context.newPage();

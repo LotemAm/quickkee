@@ -21,7 +21,7 @@ test('card form: focusing a detected cc-number field shows only card entries and
   await installDb(seed);
   await seed.reload();
   await seed.getByPlaceholder('Master password').fill('correct horse');
-  await seed.getByRole('button', { name: 'Unlock' }).click();
+  await seed.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(seed.getByPlaceholder('Search…')).toBeVisible();
 
   await markAsCard(seed, http.url);
@@ -46,7 +46,7 @@ test('card form popup masks the card number in the entry picker', async ({ conte
   await installDb(seed);
   await seed.reload();
   await seed.getByPlaceholder('Master password').fill('correct horse');
-  await seed.getByRole('button', { name: 'Unlock' }).click();
+  await seed.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(seed.getByPlaceholder('Search…')).toBeVisible();
 
   await markAsCard(seed, http.url);
@@ -64,7 +64,7 @@ test('login form excludes card-marked entries from the inline picker', async ({ 
   await installDb(seed);
   await seed.reload();
   await seed.getByPlaceholder('Master password').fill('correct horse');
-  await seed.getByRole('button', { name: 'Unlock' }).click();
+  await seed.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(seed.getByPlaceholder('Search…')).toBeVisible();
 
   await markAsCard(seed, http.url);
@@ -87,7 +87,7 @@ test('card form with <select>-based expiry (real-world shape, e.g. fill.dev) fil
   await installDb(seed);
   await seed.reload();
   await seed.getByPlaceholder('Master password').fill('correct horse');
-  await seed.getByRole('button', { name: 'Unlock' }).click();
+  await seed.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(seed.getByPlaceholder('Search…')).toBeVisible();
 
   // Expiry within the fixture <select>'s available option range (2026-2028).
@@ -113,7 +113,7 @@ test('a card entry with no URL (not tied to one site) still shows in the inline 
   await installDb(seed);
   await seed.reload();
   await seed.getByPlaceholder('Master password').fill('correct horse');
-  await seed.getByRole('button', { name: 'Unlock' }).click();
+  await seed.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(seed.getByPlaceholder('Search…')).toBeVisible();
 
   await markAsCard(seed, http.url);
@@ -140,7 +140,7 @@ test('card form embedded in an <iframe> (e.g. Google Wallet\'s payment dialog) s
   await installDb(seed);
   await seed.reload();
   await seed.getByPlaceholder('Master password').fill('correct horse');
-  await seed.getByRole('button', { name: 'Unlock' }).click();
+  await seed.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(seed.getByPlaceholder('Search…')).toBeVisible();
 
   await markAsCard(seed, http.url);

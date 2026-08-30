@@ -5,7 +5,7 @@ test('unsaved site: create + save persists and revisit shows the badge', async (
   await installDb(seed);
   await seed.reload();
   await seed.getByPlaceholder('Master password').fill('correct horse');
-  await seed.getByRole('button', { name: 'Unlock' }).click();
+  await seed.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(seed.getByPlaceholder('Search…')).toBeVisible();
 
   // 127.0.0.1 is a non-matching hostname -> no entries -> CreateForm shows.

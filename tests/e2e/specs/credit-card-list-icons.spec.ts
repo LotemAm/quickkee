@@ -5,7 +5,7 @@ test('panel and popup entry lists show a credit-card icon only once an entry is 
   await installDb(popup);
   await popup.reload();
   await popup.getByPlaceholder('Master password').fill('correct horse');
-  await popup.getByRole('button', { name: 'Unlock' }).click();
+  await popup.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(popup.getByPlaceholder('Search…')).toBeVisible();
 
   const panel = await openExtensionPage(context, extensionId, 'src/pages/panel/index.html');

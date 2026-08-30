@@ -6,7 +6,7 @@ test('saved site: badge count, copy, autofill', async ({ context, extensionId, h
   await installDb(seed);
   await seed.reload();
   await seed.getByPlaceholder('Master password').fill('correct horse');
-  await seed.getByRole('button', { name: 'Unlock' }).click();
+  await seed.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(seed.getByPlaceholder('Search…')).toBeVisible();
 
   // Open the matching site (localhost) and let the SW update its badge.

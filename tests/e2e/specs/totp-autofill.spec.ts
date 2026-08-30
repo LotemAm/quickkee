@@ -31,7 +31,7 @@ test('TOTP fills through normal autofill and the focused inline picker shows a l
   await installDb(seed);
   await seed.reload();
   await seed.getByPlaceholder('Master password').fill('correct horse');
-  await seed.getByRole('button', { name: 'Unlock' }).click();
+  await seed.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(seed.getByPlaceholder('Search…')).toBeVisible();
   await addTotp(seed, http.otpUrl);
 
@@ -61,7 +61,7 @@ test('TOTP lifecycle: create, use from every surface, then remove it', async ({ 
   await installDb(seed);
   await seed.reload();
   await seed.getByPlaceholder('Master password').fill('correct horse');
-  await seed.getByRole('button', { name: 'Unlock' }).click();
+  await seed.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(seed.getByPlaceholder('Search…')).toBeVisible();
 
   const site = await context.newPage();

@@ -7,8 +7,8 @@ test('enrolls a local vault, survives lock and reload, and reopens through fresh
   await popup.reload();
 
   await popup.getByPlaceholder('Master password').fill('correct horse');
-  await popup.getByRole('checkbox', { name: /set up device quick unlock/i }).check();
-  await popup.getByRole('button', { name: 'Unlock' }).click();
+  await popup.getByRole('button', { name: /set up device quick unlock/i }).click();
+  await popup.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(popup.getByPlaceholder('Search…')).toBeVisible();
 
   await popup.getByRole('button', { name: 'Lock database' }).click();

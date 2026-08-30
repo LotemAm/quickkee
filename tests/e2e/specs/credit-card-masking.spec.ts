@@ -5,7 +5,7 @@ test('panel: Card Number field is masked by default and reveals via the eye togg
   await installDb(popup);
   await popup.reload();
   await popup.getByPlaceholder('Master password').fill('correct horse');
-  await popup.getByRole('button', { name: 'Unlock' }).click();
+  await popup.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(popup.getByPlaceholder('Search…')).toBeVisible();
 
   const panel = await openExtensionPage(context, extensionId, 'src/pages/panel/index.html');
@@ -52,7 +52,7 @@ test('panel and popup entry-list rows mask a card number to its last 4 digits', 
   await installDb(popup);
   await popup.reload();
   await popup.getByPlaceholder('Master password').fill('correct horse');
-  await popup.getByRole('button', { name: 'Unlock' }).click();
+  await popup.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(popup.getByPlaceholder('Search…')).toBeVisible();
 
   const panel = await openExtensionPage(context, extensionId, 'src/pages/panel/index.html');

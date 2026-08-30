@@ -9,7 +9,7 @@ test('panel: local password health report is redacted, filterable, and opens ent
   await installDb(popup);
   await popup.reload();
   await popup.getByPlaceholder('Master password').fill('correct horse');
-  await popup.getByRole('button', { name: 'Unlock' }).click();
+  await popup.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(popup.getByPlaceholder('Search…')).toBeVisible();
   expect(await swCmd(popup, { cmd: 'passwordHealthPrepare' })).toEqual({ ok: true });
 

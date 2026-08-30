@@ -16,7 +16,7 @@ test('panel: edit an entry, Save, and verify via kdbxweb re-read', async ({ cont
   await installDb(popup);
   await popup.reload();
   await popup.getByPlaceholder('Master password').fill('correct horse');
-  await popup.getByRole('button', { name: 'Unlock' }).click();
+  await popup.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(popup.getByPlaceholder('Search…')).toBeVisible();
 
   // Open the panel page. Wait for the tree to appear (status poll → unlocked).

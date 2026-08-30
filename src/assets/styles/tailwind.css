@@ -262,7 +262,6 @@
   .tooltip-anchor:focus-within .tooltip-content {
     opacity: 1;
     visibility: visible;
-    pointer-events: auto;
     transform: translateY(0);
   }
   .tooltip-card {

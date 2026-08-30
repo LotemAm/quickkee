@@ -5,7 +5,7 @@ test('auto-close locks the vault and it can be re-unlocked', async ({ context, e
   await installDb(popup);
   await popup.reload();
   await popup.getByPlaceholder('Master password').fill('correct horse');
-  await popup.getByRole('button', { name: 'Unlock' }).click();
+  await popup.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(popup.getByPlaceholder('Search…')).toBeVisible();
 
   // Arm the real auto-lock timer with ~1.2s (hours = 1.2/3600), then wait it out.
@@ -17,8 +17,8 @@ test('auto-close locks the vault and it can be re-unlocked', async ({ context, e
 
   // Popup now shows the locked (Unlock) view; re-unlock works.
   await popup.reload();
-  await expect(popup.getByRole('button', { name: 'Unlock' })).toBeVisible();
+  await expect(popup.getByRole('button', { name: 'Unlock', exact: true })).toBeVisible();
   await popup.getByPlaceholder('Master password').fill('correct horse');
-  await popup.getByRole('button', { name: 'Unlock' }).click();
+  await popup.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(popup.getByPlaceholder('Search…')).toBeVisible();
 });

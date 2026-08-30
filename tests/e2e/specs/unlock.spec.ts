@@ -8,7 +8,7 @@ test('first run: install db, enter password, vault opens', async ({ context, ext
   const password = popup.getByPlaceholder('Master password');
   await expect(password).toBeFocused();
   await password.fill('correct horse');
-  await popup.getByRole('button', { name: 'Unlock' }).click();
+  await popup.getByRole('button', { name: 'Unlock', exact: true }).click();
 
   // Locked view shows the Unlock button; unlocked view shows the search box.
   await expect(popup.getByPlaceholder('Search…')).toBeVisible();

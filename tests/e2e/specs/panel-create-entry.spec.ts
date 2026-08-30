@@ -6,7 +6,7 @@ test('panel: create an entry in the selected group via the + button', async ({ c
   await installDb(popup);
   await popup.reload();
   await popup.getByPlaceholder('Master password').fill('correct horse');
-  await popup.getByRole('button', { name: 'Unlock' }).click();
+  await popup.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(popup.getByPlaceholder('Search…')).toBeVisible();
 
   const panel = await openExtensionPage(context, extensionId, 'src/pages/panel/index.html');

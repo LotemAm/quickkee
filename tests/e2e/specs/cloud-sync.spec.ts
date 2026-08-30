@@ -29,7 +29,7 @@ test('open from cloud, edit, save; remote change merges and uploads both edits',
   await popup.getByRole('button', { name: 'Connect Dropbox' }).click();
   await popup.getByRole('button', { name: 'cloud.kdbx' }).click();
   await popup.getByPlaceholder('Master password').fill('correct horse');
-  await popup.getByRole('button', { name: 'Unlock' }).click();
+  await popup.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(popup.getByPlaceholder('Search…')).toBeVisible();
 
   // Another device pushes a remote version (rev r2) that adds a new entry.
