@@ -1,0 +1,175 @@
+name: Publish Chrome Extension
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: chrome-web-store-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and submit for review
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: chrome-web-store
+
+    steps:
+      - name: Checkout tagged revision
+        uses: actions/checkout@v7
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag must use the format vMAJOR.MINOR.PATCH (for example, v0.3.0)." >&2
+            exit 1
+          fi
+
+          package_version="$(node -p "require('./package.json').version")"
+          if [[ "${GITHUB_REF_NAME}" != "v${package_version}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package.json version ${package_version}." >&2
+            exit 1
+          fi
+
+      - name: Validate deployment configuration
+        shell: bash
+        env:
+          WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          PUBLISHER_ID: ${{ vars.CHROME_WEB_STORE_PUBLISHER_ID }}
+          EXTENSION_ID: ${{ vars.CHROME_WEB_STORE_EXTENSION_ID }}
+        run: |
+          set -euo pipefail
+
+          for variable in WORKLOAD_IDENTITY_PROVIDER SERVICE_ACCOUNT PUBLISHER_ID EXTENSION_ID; do
+            if [[ -z "${!variable}" ]]; then
+              echo "Missing chrome-web-store environment variable: ${variable}" >&2
+              exit 1
+            fi
+          done
+
+      - run: corepack enable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Typecheck
+        run: yarn typecheck
+
+      - name: Run unit tests
+        run: yarn test
+
+      - name: Install Chromium
+        run: yarn playwright install --with-deps chromium
+
+      - name: Run end-to-end tests
+        run: xvfb-run --auto-servernum yarn test:e2e
+
+      - name: Build production package
+        run: yarn build:production
+        env:
+          VITE_GDRIVE_WEB_CLIENT_ID: ${{ secrets.VITE_GDRIVE_WEB_CLIENT_ID }}
+
+      - name: Verify production package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -s release/quickkee.zip
+          package_version="$(node -p "require('./package.json').version")"
+          manifest_version="$(unzip -p release/quickkee.zip manifest.json | jq -r '.version')"
+
+          if [[ "${manifest_version}" != "${package_version}" ]]; then
+            echo "ZIP manifest version ${manifest_version} does not match package.json ${package_version}." >&2
+            exit 1
+          fi
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: quickkee-chrome-${{ github.ref_name }}
+          path: release/quickkee.zip
+          if-no-files-found: error
+
+      - name: Authenticate to Google Cloud
+        id: google-auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/chromewebstore
+          access_token_lifetime: 300s
+          create_credentials_file: false
+
+      - name: Upload package to Chrome Web Store
+        shell: bash
+        env:
+          ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+          PUBLISHER_ID: ${{ vars.CHROME_WEB_STORE_PUBLISHER_ID }}
+          EXTENSION_ID: ${{ vars.CHROME_WEB_STORE_EXTENSION_ID }}
+        run: |
+          set -euo pipefail
+
+          item="publishers/${PUBLISHER_ID}/items/${EXTENSION_ID}"
+          upload_response="$(curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer ${ACCESS_TOKEN}" \
+            --header "Content-Type: application/zip" \
+            --upload-file release/quickkee.zip \
+            "https://chromewebstore.googleapis.com/upload/v2/${item}:upload")"
+
+          jq . <<<"${upload_response}"
+          upload_state="$(jq -r '.uploadState' <<<"${upload_response}")"
+
+          for attempt in {1..12}; do
+            if [[ "${upload_state}" != "IN_PROGRESS" ]]; then
+              break
+            fi
+
+            sleep 5
+            status_response="$(curl --fail-with-body --silent --show-error \
+              --header "Authorization: Bearer ${ACCESS_TOKEN}" \
+              "https://chromewebstore.googleapis.com/v2/${item}:fetchStatus")"
+            upload_state="$(jq -r '.lastAsyncUploadState' <<<"${status_response}")"
+            echo "Upload state: ${upload_state}"
+          done
+
+          if [[ "${upload_state}" != "SUCCEEDED" ]]; then
+            echo "Chrome Web Store upload did not succeed: ${upload_state}" >&2
+            exit 1
+          fi
+
+      - name: Submit extension for review
+        shell: bash
+        env:
+          ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+          PUBLISHER_ID: ${{ vars.CHROME_WEB_STORE_PUBLISHER_ID }}
+          EXTENSION_ID: ${{ vars.CHROME_WEB_STORE_EXTENSION_ID }}
+        run: |
+          set -euo pipefail
+
+          publish_response="$(curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer ${ACCESS_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data '{"publishType":"DEFAULT_PUBLISH","skipReview":false}' \
+            "https://chromewebstore.googleapis.com/v2/publishers/${PUBLISHER_ID}/items/${EXTENSION_ID}:publish")"
+
+          jq . <<<"${publish_response}"
+          echo "QuickKee ${GITHUB_REF_NAME} was submitted for Chrome Web Store review."
