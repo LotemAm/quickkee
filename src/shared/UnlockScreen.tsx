@@ -4,6 +4,7 @@ import { sendToSW } from './messages';
 import { pickAndStoreDb, pickKeyFile, readStoredKeyBytes } from './pickFile';
 import { loadHandle, ensurePermission, loadKeyHandle, clearKeyHandle, loadLastCloud, saveLastCloud, clearLastCloud } from '../background/fileHandle';
 import { CloudConnect } from './CloudConnect';
+import { IconTooltipButton } from './IconTooltipButton';
 import type { RemoteFile } from '../background/sources/cloudProvider';
 import {
   createDeviceCredential,
@@ -226,20 +227,19 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: (notice?: string) => 
         </label>
         {useKey && <button className="btn w-full" onClick={async () => { try { setKeyName(await pickKeyFile()); } catch (e) { if ((e as DOMException).name !== 'AbortError') throw e; } }}>
           <KeyRound size={15} /> {keyName ? `Key file: ${keyName}` : 'Choose key file…'}</button>}
-        <input type="password" className="input" placeholder="Master password" value={pwd} autoFocus
-          onChange={e => setPwd(e.target.value)} onKeyDown={e => e.key === 'Enter' && canUnlock && !unlocking && unlock()} />
-        {deviceAvailable && (
-          <div className="space-y-1">
-            <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-muted)' }}>
-              <input type="checkbox" checked={setupQuickUnlock}
-                onChange={event => setSetupQuickUnlock(event.target.checked)} />
-              Set up device quick unlock after this unlock
-            </label>
-            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              Stores an encrypted copy of your master password and/or key-file material on this device.
-            </p>
-          </div>
-        )}
+        <div className="flex gap-2">
+          <input type="password" className="input min-w-0 flex-1" placeholder="Master password" value={pwd} autoFocus
+            onChange={e => setPwd(e.target.value)} onKeyDown={e => e.key === 'Enter' && canUnlock && !unlocking && unlock()} />
+          {deviceAvailable && (
+            <IconTooltipButton className="icon-btn btn-toggle"
+              label="Set up device quick unlock after this unlock" aria-pressed={setupQuickUnlock}
+              tooltipId="quick-unlock-tooltip" tooltipTitle="Quick unlock"
+              tooltipDescription="Stores an encrypted copy of your master password and/or key-file material on this device."
+              onClick={() => setSetupQuickUnlock(enabled => !enabled)}>
+              <ShieldCheck size={15} />
+            </IconTooltipButton>
+          )}
+        </div>
         {err && <p className="alert-error">{err}</p>}
         {cloudErr && src !== 'local' && (
           <button className="btn w-full" onClick={() => { setPicked(null); setCloudErr(false); setErr(''); }}>

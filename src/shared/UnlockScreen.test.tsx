@@ -70,18 +70,26 @@ async function enterPasswordAndUnlock() {
 }
 
 describe('device quick unlock UI', () => {
-  test('keeps manual unlock visible and leaves setup opt-in off by default', async () => {
+  test('shows quick unlock beside the password as an off-by-default toggle with a tooltip', async () => {
     render(<UnlockScreen onUnlocked={vi.fn()} />);
     expect(await screen.findByRole('button', { name: 'Unlock' })).toBeVisible();
-    const optIn = await screen.findByRole('checkbox', { name: /set up device quick unlock/i });
-    expect(optIn).not.toBeChecked();
-    expect(screen.getByText(/encrypted copy of your master password and\/or key-file material/i)).toBeVisible();
+    const optIn = await screen.findByRole('button', { name: /set up device quick unlock/i });
+    expect(screen.getByPlaceholderText('Master password').nextElementSibling).toContainElement(optIn);
+    expect(optIn).not.toHaveTextContent(/quick unlock/i);
+    expect(optIn).toHaveAttribute('aria-pressed', 'false');
+    expect(optIn).not.toHaveAttribute('title');
+    expect(optIn).toHaveAttribute('aria-describedby', 'quick-unlock-tooltip');
+    const tooltip = screen.getByRole('tooltip');
+    expect(tooltip).toHaveTextContent('Quick unlock');
+    expect(tooltip).toHaveTextContent(/encrypted copy of your master password and\/or key-file material/i);
+    fireEvent.click(optIn);
+    expect(optIn).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('sets up only after manual unlock succeeds and does not expose secrets in the DOM', async () => {
     const onUnlocked = vi.fn();
     render(<UnlockScreen onUnlocked={onUnlocked} />);
-    fireEvent.click(await screen.findByRole('checkbox', { name: /set up device quick unlock/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /set up device quick unlock/i }));
     await enterPasswordAndUnlock();
 
     await waitFor(() => expect(mocks.createDeviceCredential).toHaveBeenCalledOnce());
@@ -101,7 +109,7 @@ describe('device quick unlock UI', () => {
     const onUnlocked = vi.fn();
     mocks.createDeviceCredential.mockRejectedValue(new DOMException('cancelled', 'NotAllowedError'));
     render(<UnlockScreen onUnlocked={onUnlocked} />);
-    fireEvent.click(await screen.findByRole('checkbox', { name: /set up device quick unlock/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /set up device quick unlock/i }));
     await enterPasswordAndUnlock();
     await waitFor(() => expect(onUnlocked).toHaveBeenCalledOnce());
     expect(onUnlocked).toHaveBeenCalledWith(expect.stringMatching(/vault is open.*not set up/i));

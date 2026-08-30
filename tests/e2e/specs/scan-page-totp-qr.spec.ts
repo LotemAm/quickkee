@@ -46,7 +46,7 @@ test('scans a visible TOTP QR from a realistic account page and persists it', as
   await installDb(seed);
   await seed.reload();
   await seed.getByPlaceholder('Master password').fill('correct horse');
-  await seed.getByRole('button', { name: 'Unlock' }).click();
+  await seed.getByRole('button', { name: 'Unlock', exact: true }).click();
   await expect(seed.getByPlaceholder('Search…')).toBeVisible();
 
   const site = await context.newPage();
@@ -59,6 +59,7 @@ test('scans a visible TOTP QR from a realistic account page and persists it', as
 
   await openBrowserActionPopup(context, extensionId, seed);
   await expect.poll(() => popupText(seed)).toContain('Localhost Login');
+  await clickPopupButton(seed, 'Add entry');
   await clickPopupButton(seed, 'Scan page QR');
 
   await expect.poll(() => popupText(seed), { timeout: 15_000 }).toContain('Confirm the scanned account and destination.');

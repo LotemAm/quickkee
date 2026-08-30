@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Link, Copy, LogIn, RefreshCw, SlidersHorizontal, History, Loader2 } from 'lucide-react';
+import { Plus, Link, Copy, LogIn, RefreshCw, SlidersHorizontal, History, Loader2, QrCode } from 'lucide-react';
 import { sendToSW } from '../../shared/messages';
 import { copyWithClear } from '../../shared/clipboard';
 import type { PwGenOpts } from '../../shared/pwgen';
@@ -8,14 +8,16 @@ import { PasswordRulesPanel } from '../../shared/PasswordRulesPanel';
 import { TotpSetup } from '../../shared/TotpSetup';
 import type { TotpConfig } from '../../background/totp';
 import { canonicalPageOrigin } from '../../shared/entryDefaults';
+import { IconTooltipButton } from '../../shared/IconTooltipButton';
 
-export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwgen, onCreated }: {
+export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwgen, scanPage, onCreated }: {
   url: string;
   tabId: number;
   groups: { groupId: string; name: string; depth: number }[];
   defaultGroupId: string;
   clearSecs: number;
   pwgen: PwGenOpts;
+  scanPage: { disabled: boolean; scanning: boolean; description: string; onClick: () => void };
   onCreated: () => void;
 }) {
   const [title, setTitle] = useState(''); const [username, setUsername] = useState('');
@@ -122,11 +124,21 @@ export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwge
         </button>
       </div>
       {showRules && <PasswordRulesPanel opts={opts} onChange={setOpts} />}
-      <input className="input" placeholder="URL" value={entryUrl} onChange={e => setEntryUrl(e.target.value)} />
-      <button className="btn-secondary w-full" disabled={isFullUrl} onClick={() => setEntryUrl(url)} title="Use the current full page URL">
-        <Link size={15} /> Use full page URL
-      </button>
+      <div className="flex gap-2 items-center">
+        <input className="input flex-1" placeholder="URL" value={entryUrl} onChange={e => setEntryUrl(e.target.value)} />
+        <IconTooltipButton label="Use full page URL" tooltipTitle="Use full page URL"
+          tooltipDescription="Use the current full page URL." disabled={isFullUrl} onClick={() => setEntryUrl(url)}>
+          <Link size={15} />
+        </IconTooltipButton>
+      </div>
       <TotpSetup initialConfig={null} issuer={title} account={username} resetKey={totpReset}
+        inputAction={(
+          <IconTooltipButton label={scanPage.scanning ? 'Scanning visible page' : 'Scan page QR'}
+            tooltipTitle="Scan page QR" tooltipDescription={scanPage.description}
+            disabled={scanPage.disabled || scanPage.scanning} onClick={scanPage.onClick}>
+            {scanPage.scanning ? <Loader2 size={15} className="animate-spin" /> : <QrCode size={15} />}
+          </IconTooltipButton>
+        )}
         onChange={(config, error) => { setTotp(config); setTotpError(error ?? ''); }} />
       <div className="flex gap-1.5">
         <button className="btn-primary w-full" disabled={!title || saving || !!totpError} onClick={createAndSave}>

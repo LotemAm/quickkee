@@ -34,6 +34,14 @@ test('compact mode starts with an add button when no authenticator is configured
   expect(screen.getByLabelText('TOTP setup key or URI')).toBeTruthy();
 });
 
+test('places an optional action immediately beside the authenticator input', () => {
+  render(<TotpSetup initialConfig={null} issuer="GitHub" account="octocat" onChange={vi.fn()}
+    inputAction={<button aria-label="Scan page QR" />} />);
+
+  const input = screen.getByLabelText('TOTP setup key or URI');
+  expect(input.nextElementSibling).toBe(screen.getByRole('button', { name: 'Scan page QR' }));
+});
+
 test('compact mode shows an existing code and keeps its URI under TOTP settings', async () => {
   const sendMessage = chrome.runtime.sendMessage as unknown as ReturnType<typeof vi.fn>;
   sendMessage.mockResolvedValue({ ok: true, code: '123456', period: 30, expiresAt: Date.now() + 30_000 });

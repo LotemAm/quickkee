@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Copy, Eye, EyeOff, Plus, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { parseTotpInput, toOtpUri, type TotpConfig, type TotpCode } from '../background/totp';
 import { sendToSW } from './messages';
@@ -63,7 +63,7 @@ export function TotpCodeDisplay({ entryId, config, onCopy }: {
   );
 }
 
-export function TotpSetup({ initialConfig, issuer, account, onChange, resetKey, showPreview = false, onCopy, compact = false }: {
+export function TotpSetup({ initialConfig, issuer, account, onChange, resetKey, showPreview = false, onCopy, compact = false, inputAction }: {
   initialConfig: TotpConfig | null;
   issuer: string;
   account: string;
@@ -72,6 +72,7 @@ export function TotpSetup({ initialConfig, issuer, account, onChange, resetKey, 
   showPreview?: boolean;
   onCopy?: (code: string, label: string) => void;
   compact?: boolean;
+  inputAction?: ReactNode;
 }) {
   const [input, setInput] = useState(() => initialConfig ? toOtpUri(initialConfig) : '');
   const [config, setConfig] = useState<TotpConfig | null>(initialConfig);
@@ -111,6 +112,7 @@ export function TotpSetup({ initialConfig, issuer, account, onChange, resetKey, 
         <input className="input flex-1" type={showSecret ? 'text' : 'password'} value={input}
           aria-label="TOTP setup key or URI" aria-invalid={!!error}
           placeholder="Setup key or otpauth:// URI" onChange={ev => changeInput(ev.target.value)} />
+        {inputAction}
         <button className="icon-btn" aria-label={showSecret ? 'Hide TOTP secret' : 'Show TOTP secret'}
           title={showSecret ? 'Hide TOTP secret' : 'Show TOTP secret'} onClick={() => setShowSecret(s => !s)}>
           {showSecret ? <EyeOff size={15} /> : <Eye size={15} />}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Search, Settings, Cloud, CloudOff, RefreshCw, PanelRight, Lock, Plus, X, QrCode, Loader2 } from 'lucide-react';
+import { Search, Settings, Cloud, CloudOff, RefreshCw, PanelRight, Lock, Plus, X } from 'lucide-react';
 import { useStatus } from '../../shared/useStatus';
 import { UnlockScreen } from '../../shared/UnlockScreen';
 import { sendToSW } from '../../shared/messages';
@@ -177,6 +177,12 @@ export function Popup() {
   const searching = q.trim().length > 0;
   const shown = searching ? searchResults : entries;
   const groupNames = tree ? buildGroupNames(tree) : new Map<string, string>();
+  const scanPageControl = {
+    disabled: !isScannablePageUrl(tab?.url),
+    scanning,
+    description: isScannablePageUrl(tab?.url) ? 'Scan the visible tab locally.' : UNSUPPORTED_PAGE_MESSAGE,
+    onClick: () => { void scanPage(); },
+  };
   return (
     <div>
       <header className="app-header">
@@ -204,14 +210,6 @@ export function Popup() {
       {clipState && <ClipboardBar state={clipState} onCancel={cancel} />}
       {unlockNotice && <p role="status" className="mx-3 mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>{unlockNotice}</p>}
       <div className="p-3">
-        <button className="btn-secondary w-full mb-2" aria-label="Scan page QR"
-          title={isScannablePageUrl(tab?.url) ? 'Scan the visible tab locally.' : UNSUPPORTED_PAGE_MESSAGE}
-          disabled={!isScannablePageUrl(tab?.url) || scanning} onClick={() => void scanPage()}>
-          {scanning ? <><Loader2 size={15} className="animate-spin" /> Scanning visible page…</> : <><QrCode size={15} /> Scan page QR</>}
-        </button>
-        {tab && !isScannablePageUrl(tab.url) && (
-          <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>{UNSUPPORTED_PAGE_MESSAGE}</p>
-        )}
         {scanError && <p className="alert-error mb-2" role="alert">{scanError}</p>}
         {notice && <p className={notice.kind === 'error' ? 'alert-error mb-2' : 'card mb-2 text-sm'}
           role={notice.kind === 'error' ? 'alert' : 'status'}>{notice.message}</p>}
@@ -221,7 +219,7 @@ export function Popup() {
               <X size={15} /> Cancel
             </button>
             <CreateForm key={tab.url} url={tab.url} tabId={tab.id} groups={flattenGroups(tree)} defaultGroupId={rootGroup}
-              clearSecs={clearSecs} pwgen={pwgen} onCreated={() => {
+              clearSecs={clearSecs} pwgen={pwgen} scanPage={scanPageControl} onCreated={() => {
                 setCreating(false);
                 void reloadVaultData(tab.url);
               }} />
@@ -237,7 +235,7 @@ export function Popup() {
               <div className="empty-state mt-6">No entries match your search.</div>}
             {!searching && entries.length === 0 && tab && rootGroup && tree &&
               <CreateForm key={tab.url} url={tab.url} tabId={tab.id} groups={flattenGroups(tree)} defaultGroupId={rootGroup}
-                clearSecs={clearSecs} pwgen={pwgen} onCreated={() =>
+                clearSecs={clearSecs} pwgen={pwgen} scanPage={scanPageControl} onCreated={() =>
                 void reloadVaultData(tab.url)} />}
             {!searching && entries.length > 0 && tab && rootGroup && tree && (
               <button className="btn-secondary w-full mt-2" onClick={() => setCreating(true)}>

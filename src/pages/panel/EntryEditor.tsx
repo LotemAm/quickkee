@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Copy, Check, Eye, EyeOff, X, Plus, Trash2, RefreshCw, SlidersHorizontal, Paperclip, Download, ChevronDown } from 'lucide-react';
+import { Copy, Check, Eye, EyeOff, X, Plus, Trash2, RefreshCw, SlidersHorizontal, Paperclip, Download, ChevronDown, QrCode, Loader2 } from 'lucide-react';
 import { sendToSW } from '../../shared/messages';
 import { CARD_FLAG_KEY, CARDHOLDER_NAME_KEY, type EntryView, type AttachmentMeta } from '../../shared/entry';
 import type { PwGenOpts } from '../../shared/pwgen';
@@ -10,6 +10,8 @@ import { arrayBufferToBase64, formatBytes } from '../../shared/bytes';
 import { downloadAttachment } from '../../shared/attachments';
 import { TotpSetup } from '../../shared/TotpSetup';
 import type { TotpConfig } from '../../background/totp';
+import { IconTooltipButton } from '../../shared/IconTooltipButton';
+import { scanVisibleTabForTotp } from '../popup/scanVisibleTabForTotp';
 
 // epoch ms -> 'YYYY-MM-DDTHH:mm' (local) for <input type="datetime-local">
 const toLocalInput = (ms: number) => {
@@ -43,6 +45,9 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
   const [initialTotp, setInitialTotp] = useState<TotpConfig | null>(null);
   const [totp, setTotp] = useState<TotpConfig | null>(null);
   const [totpError, setTotpError] = useState('');
+  const [scanningTotp, setScanningTotp] = useState(false);
+  const [scanTotpError, setScanTotpError] = useState('');
+  const scanVersionRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const noClass = !opts.lower && !opts.upper && !opts.digits && !opts.symbols;
   const { copy, state: clipState, cancel } = useClipboardTimer(clearSecs);
@@ -59,6 +64,9 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
     setInitialTotp(null);
     setTotp(null);
     setTotpError('');
+    setScanningTotp(false);
+    setScanTotpError('');
+    scanVersionRef.current += 1;
     if (entryId === null) {
       setE(BLANK_ENTRY); setExpires(null); setCustom([]); setOrigKeys([]); setAttachments([]);
       return;
@@ -141,6 +149,25 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
       )}
     </div>);
   };
+  async function scanPageQr() {
+    if (scanningTotp) return;
+    const scanVersion = ++scanVersionRef.current;
+    setScanningTotp(true);
+    setScanTotpError('');
+    try {
+      const result = await scanVisibleTabForTotp();
+      if (scanVersion !== scanVersionRef.current) return;
+      setInitialTotp(result.config);
+      setTotp(result.config);
+      setTotpError('');
+    } catch (error) {
+      if (scanVersion === scanVersionRef.current) {
+        setScanTotpError(error instanceof Error ? error.message : 'Could not scan the visible page. Try again.');
+      }
+    } finally {
+      if (scanVersion === scanVersionRef.current) setScanningTotp(false);
+    }
+  }
   async function save() {
     const fields: Record<string, string> = {
       Title: e!.title, UserName: e!.username, URL: e!.url, Password: e!.password,
@@ -212,8 +239,16 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
         )}
         {!isCard && field('URL', 'url')}
         <TotpSetup compact initialConfig={initialTotp} issuer={e.title} account={e.username} resetKey={entryId}
+          inputAction={(
+            <IconTooltipButton label={scanningTotp ? 'Scanning visible page' : 'Scan page QR'}
+              tooltipTitle="Scan page QR" tooltipDescription="Scan the visible tab locally."
+              disabled={scanningTotp} onClick={() => { void scanPageQr(); }}>
+              {scanningTotp ? <Loader2 size={15} className="animate-spin" /> : <QrCode size={15} />}
+            </IconTooltipButton>
+          )}
           onChange={(config, error) => { setTotp(config); setTotpError(error ?? ''); }}
           showPreview onCopy={copy} />
+        {scanTotpError && <p className="alert-error mb-3" role="alert">{scanTotpError}</p>}
         <div className="section-title block">Additional fields</div>
         {custom.map((f, i) => (
           <div key={i} className="flex gap-2 items-center mb-2">
