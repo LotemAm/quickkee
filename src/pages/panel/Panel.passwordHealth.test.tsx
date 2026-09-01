@@ -4,10 +4,11 @@ import type { TreeNode } from '../../shared/entry';
 const mocks = vi.hoisted(() => ({
   sendToSW: vi.fn(),
   refresh: vi.fn(),
+  dirty: false,
 }));
 
 vi.mock('../../shared/useStatus', () => ({
-  useStatus: () => ({ locked: false, dirty: false, refresh: mocks.refresh }),
+  useStatus: () => ({ locked: false, dirty: mocks.dirty, refresh: mocks.refresh }),
 }));
 vi.mock('../../shared/messages', () => ({ sendToSW: mocks.sendToSW }));
 vi.mock('../../shared/settings', () => ({
@@ -48,6 +49,7 @@ const tree: TreeNode = {
 };
 
 beforeEach(() => {
+  mocks.dirty = false;
   mocks.sendToSW.mockReset();
   mocks.sendToSW.mockImplementation((request: { type: string }) => {
     if (request.type === 'getTree') return Promise.resolve({ ok: true, tree });
@@ -68,4 +70,17 @@ test('opens a health finding in the existing Vault editor and containing group',
   await waitFor(() => expect(screen.getByText('Editor entry-1 in sites')).toBeTruthy());
   expect(screen.getByRole('button', { name: 'Vault view' }).getAttribute('aria-pressed')).toBe('true');
   expect(mocks.sendToSW.mock.calls.filter(([request]) => request.type === 'getTree')).toHaveLength(2);
+});
+
+test('shows the last successful save time in the Saved button tooltip', async () => {
+  mocks.dirty = true;
+  const toLocaleString = vi.spyOn(Date.prototype, 'toLocaleString').mockReturnValue('local date and time');
+  render(<Panel />);
+
+  const saveButton = await screen.findByRole('button', { name: 'Save *' });
+  expect(saveButton.getAttribute('title')).toBeNull();
+  fireEvent.click(saveButton);
+
+  await waitFor(() => expect(saveButton.getAttribute('title')).toBe('Last saved: local date and time'));
+  toLocaleString.mockRestore();
 });
