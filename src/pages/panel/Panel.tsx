@@ -143,6 +143,7 @@ export function Panel() {
   const [selEntry, setSelEntry] = useState<string | null>(null);
   const [creatingEntry, setCreatingEntry] = useState(false);
   const [clearSecs, setClearSecs] = useState(30); const [saved, setSaved] = useState('');
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [saving, setSaving] = useState(false);
   const [pwgen, setPwgen] = useState<PwGenOpts>(DEFAULT_PWGEN);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -217,7 +218,9 @@ export function Panel() {
     </div>);
   async function save() { setSaving(true);
     const r = await sendToSW({ type: 'save' });
-    setSaved(r.ok ? 'Saved' : 'Save failed'); refresh(); setSaving(false); setTimeout(() => setSaved(''), 2000); }
+    setSaved(r.ok ? 'Saved' : 'Save failed');
+    if (r.ok) setLastSavedAt(new Date());
+    refresh(); setSaving(false); setTimeout(() => setSaved(''), 2000); }
 
   async function openHealthEntry(entryId: string): Promise<boolean> {
     const latestTree = await reload();
@@ -299,7 +302,8 @@ export function Panel() {
           <input ref={totpFileInput} className="hidden" type="file" accept="image/*" multiple
             aria-label="Google Authenticator QR images"
             onChange={event => void readTotpExport(event.target.files)} />
-          <button className="btn-primary btn-xs" disabled={!dirty || saving} onClick={save}>
+          <button className="btn-primary btn-xs" disabled={!dirty || saving} onClick={save}
+            title={lastSavedAt ? `Last saved: ${lastSavedAt.toLocaleString()}` : undefined}>
             {saving
               ? <><Loader2 size={13} className="animate-spin" /> Saving</>
               : <><Save size={13} /> {dirty ? 'Save *' : 'Saved'}{saved && ` · ${saved}`}</>}
