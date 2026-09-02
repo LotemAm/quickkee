@@ -1,6 +1,6 @@
 {
   "name": "quickkee",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "KeePass-compatible password manager browser extension (Chrome MV3) for local and cloud .kdbx databases.",
   "license": "MIT",
   "packageManager": "yarn@4.17.0",
