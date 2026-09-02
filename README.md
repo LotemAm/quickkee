@@ -2,6 +2,8 @@
 
 KeePass-compatible password manager for Chrome (Manifest V3). Open local or cloud-hosted `.kdbx` vaults, find matching entries, and manage or autofill credentials without leaving the browser.
 
+[Install QuickKee from the Chrome Web Store](https://chromewebstore.google.com/detail/jngjnmfmodbiogpcadigjcflkbkhfnfb)
+
 ## Core capabilities
 
 - Open local KeePass databases with a password, key file, or both.
