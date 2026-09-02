@@ -7,6 +7,7 @@ export interface CredentialPromptCommit {
   captureId: string;
   entryId?: string;
   saveAsNew?: boolean;
+  groupId?: string;
 }
 
 export interface CredentialPromptHandlers {
@@ -112,11 +113,11 @@ export class CredentialPrompt {
 
     const site = this.doc.createElement('p');
     site.className = 'site';
-    site.textContent = metadata.username ? `${metadata.site} · ${metadata.username}` : metadata.site;
+    site.textContent = `${metadata.site} · ${metadata.username || 'No username recorded'}`;
     panel.appendChild(site);
 
     let selection = '';
-    let select: HTMLSelectElement | null = null;
+    let destinationSelect: HTMLSelectElement | null = null;
     if (metadata.suggestedAction === 'update' && metadata.entries[0]) {
       const destination = this.doc.createElement('p');
       destination.className = 'destination';
@@ -130,16 +131,37 @@ export class CredentialPrompt {
       panel.appendChild(destination);
     } else if (metadata.suggestedAction === 'choose') {
       const label = this.doc.createElement('label'); label.textContent = 'Destination';
-      select = this.doc.createElement('select'); select.setAttribute('aria-label', 'Credential destination');
+      destinationSelect = this.doc.createElement('select'); destinationSelect.setAttribute('aria-label', 'Credential destination');
       const placeholder = this.doc.createElement('option'); placeholder.value = ''; placeholder.textContent = 'Choose an entry'; placeholder.disabled = true; placeholder.selected = true;
-      select.appendChild(placeholder);
+      destinationSelect.appendChild(placeholder);
       for (const entry of metadata.entries) {
         const option = this.doc.createElement('option'); option.value = entry.id;
         option.textContent = entry.username ? `${entry.title} — ${entry.username}` : entry.title;
-        select.appendChild(option);
+        destinationSelect.appendChild(option);
       }
-      const create = this.doc.createElement('option'); create.value = '__new__'; create.textContent = 'Save as new entry'; select.appendChild(create);
-      panel.append(label, select);
+      const create = this.doc.createElement('option'); create.value = '__new__'; create.textContent = 'Save as new entry'; destinationSelect.appendChild(create);
+      panel.append(label, destinationSelect);
+    }
+
+    let groupSelection = metadata.rootGroupId;
+    let groupContainer: HTMLDivElement | null = null;
+    if (!metadata.retry && metadata.groups.length > 0
+      && (metadata.suggestedAction === 'save' || metadata.suggestedAction === 'choose')) {
+      groupContainer = this.doc.createElement('div');
+      groupContainer.hidden = metadata.suggestedAction === 'choose';
+      const groupLabel = this.doc.createElement('label'); groupLabel.textContent = 'Group';
+      const groupSelect = this.doc.createElement('select'); groupSelect.setAttribute('aria-label', 'Group');
+      for (const group of metadata.groups) {
+        const option = this.doc.createElement('option'); option.value = group.groupId;
+        option.textContent = `${'\u00a0\u00a0'.repeat(group.depth)}${group.name}`;
+        groupSelect.appendChild(option);
+      }
+      if (!metadata.groups.some(group => group.groupId === groupSelection))
+        groupSelection = metadata.groups[0].groupId;
+      groupSelect.value = groupSelection;
+      groupSelect.addEventListener('change', () => { groupSelection = groupSelect.value; });
+      groupContainer.append(groupLabel, groupSelect);
+      panel.appendChild(groupContainer);
     }
 
     const actions = this.doc.createElement('div'); actions.className = 'actions';
@@ -150,15 +172,25 @@ export class CredentialPrompt {
     actions.append(dismiss, primary); panel.appendChild(actions);
     const status = this.doc.createElement('p'); status.className = 'status'; status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite'); panel.appendChild(status);
 
-    select?.addEventListener('change', () => { selection = select?.value ?? ''; primary.disabled = !selection; status.textContent = ''; status.className = 'status'; });
+    destinationSelect?.addEventListener('change', () => {
+      selection = destinationSelect?.value ?? '';
+      if (groupContainer) groupContainer.hidden = selection !== '__new__';
+      primary.disabled = !selection; status.textContent = ''; status.className = 'status';
+    });
     dismiss.addEventListener('click', event => { if (this.trustedAction(event)) this.dismiss(); });
     primary.addEventListener('click', event => {
       if (!this.trustedAction(event) || primary.disabled) return;
       primary.disabled = true; dismiss.disabled = true; status.textContent = 'Saving…'; status.className = 'status';
       const request: CredentialPromptCommit = { captureId: metadata.captureId };
-      if (metadata.suggestedAction === 'save') request.saveAsNew = true;
+      if (metadata.suggestedAction === 'save') {
+        request.saveAsNew = true;
+        if (groupContainer) request.groupId = groupSelection;
+      }
       else if (metadata.suggestedAction === 'update' && metadata.entries[0]) request.entryId = metadata.entries[0].id;
-      else if (selection === '__new__') request.saveAsNew = true;
+      else if (selection === '__new__') {
+        request.saveAsNew = true;
+        if (groupContainer) request.groupId = groupSelection;
+      }
       else if (selection) request.entryId = selection;
       void handlers.commit(request).then(ok => {
         if (this.metadata?.captureId !== metadata.captureId) return;

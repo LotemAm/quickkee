@@ -16,6 +16,7 @@ import { loadDraft } from '../../shared/createDraft';
 import { isScannablePageUrl, scanVisibleTabForTotp, UNSUPPORTED_PAGE_MESSAGE, type ScannedPageTotp } from './scanVisibleTabForTotp';
 import { ScannedTotpDialog } from './ScannedTotpDialog';
 import { saveScannedTotp, type ScannedTotpDestination } from './saveScannedTotp';
+import { flattenGroups } from '../../shared/groups';
 
 function collectEntries(node: TreeNode, acc: { id: string; title: string; username: string; url: string }[] = []) {
   for (const e of node.entries) acc.push(e);
@@ -27,12 +28,6 @@ function buildGroupNames(node: TreeNode, map: Map<string, string> = new Map()) {
   for (const e of node.entries) map.set(e.id, node.name);
   for (const c of node.children) buildGroupNames(c, map);
   return map;
-}
-
-function flattenGroups(node: TreeNode, depth = 0, acc: { groupId: string; name: string; depth: number }[] = []) {
-  acc.push({ groupId: node.groupId, name: node.name, depth });
-  for (const c of node.children) flattenGroups(c, depth + 1, acc);
-  return acc;
 }
 
 export function Popup() {

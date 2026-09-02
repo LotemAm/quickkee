@@ -62,3 +62,30 @@ test('panel: edit an entry, Save, and verify via kdbxweb re-read', async ({ cont
     return pf instanceof kdbxweb.ProtectedValue ? pf.getText() : pf?.toString();
   }).toBe('edited-pass-123');
 });
+
+test('panel: move an entry to another group and persist it', async ({ context, extensionId }) => {
+  const popup = await openExtensionPage(context, extensionId, 'src/pages/popup/index.html');
+  await installDb(popup);
+  await popup.reload();
+  await popup.getByPlaceholder('Master password').fill('correct horse');
+  await popup.getByRole('button', { name: 'Unlock', exact: true }).click();
+  await expect(popup.getByPlaceholder('Search…')).toBeVisible();
+
+  const panel = await openExtensionPage(context, extensionId, 'src/pages/panel/index.html');
+  await panel.getByRole('button', { name: 'Sites' }).click();
+  await panel.getByRole('button', { name: 'Localhost Login' }).click();
+  await panel.getByRole('button', { name: 'Apply changes' }).waitFor();
+
+  await panel.getByText('More', { exact: true }).click();
+  await panel.getByLabel('Group', { exact: true }).selectOption({ index: 0 });
+  await panel.getByRole('button', { name: 'Apply changes' }).click();
+  const saveBtn = panel.getByRole('button', { name: /Save/ });
+  await expect(saveBtn).toContainText('Save *');
+  await saveBtn.click();
+  await expect(saveBtn).not.toContainText('Save *');
+
+  await expect.poll(async () => {
+    const db = await reReadKdbx(panel);
+    return db.getDefaultGroup().entries.some(entry => entry.fields.get('Title')?.toString() === 'Localhost Login');
+  }).toBe(true);
+});

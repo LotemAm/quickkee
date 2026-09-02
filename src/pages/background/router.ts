@@ -24,6 +24,7 @@ import {
 import { unwrapQuickUnlockMaterial, wrapQuickUnlockMaterial } from '../../background/quickUnlockCrypto';
 import { quickUnlockSourceMatches, type QuickUnlockSource, type QuickUnlockSourceIdentity } from '../../shared/quickUnlock';
 import { quickUnlockInfo, quickUnlockWarn } from '../../shared/quickUnlockDebug';
+import { flattenGroups } from '../../shared/groups';
 
 /** Name of the alarm used to schedule a deferred clipboard clear (shared with lifecycle wiring in index.ts). */
 export const CLIPBOARD_CLEAR_ALARM = 'clipboard-clear';
@@ -253,7 +254,7 @@ export function makeRouter(ctx: SwContext) {
           : { ok: false, error: 'locked' };
       case 'createEntry':
         return { ok: true, entryId: ctx.vault.createEntry(req.groupId, req.fields, req.totp) };
-      case 'updateEntry': ctx.vault.updateEntry(req.entryId, req.fields, req.expires, req.removeKeys, req.totp); return { ok: true };
+      case 'updateEntry': ctx.vault.updateEntry(req.entryId, req.fields, req.expires, req.removeKeys, req.totp, req.groupId); return { ok: true };
       case 'updateGroup': ctx.vault.updateGroup(req.groupId, req.fields); return { ok: true };
       case 'createGroup': return { ok: true, groupId: ctx.vault.createGroup(req.parentId, req.name) };
       case 'deleteGroup': ctx.vault.deleteGroup(req.groupId); return { ok: true };
@@ -545,6 +546,20 @@ export function makeRouter(ctx: SwContext) {
         await ctx.persistPendingClipboardHash(null);
         chrome.alarms.clear(CLIPBOARD_CLEAR_ALARM);
         return { ok: true };
+      case 'stageCredentialUsername': {
+        const authority = contentAuthority(sender);
+        if (!authority) return { ok: false, error: 'forbidden' };
+        if (!ctx.vault.isOpen()) return { ok: false, error: 'locked' };
+        const settings = await loadSettings();
+        if (!ctx.vault.isOpen()) return { ok: false, error: 'locked' };
+        if (!settings.offerToSaveCredentials) return { ok: true, staged: false };
+        if (typeof req.username !== 'string' || !req.username.trim())
+          return { ok: false, error: 'invalidCapture' };
+        await ctx.credentialCaptures.stageUsername({
+          tabId: authority.tabId, sourceUrl: authority.url, username: req.username,
+        });
+        return { ok: true, staged: true };
+      }
       case 'stageCredentialCapture': {
         const authority = contentAuthority(sender);
         if (!authority) return { ok: false, error: 'forbidden' };
@@ -574,6 +589,7 @@ export function makeRouter(ctx: SwContext) {
           await ctx.credentialCaptures.dismiss(record.id, authority);
           return { ok: true, prompt: null };
         }
+        const tree = ctx.vault.getTree();
         return { ok: true, prompt: {
           captureId: safe.captureId,
           site: safe.site,
@@ -581,6 +597,8 @@ export function makeRouter(ctx: SwContext) {
           kind: safe.kind,
           suggestedAction: classification.suggestedAction,
           entries: classification.entries,
+          rootGroupId: tree.groupId,
+          groups: flattenGroups(tree),
           ...(record.mutation ? { retry: true } : {}),
         } };
       }
@@ -597,7 +615,8 @@ export function makeRouter(ctx: SwContext) {
         const record = await ctx.credentialCaptures.authorizeAction(req.captureId, authority);
         if (!record) return { ok: false, error: 'forbidden' };
         if (!ctx.vault.isOpen()) return { ok: false, error: 'locked' };
-        if (req.entryId && req.saveAsNew) return { ok: false, error: 'invalidSelection' };
+        if (req.entryId && (req.saveAsNew || req.groupId)) return { ok: false, error: 'invalidSelection' };
+        if (req.groupId && !req.saveAsNew) return { ok: false, error: 'invalidSelection' };
 
         if (!record.mutation) {
           const classification = classifyCapture(record, ctx.vault);
@@ -611,7 +630,11 @@ export function makeRouter(ctx: SwContext) {
 
           try {
             if (req.saveAsNew || (!req.entryId && classification.suggestedAction === 'save')) {
-              const entryId = ctx.vault.createEntry(ctx.vault.getTree().groupId, {
+              const tree = ctx.vault.getTree();
+              const groupId = req.groupId ?? tree.groupId;
+              if (!flattenGroups(tree).some(group => group.groupId === groupId))
+                return { ok: false, error: 'invalidSelection' };
+              const entryId = ctx.vault.createEntry(groupId, {
                 Title: defaultEntryTitle(record.sourceUrl),
                 UserName: record.username,
                 Password: record.password,

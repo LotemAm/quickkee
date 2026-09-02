@@ -66,6 +66,40 @@ test('createEntry throws on unknown groupId', async () => {
   expect(() => v.createEntry('does-not-exist', { Title: 'x' })).toThrow('no group');
 });
 
+test('moves an entry between groups while preserving its data', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const entry = v.entriesForUrl('https://github.com')[0];
+  const root = v.getTree().groupId;
+  const expiry = new Date(2032, 0, 1).getTime();
+  v.updateEntry(entry.id, { CustomField: 'keep-me' }, expiry);
+  v.setTotpConfig(entry.id, { secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30 });
+  await v.addAttachment(entry.id, 'note.txt', bytesOf('keep attachment'));
+
+  v.moveEntry(entry.id, root);
+
+  expect(v.getTree().entries.some(candidate => candidate.id === entry.id)).toBe(true);
+  expect(v.getEntry(entry.id)).toMatchObject({ expires: expiry, hasTotp: true, attachments: [{ name: 'note.txt' }] });
+  expect(v.getEntry(entry.id)?.fields).toContainEqual({ key: 'CustomField', value: 'keep-me', protected: false });
+});
+
+test('rejects an unknown move destination without moving the entry', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const entry = v.entriesForUrl('https://github.com')[0];
+  const originalGroup = v.getTree().children.find(group => group.entries.some(candidate => candidate.id === entry.id))!;
+
+  expect(() => v.moveEntry(entry.id, 'does-not-exist')).toThrow('no group');
+  expect(v.getTree().children.find(group => group.groupId === originalGroup.groupId)?.entries.some(candidate => candidate.id === entry.id)).toBe(true);
+});
+
+test('validates an update destination before changing entry fields', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const entry = v.entriesForUrl('https://github.com')[0];
+
+  expect(() => v.updateEntry(entry.id, { UserName: 'must-not-change' }, undefined, undefined, undefined, 'missing-group'))
+    .toThrow('no group');
+  expect(v.getEntry(entry.id)?.username).toBe(entry.username);
+});
+
 test('isInvalidKey is true for wrong password', async () => {
   const v = new Vault();
   const err = await v.open(fixture(), 'wrong password', null).then(() => null, e => e);

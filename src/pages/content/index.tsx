@@ -6,7 +6,7 @@ import { showPopup, hidePopup } from '../../content/inlinePopup';
 import { sendToSW } from '../../shared/messages';
 import { maskCardNumber } from '../../shared/cardMask';
 import { CARDHOLDER_NAME_KEY } from '../../shared/entry';
-import { extractCredentialCandidate, SubmitGestureTracker } from '../../content/credentialCapture';
+import { extractCredentialCandidate, extractUsernameCandidate, SubmitGestureTracker } from '../../content/credentialCapture';
 import { CredentialPrompt } from '../../content/credentialPrompt';
 
 let filling = false;
@@ -34,10 +34,14 @@ if (eligibleTopPage()) {
   document.addEventListener('submit', event => {
     if (filling || !(event.target instanceof HTMLFormElement) || !submitGestures.consume(event.target)) return;
     const candidate = extractCredentialCandidate(event.target);
-    if (!candidate) return;
-    void sendToSW({ type: 'stageCredentialCapture', ...candidate }).then(response => {
-      if (response.ok && response.staged) setTimeout(() => void showPendingCredentialPrompt(), 300);
-    });
+    if (candidate) {
+      void sendToSW({ type: 'stageCredentialCapture', ...candidate }).then(response => {
+        if (response.ok && response.staged) setTimeout(() => void showPendingCredentialPrompt(), 300);
+      });
+      return;
+    }
+    const username = extractUsernameCandidate(event.target);
+    if (username) void sendToSW({ type: 'stageCredentialUsername', username });
   }, true);
   for (const delay of [0, 500, 1_500]) setTimeout(() => void showPendingCredentialPrompt(), delay);
 }

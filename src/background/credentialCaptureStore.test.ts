@@ -53,6 +53,53 @@ test('safe prompt metadata never exposes the staged password or source path', as
   expect(JSON.stringify(safe)).not.toContain('/sign-in');
 });
 
+test('merges a username-only stage into a later password capture on the same tab and related site', async () => {
+  const store = new CredentialCaptureStore({ storage: fakeStorage().storage, randomId: () => 'capture-id' });
+  await store.stageUsername({ tabId: 7, sourceUrl: 'https://login.example.test/identifier', username: 'octocat' });
+  await store.stage({
+    tabId: 7, sourceUrl: 'https://app.example.test/password', username: '', password: 'capture-secret', kind: 'login',
+  });
+
+  expect(await store.pendingForPage(7, 'https://app.example.test/home'))
+    .toMatchObject({ captureId: 'capture-id', username: 'octocat' });
+});
+
+test('does not merge staged usernames across tabs, unrelated sites, or expiry', async () => {
+  let now = 1_000;
+  let nextId = 0;
+  const store = new CredentialCaptureStore({
+    storage: fakeStorage().storage, now: () => now, randomId: () => `capture-${++nextId}`, ttlMs: 500,
+  });
+  await store.stageUsername({ tabId: 7, sourceUrl: 'https://login.example.test/identifier', username: 'octocat' });
+
+  await store.stage({ tabId: 8, sourceUrl: 'https://app.example.test/password', username: '', password: 'other-tab', kind: 'login' });
+  expect(await store.pendingForPage(8, 'https://app.example.test/home')).toMatchObject({ username: '' });
+
+  await store.stage({ tabId: 7, sourceUrl: 'https://unrelated.test/password', username: '', password: 'other-site', kind: 'login' });
+  expect(await store.pendingForPage(7, 'https://unrelated.test/home')).toMatchObject({ username: '' });
+
+  await store.stageUsername({ tabId: 9, sourceUrl: 'https://login.example.test/identifier', username: 'expired-user' });
+  now = 1_501;
+  await store.stage({ tabId: 9, sourceUrl: 'https://app.example.test/password', username: '', password: 'late-secret', kind: 'login' });
+  expect(await store.pendingForPage(9, 'https://app.example.test/home')).toMatchObject({ username: '' });
+});
+
+test('a username captured with the password wins and clears an older username stage', async () => {
+  let nextId = 0;
+  const store = new CredentialCaptureStore({ storage: fakeStorage().storage, randomId: () => `capture-${++nextId}` });
+  await store.stageUsername({ tabId: 7, sourceUrl: 'https://login.example.test/identifier', username: 'older-user' });
+  await store.stage({
+    tabId: 7, sourceUrl: 'https://app.example.test/password', username: 'newer-user', password: 'capture-secret', kind: 'login',
+  });
+  expect(await store.pendingForPage(7, 'https://app.example.test/home')).toMatchObject({ username: 'newer-user' });
+
+  await store.dismiss('capture-1', { tabId: 7, url: 'https://app.example.test/home' });
+  await store.stage({
+    tabId: 7, sourceUrl: 'https://app.example.test/password', username: '', password: 'second-secret', kind: 'login',
+  });
+  expect(await store.pendingForPage(7, 'https://app.example.test/home')).toMatchObject({ username: '' });
+});
+
 test('dismissal and tab cleanup require the bound authority', async () => {
   const store = new CredentialCaptureStore({ storage: fakeStorage().storage, randomId: () => 'capture-id' });
   await store.stage(input());

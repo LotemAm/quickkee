@@ -27,6 +27,11 @@ function uniqueValue(inputs: HTMLInputElement[]): string | null {
   return values.size === 1 ? [...values][0] : null;
 }
 
+function uniqueTrimmedValue(inputs: HTMLInputElement[]): string | null {
+  const values = new Set(inputs.map(input => input.value.trim()).filter(Boolean));
+  return values.size === 1 ? [...values][0] : null;
+}
+
 function findUsername(inputs: HTMLInputElement[], password: HTMLInputElement): string {
   const available = inputs.filter(input => eligible(input) && input.type !== 'password' && input.type !== 'hidden');
   const standard = available.find(input => tokens(input).includes('username'))
@@ -74,6 +79,32 @@ export function extractCredentialCandidate(form: HTMLFormElement): CredentialCan
 
   if (passwords.length !== 1) return null;
   return { username: findUsername(inputs, passwords[0]), password: passwords[0].value, kind: 'login' };
+}
+
+export function extractUsernameCandidate(form: HTMLFormElement): string | null {
+  const inputs = Array.from(form.querySelectorAll<HTMLInputElement>('input'));
+  if (inputs.some(input => input.type === 'password')) return null;
+  if (inputs.some(input => {
+    const autocomplete = tokens(input);
+    return autocomplete.some(token => token.startsWith('cc-')) || autocomplete.includes('one-time-code')
+      || OTP_SIGNAL.test(inputText(input));
+  })) return null;
+
+  const available = inputs.filter(input => {
+    const type = (input.type || 'text').toLowerCase();
+    return eligible(input) && !['hidden', 'search'].includes(type) && input.value.trim().length > 0;
+  });
+  const standard = available.filter(input => {
+    const autocomplete = tokens(input);
+    return autocomplete.includes('username') || autocomplete.includes('email');
+  });
+  if (standard.length > 0) return uniqueTrimmedValue(standard);
+
+  const inferred = available.filter(input => {
+    const type = (input.type || 'text').toLowerCase();
+    return type === 'email' || /(?:^|[\s_-])(?:user(?:name)?|email|login)(?:$|[\s_-])/i.test(inputText(input));
+  });
+  return inferred.length > 0 ? uniqueTrimmedValue(inferred) : null;
 }
 
 export class SubmitGestureTracker {

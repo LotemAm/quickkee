@@ -19,6 +19,7 @@ import { PanelActionsMenu } from './PanelActionsMenu';
 import { TotpImportDialog } from './TotpImportDialog';
 import { decodeQrImage } from '../../shared/decodeQrImage';
 import { PasswordHealthCenter } from './PasswordHealthCenter';
+import { flattenGroups } from '../../shared/groups';
 
 function findGroup(node: TreeNode, id: string): TreeNode | null {
   if (node.groupId === id) return node;
@@ -287,6 +288,10 @@ export function Panel() {
     ? collectEntries(tree).filter(e =>
         `${e.title} ${e.username} ${e.url}`.toLowerCase().includes(q))
     : group ? group.entries : [];
+  const editorGroupId = tree && selEntry
+    ? findEntryGroup(tree, selEntry)?.groupId
+    : selGroup ?? undefined;
+  const groupOptions = tree ? flattenGroups(tree) : [];
 
   return (
     <div className="flex flex-col h-screen" style={{ background: 'var(--bg)' }}>
@@ -394,10 +399,23 @@ export function Panel() {
             </button>
           </div>
           <div className="overflow-auto flex-1">
-            <EntryEditor entryId={creatingEntry ? null : selEntry} groupId={selGroup ?? undefined}
+            <EntryEditor entryId={creatingEntry ? null : selEntry} groupId={editorGroupId}
+              groups={groupOptions}
               clearSecs={clearSecs} pwgen={pwgen}
-              onChanged={() => { refresh(); reload(); }}
-              onCreated={id => { setCreatingEntry(false); setSelEntry(id); refresh(); reload(); }}
+              onChanged={destinationGroupId => {
+                if (destinationGroupId) setSelGroup(destinationGroupId);
+                refresh();
+                void reload().then(latestTree => {
+                  if (!latestTree || !selEntry) return;
+                  const found = findEntryGroup(latestTree, selEntry);
+                  if (found) setExpanded(current => new Set([...current, ...found.ancestors]));
+                });
+              }}
+              onCreated={(id, destinationGroupId) => {
+                setCreatingEntry(false); setSelEntry(id);
+                if (destinationGroupId) setSelGroup(destinationGroupId);
+                refresh(); void reload();
+              }}
               onDeleted={() => { setSelEntry(null); refresh(); reload(); }} />
           </div>
         </div>)}

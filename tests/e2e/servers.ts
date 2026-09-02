@@ -169,6 +169,22 @@ const CREDENTIAL_SIGNUP_PAGE = `<!doctype html><html><body>
 </form>
 </body></html>`;
 
+const CREDENTIAL_USERNAME_STEP_PAGE = `<!doctype html><html><body>
+<h1>Enter username</h1>
+<form method="get" action="/credential-password-step">
+  <input id="username" name="username" autocomplete="username" />
+  <button type="submit">Next</button>
+</form>
+</body></html>`;
+
+const CREDENTIAL_PASSWORD_STEP_PAGE = `<!doctype html><html><body>
+<h1>Enter password</h1>
+<form method="post" action="/credential-landing">
+  <input id="password" name="password" type="password" autocomplete="current-password" />
+  <button type="submit">Sign in</button>
+</form>
+</body></html>`;
+
 const PASSWORD_CHANGE_PAGE = `<!doctype html><html><body>
 <h1>Change password</h1>
 <form method="post" action="/credential-landing">
@@ -210,6 +226,8 @@ export async function startHttpFixture() {
     else if (req.url === '/card-iframe') res.end(CARD_IFRAME_PAGE);
     else if (req.url === '/credential-login') res.end(CREDENTIAL_LOGIN_PAGE);
     else if (req.url === '/credential-signup') res.end(CREDENTIAL_SIGNUP_PAGE);
+    else if (req.url === '/credential-multistep') res.end(CREDENTIAL_USERNAME_STEP_PAGE);
+    else if (req.url?.startsWith('/credential-password-step')) res.end(CREDENTIAL_PASSWORD_STEP_PAGE);
     else if (req.url === '/credential-password-change') res.end(PASSWORD_CHANGE_PAGE);
     else if (req.url === '/credential-rejected') res.end(REJECTED_LOGIN_PAGE);
     else if (req.url === '/credential-landing') res.end(CREDENTIAL_LANDING_PAGE);
@@ -231,6 +249,7 @@ export async function startHttpFixture() {
     credentialLoginUrl: `http://localhost:${port}/credential-login`,
     newCredentialLoginUrl: `http://127.0.0.1:${port}/credential-login`,
     credentialSignupUrl: `http://127.0.0.1:${port}/credential-signup`,
+    credentialMultistepUrl: `http://127.0.0.1:${port}/credential-multistep`,
     passwordChangeUrl: `http://localhost:${port}/credential-password-change`,
     rejectedCredentialUrl: `http://localhost:${port}/credential-rejected`,
     close: () => { server.closeAllConnections(); return new Promise<void>(r => server.close(() => r())); },

@@ -273,8 +273,10 @@ export class Vault {
     this.dirty = true; return e.uuid.id;
   }
 
-  updateEntry(id: string, fields: Record<string, string>, expires?: number | null, removeKeys?: string[], totp?: TotpConfig | null): void {
+  updateEntry(id: string, fields: Record<string, string>, expires?: number | null, removeKeys?: string[], totp?: TotpConfig | null, groupId?: string): void {
     const e = this.findEntry(id); if (!e) throw new Error('no entry');
+    const destination = groupId === undefined ? null : this.findGroup(groupId);
+    if (groupId !== undefined && !destination) throw new Error('no group');
     const otpUri = totp ? toOtpUri(totp) : null;
     if (removeKeys) for (const k of removeKeys) if (!STD.has(k)) e.fields.delete(k);
     this.applyFields(e, fields);
@@ -285,6 +287,16 @@ export class Vault {
       if (expires === null) { e.times.expires = false; }
       else { e.times.expires = true; e.times.expiryTime = new Date(expires); }
     }
+    if (destination && e.parentGroup !== destination) this.db!.move(e, destination);
+    e.times.update(); this.dirty = true;
+  }
+
+  moveEntry(id: string, groupId: string): void {
+    if (!this.db) throw new Error('locked');
+    const e = this.findEntry(id); if (!e) throw new Error('no entry');
+    const destination = this.findGroup(groupId); if (!destination) throw new Error('no group');
+    if (e.parentGroup === destination) return;
+    this.db.move(e, destination);
     e.times.update(); this.dirty = true;
   }
 

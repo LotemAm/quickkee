@@ -4,7 +4,11 @@ import { CREDENTIAL_CAPTURE_TTL_MS } from '../shared/credentialCapture';
 
 const base: CredentialPromptMetadata = {
   captureId: 'capture-id', site: 'example.test', username: 'octocat', kind: 'login',
-  suggestedAction: 'save', entries: [],
+  suggestedAction: 'save', entries: [], rootGroupId: 'root',
+  groups: [
+    { groupId: 'root', name: 'Vault', depth: 0 },
+    { groupId: 'work', name: 'Work', depth: 1 },
+  ],
 };
 
 function captureClosedShadow() {
@@ -39,6 +43,45 @@ test('renders safe create and update copy in a fixed closed-shadow dialog', () =
   prompt.show({ ...base, suggestedAction: 'update', entries: [{ id: 'entry-1', title: 'Existing', username: 'octocat' }] }, handlers());
   expect(captured.get()!.textContent).toContain('Update this password?');
   expect(captured.get()!.textContent).toContain('Existing');
+  prompt.hide();
+  captured.spy.mockRestore();
+});
+
+test('states explicitly when no username was captured', () => {
+  const captured = captureClosedShadow();
+  const prompt = new CredentialPrompt({ trustedAction: () => true });
+  prompt.show({ ...base, username: '' }, handlers());
+
+  expect(captured.get()!.textContent).toContain('No username recorded');
+  prompt.hide();
+  captured.spy.mockRestore();
+});
+
+test('new saves default to root and submit the selected group', async () => {
+  const captured = captureClosedShadow();
+  const h = handlers();
+  const prompt = new CredentialPrompt({ trustedAction: () => true });
+  prompt.show(base, h);
+
+  const group = captured.get()!.querySelector('[aria-label="Group"]') as HTMLSelectElement;
+  expect(group.value).toBe('root');
+  group.value = 'work'; group.dispatchEvent(new Event('change', { bubbles: true }));
+  (captured.get()!.querySelector('[data-action="primary"]') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(h.commit).toHaveBeenCalledWith({
+    captureId: 'capture-id', saveAsNew: true, groupId: 'work',
+  }));
+  captured.spy.mockRestore();
+});
+
+test('updates do not render a group picker', () => {
+  const captured = captureClosedShadow();
+  const prompt = new CredentialPrompt({ trustedAction: () => true });
+  prompt.show({
+    ...base, suggestedAction: 'update',
+    entries: [{ id: 'entry-1', title: 'Existing', username: 'octocat' }],
+  }, handlers());
+
+  expect(captured.get()!.querySelector('[aria-label="Group"]')).toBeNull();
   prompt.hide();
   captured.spy.mockRestore();
 });
@@ -78,7 +121,7 @@ test('ambiguous state requires and submits an explicit destination or save-as-ne
   const secondSelect = captured.get()!.querySelector('select') as HTMLSelectElement;
   secondSelect.value = '__new__'; secondSelect.dispatchEvent(new Event('change', { bubbles: true }));
   (captured.get()!.querySelector('[data-action="primary"]') as HTMLButtonElement).click();
-  await vi.waitFor(() => expect(h.commit).toHaveBeenCalledWith({ captureId: 'capture-id', saveAsNew: true }));
+  await vi.waitFor(() => expect(h.commit).toHaveBeenCalledWith({ captureId: 'capture-id', saveAsNew: true, groupId: 'root' }));
   captured.spy.mockRestore();
 });
 

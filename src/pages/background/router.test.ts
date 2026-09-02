@@ -258,6 +258,23 @@ describe('mutations mark vault dirty', () => {
     expect(await handle_({ type: 'deleteGroup', groupId })).toEqual({ ok: true });
     expect(ctx.vault.dirty).toBe(true);
   });
+
+  test('updateEntry moves an entry to the requested group', async () => {
+    const { ctx, handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    const tree = ctx.vault.getTree();
+    const sites = tree.children.find(group => group.name === 'Sites')!;
+    const created = await handle_({
+      type: 'createEntry', groupId: tree.groupId,
+      fields: { Title: 'Movable', URL: 'https://move.example', UserName: 'u', Password: 'p' },
+    });
+    const entryId = (created as { entryId: string }).entryId;
+
+    expect(await handle_({ type: 'updateEntry', entryId, fields: { UserName: 'moved' }, groupId: sites.groupId }))
+      .toEqual({ ok: true });
+    expect(ctx.vault.getTree().children.find(group => group.groupId === sites.groupId)?.entries)
+      .toContainEqual(expect.objectContaining({ id: entryId, username: 'moved' }));
+  });
 });
 
 describe('importTotp', () => {
@@ -617,6 +634,19 @@ describe('credential capture', () => {
     expect(await pending).toEqual({ ok: false, error: 'locked' });
   });
 
+  test('merges a username-only first step into a later password capture', async () => {
+    const { handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    expect(await handle_({ type: 'stageCredentialUsername', username: 'octocat' }, contentSender('https://login.github.com/identifier')))
+      .toEqual({ ok: true, staged: true });
+    expect(await handle_({
+      type: 'stageCredentialCapture', username: '', password: 'new-secret', kind: 'login',
+    }, contentSender('https://github.com/password'))).toEqual({ ok: true, staged: true });
+
+    expect(await handle_({ type: 'getPendingCredentialPrompt' }, contentSender('https://github.com/account')))
+      .toMatchObject({ ok: true, prompt: { username: 'octocat' } });
+  });
+
   test('suppresses identical credentials and classifies update, create, and ambiguous matches', async () => {
     const { ctx, handle_ } = makeCtx();
     await unlockHappyPath(handle_);
@@ -652,6 +682,33 @@ describe('credential capture', () => {
     });
     const multiple = await stageAndGetPrompt(handle_, { username: '', password: 'third-secret' });
     expect(multiple.prompt).toMatchObject({ ok: true, prompt: { suggestedAction: 'choose' } });
+  });
+
+  test('creates a new captured credential in the selected group and rejects unknown groups', async () => {
+    const { ctx, handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    vi.mocked(writeBytes).mockResolvedValue(undefined);
+    const root = ctx.vault.getTree();
+    const sites = root.children.find(group => group.name === 'Sites')!;
+
+    const first = await stageAndGetPrompt(handle_, { username: 'grouped-user', password: 'new-secret' });
+    const firstPrompt = (first.prompt as { ok: true; prompt: {
+      captureId: string; rootGroupId: string; groups: { groupId: string }[];
+    } }).prompt;
+    expect(firstPrompt.rootGroupId).toBe(root.groupId);
+    expect(firstPrompt.groups.map(group => group.groupId)).toContain(sites.groupId);
+    expect(await handle_({
+      type: 'commitCredentialCapture', captureId: firstPrompt.captureId, saveAsNew: true, groupId: sites.groupId,
+    }, contentSender('https://github.com/account'))).toEqual({ ok: true });
+    expect(ctx.vault.getTree().children.find(group => group.groupId === sites.groupId)?.entries
+      .some(entry => entry.username === 'grouped-user')).toBe(true);
+
+    const second = await stageAndGetPrompt(handle_, { username: 'invalid-group-user', password: 'new-secret' });
+    const secondId = (second.prompt as { ok: true; prompt: { captureId: string } }).prompt.captureId;
+    expect(await handle_({
+      type: 'commitCredentialCapture', captureId: secondId, saveAsNew: true, groupId: 'missing-group',
+    }, contentSender('https://github.com/account'))).toEqual({ ok: false, error: 'invalidSelection' });
+    expect(ctx.vault.entriesForUrl('https://github.com').some(entry => entry.username === 'invalid-group-user')).toBe(false);
   });
 
   test('updates only submitted credential fields, persists, and preserves unrelated entry data', async () => {

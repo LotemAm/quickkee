@@ -9,11 +9,12 @@ import { TotpSetup } from '../../shared/TotpSetup';
 import type { TotpConfig } from '../../background/totp';
 import { canonicalPageOrigin } from '../../shared/entryDefaults';
 import { IconTooltipButton } from '../../shared/IconTooltipButton';
+import type { GroupOption } from '../../shared/groups';
 
 export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwgen, scanPage, onCreated }: {
   url: string;
   tabId: number;
-  groups: { groupId: string; name: string; depth: number }[];
+  groups: GroupOption[];
   defaultGroupId: string;
   clearSecs: number;
   pwgen: PwGenOpts;

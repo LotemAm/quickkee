@@ -37,10 +37,12 @@ beforeEach(() => {
 
 test('scans a page QR into the side-panel editor without saving immediately', async () => {
   render(<EntryEditor entryId="entry-1" groupId="group-1" clearSecs={30}
+    groups={[{ groupId: 'group-1', name: 'Sites', depth: 0 }]}
     pwgen={{ length: 20, lower: true, upper: true, digits: true, symbols: true }}
     onChanged={vi.fn()} onDeleted={vi.fn()} />);
 
   await screen.findByRole('button', { name: 'Apply changes' });
+  await waitFor(() => expect(mocks.sendToSW).toHaveBeenCalledWith({ type: 'getTotpConfig', entryId: 'entry-1' }));
   fireEvent.click(screen.getByRole('button', { name: 'Add Authenticator code' }));
 
   const input = screen.getByLabelText('TOTP setup key or URI');
@@ -61,4 +63,27 @@ test('scans a page QR into the side-panel editor without saving immediately', as
   await waitFor(() => expect(mocks.sendToSW).toHaveBeenCalledWith(expect.objectContaining({
     type: 'updateEntry', entryId: 'entry-1', totp: scannedConfig,
   })));
+});
+
+test('changes an existing entry group through the same update request', async () => {
+  const onChanged = vi.fn();
+  render(<EntryEditor entryId="entry-1" groupId="sites" clearSecs={30}
+    groups={[
+      { groupId: 'root', name: 'Vault', depth: 0 },
+      { groupId: 'sites', name: 'Sites', depth: 1 },
+    ]}
+    pwgen={{ length: 20, lower: true, upper: true, digits: true, symbols: true }}
+    onChanged={onChanged} onDeleted={vi.fn()} />);
+
+  await screen.findByRole('button', { name: 'Apply changes' });
+  const groupSelect = screen.getByLabelText('Group');
+  expect(groupSelect.closest('details')).not.toHaveAttribute('open');
+  fireEvent.click(screen.getByText('More'));
+  fireEvent.change(groupSelect, { target: { value: 'root' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply changes' }));
+
+  await waitFor(() => expect(mocks.sendToSW).toHaveBeenCalledWith(expect.objectContaining({
+    type: 'updateEntry', entryId: 'entry-1', groupId: 'root',
+  })));
+  expect(onChanged).toHaveBeenCalledWith('root');
 });

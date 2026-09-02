@@ -1,4 +1,4 @@
-import { extractCredentialCandidate, SubmitGestureTracker } from './credentialCapture';
+import { extractCredentialCandidate, extractUsernameCandidate, SubmitGestureTracker } from './credentialCapture';
 
 function form(markup: string): HTMLFormElement {
   document.body.innerHTML = `<form id="target">${markup}</form>`;
@@ -72,6 +72,37 @@ test('does not pair inputs outside the submitted form', () => {
     <form id="target"><input id="p" type="password" autocomplete="current-password" value="login-secret"></form>`;
   expect(extractCredentialCandidate(document.getElementById('target') as HTMLFormElement))
     .toEqual({ username: '', password: 'login-secret', kind: 'login' });
+});
+
+test('extracts a username-only stage from standards-based identifier fields', () => {
+  const target = form('<input id="u" autocomplete="username">');
+  (document.getElementById('u') as HTMLInputElement).value = 'octocat';
+  expect(extractUsernameCandidate(target)).toBe('octocat');
+});
+
+test('extracts a username-only stage from clear email and login identifiers', () => {
+  const email = form('<input id="account-email" type="email">');
+  (document.getElementById('account-email') as HTMLInputElement).value = 'person@example.test';
+  expect(extractUsernameCandidate(email)).toBe('person@example.test');
+
+  const login = form('<input id="login_name">');
+  (document.getElementById('login_name') as HTMLInputElement).value = 'octocat';
+  expect(extractUsernameCandidate(login)).toBe('octocat');
+});
+
+test('rejects generic text, password, and OTP username-only forms', () => {
+  const generic = form('<input id="query"><input id="city">');
+  (document.getElementById('query') as HTMLInputElement).value = 'octocat';
+  (document.getElementById('city') as HTMLInputElement).value = 'Paris';
+  expect(extractUsernameCandidate(generic)).toBeNull();
+
+  const password = form('<input id="u" autocomplete="username"><input type="password">');
+  (document.getElementById('u') as HTMLInputElement).value = 'octocat';
+  expect(extractUsernameCandidate(password)).toBeNull();
+
+  const otp = form('<input id="u" autocomplete="username"><input autocomplete="one-time-code">');
+  (document.getElementById('u') as HTMLInputElement).value = 'octocat';
+  expect(extractUsernameCandidate(otp)).toBeNull();
 });
 
 test('ignores disabled and read-only password inputs', () => {

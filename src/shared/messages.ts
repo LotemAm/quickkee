@@ -6,6 +6,7 @@ import type { TotpConfig, TotpCode } from '../background/totp';
 import type { TotpImportAssignment } from './totpImport';
 import type { PasswordHealthReport } from './passwordHealth';
 import type { QuickUnlockSource, QuickUnlockStatus } from './quickUnlock';
+import type { GroupOption } from './groups';
 
 export interface CredentialPromptEntry {
   id: string;
@@ -20,6 +21,8 @@ export interface CredentialPromptMetadata {
   kind: 'login' | 'password-change';
   suggestedAction: 'save' | 'update' | 'choose';
   entries: CredentialPromptEntry[];
+  rootGroupId: string;
+  groups: GroupOption[];
   retry?: boolean;
 }
 
@@ -38,7 +41,7 @@ export type Request =
   | { type: 'getTree' }
   | { type: 'getPasswordHealthReport' }
   | { type: 'createEntry'; groupId: string; fields: Record<string, string>; totp?: TotpConfig }
-  | { type: 'updateEntry'; entryId: string; fields: Record<string, string>; expires?: number | null; removeKeys?: string[]; totp?: TotpConfig | null }
+  | { type: 'updateEntry'; entryId: string; fields: Record<string, string>; expires?: number | null; removeKeys?: string[]; totp?: TotpConfig | null; groupId?: string }
   | { type: 'updateGroup'; groupId: string; fields: Record<string, string> }
   | { type: 'createGroup'; parentId: string; name: string }
   | { type: 'deleteGroup'; groupId: string }
@@ -71,9 +74,10 @@ export type Request =
   | { type: 'disableQuickUnlock' }
   | { type: 'scheduleClipboardClear'; textHash: string; seconds: number }
   | { type: 'cancelClipboardClear' }
+  | { type: 'stageCredentialUsername'; username: string }
   | { type: 'stageCredentialCapture'; username: string; password: string; kind: 'login' | 'password-change' }
   | { type: 'getPendingCredentialPrompt' }
-  | { type: 'commitCredentialCapture'; captureId: string; entryId?: string; saveAsNew?: boolean }
+  | { type: 'commitCredentialCapture'; captureId: string; entryId?: string; saveAsNew?: boolean; groupId?: string }
   | { type: 'dismissCredentialCapture'; captureId: string };
 
 // Intentional: `{}` (not `Record<string, never>`) is required so bare `Ok` is excluded from
@@ -110,6 +114,7 @@ type OkFor = {
   importTotp: Ok;
   scheduleClipboardClear: Ok;
   cancelClipboardClear: Ok;
+  stageCredentialUsername: Ok<{ staged: boolean }>;
   stageCredentialCapture: Ok<{ staged: boolean }>;
   getPendingCredentialPrompt: Ok<{ prompt: CredentialPromptMetadata | null }>;
   commitCredentialCapture: Ok;

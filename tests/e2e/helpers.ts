@@ -234,6 +234,19 @@ export async function selectClosedCredentialDestination(page: Page, optionIndex 
   });
 }
 
+export async function selectClosedCredentialGroup(page: Page, optionIndex = 1): Promise<void> {
+  await withPromptNodes(page, async (nodes, client) => {
+    const select = nodes.find(node => node.nodeName === 'SELECT' && attribute(node, 'aria-label') === 'Group');
+    if (!select) throw new Error('Credential group select not found');
+    const { object } = await client.send('DOM.resolveNode', { backendNodeId: select.backendNodeId });
+    await client.send('Runtime.callFunctionOn', {
+      objectId: object.objectId,
+      functionDeclaration: 'function(index){ this.value = this.options[index].value; this.dispatchEvent(new Event("change", { bubbles: true })); }',
+      arguments: [{ value: optionIndex }],
+    });
+  });
+}
+
 export async function clickClosedCredentialAction(page: Page, action: 'primary' | 'dismiss'): Promise<void> {
   await withPromptNodes(page, async (nodes, client) => {
     const button = nodes.find(node => attribute(node, 'data-action') === action);

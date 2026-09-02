@@ -4,6 +4,7 @@ import {
   test, expect, openExtensionPage, installDb, reReadKdbx, swCmd,
   closedCredentialPromptText, clickClosedCredentialAction,
   closedCredentialPromptPrimaryDisabled, selectClosedCredentialDestination,
+  selectClosedCredentialGroup,
 } from '../helpers';
 import { OTP_FIELD_KEY } from '../../../src/shared/entry';
 
@@ -62,6 +63,45 @@ test('signup submission offers Save and persists exactly one root entry', async 
   expect(field(saved, 'Password')).toBe('signup-password-value');
   expect(field(saved, 'URL')).toBe(`http://127.0.0.1:${http.port}/`);
   expect(db.getDefaultGroup().entries.map(entry => entry.uuid.id)).toContain(saved.uuid.id);
+});
+
+test('new credential save can target a non-root group', async ({ context, extensionId, http }) => {
+  const seed = await unlock(context, extensionId);
+  const site = await context.newPage();
+  await site.goto(http.credentialSignupUrl);
+  await site.locator('#email').fill('grouped-user@example.test');
+  await site.locator('#password').fill('grouped-password-value');
+  await site.locator('#confirm').fill('grouped-password-value');
+  await site.getByRole('button', { name: 'Create account' }).click();
+  await expect(site.locator('[data-quickkee-credential-prompt]')).toBeVisible();
+
+  await selectClosedCredentialGroup(site, 1);
+  await clickClosedCredentialAction(site, 'primary');
+  await expect(site.locator('[data-quickkee-credential-prompt]')).toHaveCount(0);
+
+  await expect.poll(async () => {
+    const db = await reReadKdbx(seed);
+    return db.getDefaultGroup().groups.some(group => group.entries
+      .some(entry => field(entry, 'UserName') === 'grouped-user@example.test'));
+  }).toBe(true);
+});
+
+test('multi-stage login merges the submitted username into the password capture', async ({ context, extensionId, http }) => {
+  const seed = await unlock(context, extensionId);
+  const site = await context.newPage();
+  await site.goto(http.credentialMultistepUrl);
+  await site.locator('#username').fill('multistep-user@example.test');
+  await site.getByRole('button', { name: 'Next' }).click();
+  await expect(site).toHaveURL(/\/credential-password-step/);
+  await site.locator('#password').fill('multistep-password-value');
+  await site.getByRole('button', { name: 'Sign in' }).click();
+  await expect(site.locator('[data-quickkee-credential-prompt]')).toBeVisible();
+  expect(await closedCredentialPromptText(site)).toContain('multistep-user@example.test');
+
+  await clickClosedCredentialAction(site, 'primary');
+  await expect.poll(async () => entries(await reReadKdbx(seed))
+    .some(entry => field(entry, 'UserName') === 'multistep-user@example.test'
+      && field(entry, 'Password') === 'multistep-password-value')).toBe(true);
 });
 
 test('password-change submission offers Update and preserves unrelated fields and TOTP', async ({ context, extensionId, http }) => {

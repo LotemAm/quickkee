@@ -12,6 +12,7 @@ import { TotpSetup } from '../../shared/TotpSetup';
 import type { TotpConfig } from '../../background/totp';
 import { IconTooltipButton } from '../../shared/IconTooltipButton';
 import { scanVisibleTabForTotp } from '../popup/scanVisibleTabForTotp';
+import type { GroupOption } from '../../shared/groups';
 
 // epoch ms -> 'YYYY-MM-DDTHH:mm' (local) for <input type="datetime-local">
 const toLocalInput = (ms: number) => {
@@ -26,7 +27,16 @@ const BLANK_ENTRY: EntryView = {
   hasTotp: false, totpPeriod: null, attachments: [],
 };
 
-export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onCreated, onDeleted }: { entryId: string | null; groupId?: string; clearSecs: number; pwgen: PwGenOpts; onChanged: () => void; onCreated?: (entryId: string) => void; onDeleted: () => void }) {
+export function EntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChanged, onCreated, onDeleted }: {
+  entryId: string | null;
+  groupId?: string;
+  groups: GroupOption[];
+  clearSecs: number;
+  pwgen: PwGenOpts;
+  onChanged: (groupId?: string) => void;
+  onCreated?: (entryId: string, groupId?: string) => void;
+  onDeleted: () => void;
+}) {
   const [e, setE] = useState<EntryView | null>(null);
   const [showPass, setShowPass] = useState(false);
   const [showCardNumber, setShowCardNumber] = useState(false);
@@ -47,10 +57,12 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
   const [totpError, setTotpError] = useState('');
   const [scanningTotp, setScanningTotp] = useState(false);
   const [scanTotpError, setScanTotpError] = useState('');
+  const [selectedGroupId, setSelectedGroupId] = useState(groupId ?? '');
   const scanVersionRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const noClass = !opts.lower && !opts.upper && !opts.digits && !opts.symbols;
   const { copy, state: clipState, cancel } = useClipboardTimer(clearSecs);
+  useEffect(() => { setSelectedGroupId(groupId ?? ''); }, [entryId, groupId]);
   useEffect(() => {
     setShowPass(false);
     setShowCardNumber(false);
@@ -169,6 +181,8 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
     }
   }
   async function save() {
+    setSaveError('');
+    if (!selectedGroupId) { setSaveError('Select a group.'); return; }
     const fields: Record<string, string> = {
       Title: e!.title, UserName: e!.username, URL: e!.url, Password: e!.password,
       [CARD_FLAG_KEY]: isCard ? '1' : '',
@@ -181,20 +195,24 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
     const name = cardholderName.trim();
     if (name) { fields[CARDHOLDER_NAME_KEY] = name; keptKeys.add(CARDHOLDER_NAME_KEY); }
     if (entryId === null) {
-      const r = await sendToSW({ type: 'createEntry', groupId: groupId!, fields, ...(totp ? { totp } : {}) });
-      if (r.ok) onCreated?.(r.entryId);
-      else setSaveError(r.error);
+      try {
+        const r = await sendToSW({ type: 'createEntry', groupId: selectedGroupId, fields, ...(totp ? { totp } : {}) });
+        if (r.ok) onCreated?.(r.entryId, selectedGroupId);
+        else setSaveError(r.error);
+      } catch { setSaveError('Could not create entry.'); }
       return;
     }
     const removeKeys = origKeys.filter(k => !keptKeys.has(k));
-    const result = await sendToSW({ type: 'updateEntry', entryId, fields, expires, removeKeys, totp });
-    if (!result.ok) { setSaveError(result.error); return; }
+    try {
+      const result = await sendToSW({ type: 'updateEntry', entryId, fields, expires, removeKeys, totp, groupId: selectedGroupId });
+      if (!result.ok) { setSaveError(result.error); return; }
+    } catch { setSaveError('Could not update entry.'); return; }
     // Sync origKeys to what was just persisted: Apply Changes doesn't trigger a
     // getEntry refetch (onChanged only reloads the tree), so without this a field
     // added on one Apply-changes click can never be removed by a later one — its
     // key never enters `fields` (once cleared) nor `removeKeys` (stale origKeys).
     setOrigKeys([...keptKeys]);
-    onChanged();
+    onChanged(selectedGroupId);
   }
   async function del() {
     if (entryId === null) return;
@@ -282,6 +300,18 @@ export function EntryEditor({ entryId, groupId, clearSecs, pwgen, onChanged, onC
             </span>
           </summary>
           <div className="space-y-4 border-t px-3 py-3" style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}>
+            <div>
+              <label className="section-title block" htmlFor="entry-group">Group</label>
+              <select id="entry-group" className="input w-full" value={selectedGroupId}
+                onChange={event => setSelectedGroupId(event.target.value)}>
+                {groups.map(group => (
+                  <option key={group.groupId} value={group.groupId}>
+                    {'\u00A0\u00A0'.repeat(group.depth) + group.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <label className="flex cursor-pointer items-center gap-2 text-sm" style={{ color: 'var(--text)' }}>
               <input className="h-4 w-4 accent-[var(--primary)]" type="checkbox" checked={isCard}
                 onChange={ev => setIsCard(ev.target.checked)} />

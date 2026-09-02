@@ -3,6 +3,7 @@ import { urlMatches } from './matcher';
 import { CREDENTIAL_CAPTURE_TTL_MS } from '../shared/credentialCapture';
 
 export const CREDENTIAL_CAPTURE_KEY = 'quickkee.credentialCaptures.v1';
+export const CREDENTIAL_USERNAME_KEY = 'quickkee.credentialUsernames.v1';
 export { CREDENTIAL_CAPTURE_TTL_MS } from '../shared/credentialCapture';
 
 export interface SessionStorageArea {
@@ -20,6 +21,15 @@ export interface CredentialCaptureRecord extends CredentialCandidate {
   expiresAt: number;
   promptOrigin?: string;
   mutation?: { type: 'create' | 'update'; entryId: string };
+}
+
+interface CredentialUsernameRecord {
+  tabId: number;
+  sourceUrl: string;
+  sourceOrigin: string;
+  username: string;
+  createdAt: number;
+  expiresAt: number;
 }
 
 export type SafeCredentialCapture = Pick<CredentialCaptureRecord, 'username' | 'kind'> & {
@@ -42,6 +52,7 @@ export class CredentialCaptureStore {
   private readonly randomId: () => string;
   private readonly ttlMs: number;
   private records: Record<string, CredentialCaptureRecord> = {};
+  private usernames: Record<string, CredentialUsernameRecord> = {};
   private hydrated = false;
   private tail: Promise<void> = Promise.resolve();
 
@@ -62,10 +73,16 @@ export class CredentialCaptureStore {
       this.hydrated = true;
       if (this.storage) {
         try {
-          const got = await this.storage.get(CREDENTIAL_CAPTURE_KEY);
+          const [got, usernameGot] = await Promise.all([
+            this.storage.get(CREDENTIAL_CAPTURE_KEY),
+            this.storage.get(CREDENTIAL_USERNAME_KEY),
+          ]);
           const stored = got[CREDENTIAL_CAPTURE_KEY];
           if (stored && typeof stored === 'object' && !Array.isArray(stored))
             this.records = stored as Record<string, CredentialCaptureRecord>;
+          const storedUsernames = usernameGot[CREDENTIAL_USERNAME_KEY];
+          if (storedUsernames && typeof storedUsernames === 'object' && !Array.isArray(storedUsernames))
+            this.usernames = storedUsernames as Record<string, CredentialUsernameRecord>;
         } catch { this.storage = null; }
       }
     }
@@ -77,13 +94,23 @@ export class CredentialCaptureStore {
         delete this.records[id]; pruned = true;
       }
     }
+    for (const [tabId, record] of Object.entries(this.usernames)) {
+      if (!record || typeof record.expiresAt !== 'number' || now >= record.expiresAt) {
+        delete this.usernames[tabId]; pruned = true;
+      }
+    }
     if (pruned) await this.persist();
     return this.records;
   }
 
   private async persist(): Promise<void> {
     if (!this.storage) return;
-    try { await this.storage.set({ [CREDENTIAL_CAPTURE_KEY]: this.records }); }
+    try {
+      await this.storage.set({
+        [CREDENTIAL_CAPTURE_KEY]: this.records,
+        [CREDENTIAL_USERNAME_KEY]: this.usernames,
+      });
+    }
     catch { this.storage = null; }
   }
 
@@ -107,6 +134,22 @@ export class CredentialCaptureStore {
     return record && record.tabId === authority.tabId && record.promptOrigin === origin ? record : null;
   }
 
+  async stageUsername(input: { tabId: number; sourceUrl: string; username: string }): Promise<void> {
+    await this.exclusive(async () => {
+      const sourceOrigin = this.pageOrigin(input.sourceUrl);
+      const username = input.username.trim();
+      if (!sourceOrigin || !username) throw new Error('invalidSource');
+      const records = await this.load();
+      for (const [id, record] of Object.entries(records))
+        if (record.tabId === input.tabId) delete records[id];
+      const createdAt = this.now();
+      this.usernames[String(input.tabId)] = {
+        ...input, username, sourceOrigin, createdAt, expiresAt: createdAt + this.ttlMs,
+      };
+      await this.persist();
+    });
+  }
+
   async stage(input: CredentialCandidate & { tabId: number; sourceUrl: string }): Promise<string> {
     return this.exclusive(async () => {
       const sourceOrigin = this.pageOrigin(input.sourceUrl);
@@ -114,10 +157,16 @@ export class CredentialCaptureStore {
       const records = await this.load();
       for (const [id, record] of Object.entries(records))
         if (record.tabId === input.tabId) delete records[id];
+      const usernameKey = String(input.tabId);
+      const stagedUsername = this.usernames[usernameKey];
+      delete this.usernames[usernameKey];
+      const username = input.username.trim()
+        ? input.username
+        : stagedUsername && urlMatches(stagedUsername.sourceUrl, input.sourceUrl) ? stagedUsername.username : '';
       let id = this.randomId();
       while (records[id]) id = this.randomId();
       const createdAt = this.now();
-      records[id] = { ...input, id, sourceOrigin, createdAt, expiresAt: createdAt + this.ttlMs };
+      records[id] = { ...input, username, id, sourceOrigin, createdAt, expiresAt: createdAt + this.ttlMs };
       await this.persist();
       return id;
     });
@@ -174,6 +223,7 @@ export class CredentialCaptureStore {
       for (const [id, record] of Object.entries(records)) {
         if (record.tabId === tabId) { delete records[id]; changed = true; }
       }
+      if (this.usernames[String(tabId)]) { delete this.usernames[String(tabId)]; changed = true; }
       if (changed) await this.persist();
     });
   }
@@ -181,9 +231,13 @@ export class CredentialCaptureStore {
   async clearAll(): Promise<void> {
     await this.exclusive(async () => {
       this.records = {};
+      this.usernames = {};
       this.hydrated = true;
       if (!this.storage) return;
-      try { await this.storage.remove(CREDENTIAL_CAPTURE_KEY); }
+      try {
+        await this.storage.remove(CREDENTIAL_CAPTURE_KEY);
+        await this.storage.remove(CREDENTIAL_USERNAME_KEY);
+      }
       catch { this.storage = null; }
     });
   }
