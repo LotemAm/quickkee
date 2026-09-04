@@ -39,9 +39,9 @@ function txAttempt<T>(
   retried: boolean,
 ): Promise<T> {
   return openQuickKeeDb().then(db => new Promise<T>((res, rej) => {
-    let req: IDBRequest<T>;
+    let transaction: IDBTransaction;
     try {
-      req = fn(db.transaction(store, mode).objectStore(store));
+      transaction = db.transaction(store, mode);
     } catch (error) {
       if (!retried && (error as Error)?.name === 'InvalidStateError') {
         // Connection was closed by versionchange between memoization and use, reset and retry once.
@@ -50,7 +50,25 @@ function txAttempt<T>(
       }
       return rej(error);
     }
-    req.onsuccess = () => res(req.result);
-    req.onerror = () => rej(req.error);
+
+    let result: T;
+    const rejectTransaction = (error: DOMException | null) =>
+      rej(error ?? new DOMException('IndexedDB transaction aborted', 'AbortError'));
+    transaction.oncomplete = () => res(result);
+    transaction.onerror = event => {
+      // Request errors bubble before the transaction's error is necessarily set.
+      const target = event.target as IDBRequest<unknown> | IDBTransaction;
+      rejectTransaction(target.error ?? transaction.error);
+    };
+    transaction.onabort = () => rejectTransaction(transaction.error);
+
+    try {
+      const req = fn(transaction.objectStore(store));
+      req.onsuccess = () => { result = req.result; };
+      req.onerror = () => rejectTransaction(req.error);
+    } catch (error) {
+      // Once the operation has started, replaying it could duplicate a write.
+      rej(error);
+    }
   }));
 }

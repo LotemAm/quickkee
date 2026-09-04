@@ -14,6 +14,100 @@ test('tx round-trips a value through a named store', async () => {
   expect(got.v).toBe(1);
 });
 
+test('tx rejects an abort after request success without retrying or committing the write', async () => {
+  const write = vi.fn((store: IDBObjectStore) => {
+    const transaction = store.transaction;
+    const request = store.put({ v: 2 }, 'aborted-write');
+    request.addEventListener('success', () => transaction.abort());
+    return request;
+  });
+
+  const result = await tx('cache', 'readwrite', write).then(
+    value => ({ value, error: null }),
+    error => ({ value: undefined, error }),
+  );
+  const stored = await tx('cache', 'readonly', store => store.get('aborted-write'));
+
+  expect(stored).toBeUndefined();
+  expect(write).toHaveBeenCalledTimes(1);
+  expect(result.error).toMatchObject({ name: 'AbortError' });
+});
+
+test('tx returns the request result only after the write transaction completes', async () => {
+  const events: string[] = [];
+  const result = await tx('cache', 'readwrite', store => {
+    store.transaction.addEventListener('complete', () => events.push('complete'));
+    const request = store.put({ v: 3 }, 'completed-write');
+    request.addEventListener('success', () => events.push('success'));
+    return request;
+  });
+  events.push('resolved');
+
+  expect(result).toBe('completed-write');
+  expect(events).toEqual(['success', 'complete', 'resolved']);
+});
+
+test.each([
+  ['readonly-existing', { v: 4 }],
+  ['readonly-missing', undefined],
+] as const)('tx returns %s only after readonly completion', async (key, expected) => {
+  if (expected !== undefined) await tx('cache', 'readwrite', store => store.put(expected, key));
+  let completed = false;
+
+  const result = await tx<{ v: number } | undefined>('cache', 'readonly', store => {
+    store.transaction.addEventListener('complete', () => { completed = true; });
+    return store.get(key);
+  });
+
+  expect(result).toEqual(expected);
+  expect(completed).toBe(true);
+});
+
+test('tx preserves a failed request error and the previously committed value', async () => {
+  await tx('cache', 'readwrite', store => store.put({ v: 5 }, 'duplicate-key'));
+  let requestError: DOMException | null = null;
+
+  const result = await tx('cache', 'readwrite', store => {
+    const request = store.add({ v: 6 }, 'duplicate-key');
+    request.addEventListener('error', () => { requestError = request.error; });
+    return request;
+  }).catch(error => error);
+
+  expect(requestError).toMatchObject({ name: 'ConstraintError' });
+  expect(result).toBe(requestError);
+  expect(await tx('cache', 'readonly', store => store.get('duplicate-key'))).toEqual({ v: 5 });
+});
+
+test('tx preserves a later request error when the returned request succeeded', async () => {
+  let requestError: DOMException | null = null;
+  const write = vi.fn((store: IDBObjectStore) => {
+    const request = store.put({ v: 7 }, 'secondary-request-failure');
+    const duplicate = store.add({ v: 8 }, 'secondary-request-failure');
+    duplicate.addEventListener('error', () => { requestError = duplicate.error; });
+    return request;
+  });
+
+  const result = await tx('cache', 'readwrite', write).catch(error => error);
+
+  expect(requestError).toMatchObject({ name: 'ConstraintError' });
+  expect(result).toBe(requestError);
+  expect(write).toHaveBeenCalledTimes(1);
+  expect(await tx('cache', 'readonly', store => store.get('secondary-request-failure'))).toBeUndefined();
+});
+
+test('tx does not retry an InvalidStateError thrown after the operation starts', async () => {
+  const error = new DOMException('operation failed', 'InvalidStateError');
+  const write = vi.fn((store: IDBObjectStore) => {
+    store.put({ v: 9 }, 'operation-error');
+    store.transaction.abort();
+    throw error;
+  });
+
+  await expect(tx('cache', 'readwrite', write)).rejects.toBe(error);
+  expect(write).toHaveBeenCalledTimes(1);
+  expect(await tx('cache', 'readonly', store => store.get('operation-error'))).toBeUndefined();
+});
+
 test('memoizes connection', async () => {
   const a = await openQuickKeeDb();
   const b = await openQuickKeeDb();
