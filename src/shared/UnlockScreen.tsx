@@ -235,6 +235,7 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: (notice?: string) => 
         {useKey && <button className="btn w-full" onClick={async () => { try { setKeyName(await pickKeyFile()); } catch (e) { if ((e as DOMException).name !== 'AbortError') throw e; } }}>
           <KeyRound size={15} /> {keyName ? `Key file: ${keyName}` : 'Choose key file…'}</button>}
         <div className="flex gap-2">
+          {/* eslint-disable-next-line jsx-a11y/no-autofocus -- intentional: the unlock screen focuses its primary input */}
           <input type="password" className="input min-w-0 flex-1" placeholder="Master password" value={pwd} autoFocus
             onChange={e => setPwd(e.target.value)} onKeyDown={e => e.key === 'Enter' && canUnlock && !unlocking && unlock()} />
           <IconTooltipButton className="icon-btn btn-toggle"
