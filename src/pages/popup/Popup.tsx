@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Search, Settings, Cloud, CloudOff, RefreshCw, PanelRight, Lock, Plus, X } from 'lucide-react';
 import { useStatus } from '../../shared/useStatus';
+import { useVaultActivity } from '../../shared/useVaultActivity';
 import { UnlockScreen } from '../../shared/UnlockScreen';
 import { sendToSW } from '../../shared/messages';
 import { lockVault } from '../../shared/lockVault';
@@ -32,6 +33,7 @@ function buildGroupNames(node: TreeNode, map: Map<string, string> = new Map()) {
 
 export function Popup() {
   const { locked, dirty, refresh } = useStatus();
+  useVaultActivity(!locked);
   const [entries, setEntries] = useState<EntryView[]>([]);
   const [tree, setTree] = useState<TreeNode | null>(null);
   const [searchResults, setSearchResults] = useState<EntryView[]>([]);

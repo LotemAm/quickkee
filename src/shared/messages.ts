@@ -29,6 +29,7 @@ export interface CredentialPromptMetadata {
 export type Request =
   | { type: 'unlock'; password: string | null; keyFile: number[] | null }
   | { type: 'lock' }
+  | { type: 'vaultActivity' }
   | { type: 'getStatus' }
   | { type: 'getEntriesForUrl'; url: string }
   | { type: 'getEntrySummariesForUrl'; url: string }
@@ -92,6 +93,7 @@ export type Err = { ok: false; error: string };
 type OkFor = {
   unlock: Ok;
   lock: Ok;
+  vaultActivity: Ok;
   updateEntry: Ok;
   updateGroup: Ok;
   deleteGroup: Ok;

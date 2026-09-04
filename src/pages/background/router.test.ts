@@ -311,6 +311,171 @@ function browserFrame(frameId: number, overrides = {}) {
   return { frameId, documentId: `document-${frameId}`, documentLifecycle: 'active', errorOccurred: false, url: 'https://github.com/login', ...overrides };
 }
 
+describe('explicit vault activity deadlines', () => {
+  const panel = { ...popupFillSender, url: 'chrome-extension://quickkee/src/pages/panel/index.html' };
+  const inline = { ...contentSender(), id: 'quickkee', documentId: 'document-0' };
+  const config = { secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1' as const, digits: 6, period: 30 };
+
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  async function ready() {
+    const setup = makeCtx();
+    await unlockHappyPath(setup.handle_);
+    const entry = setup.ctx.vault.entriesForUrl('https://github.com')[0];
+    setup.ctx.vault.setTotpConfig(entry.id, config);
+    setup.ctx.autolock.disarm();
+    vi.useFakeTimers();
+    setup.ctx.autolock.arm(10 / 3600);
+    const touch = vi.spyOn(setup.ctx.autolock, 'touch');
+    chromeMock.tabs.get.mockResolvedValue({ url: 'https://github.com/login' });
+    chromeMock.tabs.sendMessage.mockResolvedValue(undefined);
+    vi.mocked(writeBytes).mockResolvedValue(undefined);
+    return { ...setup, entry, touch };
+  }
+
+  test('repeated status, sync, TOTP and summary reads lock at the original deadline', async () => {
+    const { ctx, handle_, entry, touch, doLock } = await ready();
+    for (let second = 1; second <= 12; second++) {
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(await handle_({ type: 'getStatus' }, popupFillSender)).toMatchObject({ locked: second >= 10 });
+      expect(await handle_({ type: 'getSyncStatus' }, popupFillSender)).toMatchObject({ ok: true });
+      const code = await handle_({ type: 'getTotpCode', entryId: entry.id }, popupFillSender);
+      expect(code.ok).toBe(second < 10);
+      expect(await handle_({ type: 'previewTotp', config }, panel)).toMatchObject({ ok: true });
+      await handle_({ type: 'getEntrySummariesForUrl', url: inline.url! }, inline);
+      await handle_({ type: 'getPendingCredentialPrompt' }, inline);
+    }
+    expect(ctx.vault.isOpen()).toBe(false);
+    expect(doLock).toHaveBeenCalledOnce();
+    expect(touch).not.toHaveBeenCalled();
+  });
+
+  test.each([popupFillSender, panel, inline, { ...inline, frameId: 3, documentId: 'document-3' }])(
+    'valid popup, panel and frame activity extends the deadline: %j', async sender => {
+      const { handle_, doLock, touch } = await ready();
+      await vi.advanceTimersByTimeAsync(9000);
+      expect(await handle_({ type: 'vaultActivity' }, sender)).toEqual({ ok: true });
+      await vi.advanceTimersByTimeAsync(9999);
+      expect(doLock).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(doLock).toHaveBeenCalledOnce();
+      expect(touch).toHaveBeenCalledOnce();
+    },
+  );
+
+  test.each([
+    {}, { ...popupFillSender, id: undefined }, { ...popupFillSender, id: 'other' },
+    { ...popupFillSender, url: 'chrome-extension://other/src/pages/popup/index.html' },
+    { ...popupFillSender, url: 'chrome-extension://quickkee/src/pages/options/index.html' },
+    { ...popupFillSender, url: 'chrome-extension://quickkee/nested/src/pages/popup/index.html' },
+    { ...popupFillSender, url: 'moz-extension://other/src/pages/popup/index.html' },
+    { ...inline, id: 'other' }, { ...inline, tab: undefined },
+    { ...inline, tab: { id: -1 } }, { ...inline, tab: { id: 0.5 } },
+    { ...inline, documentId: undefined }, { ...inline, documentId: 'replaced' },
+    { ...inline, frameId: -1 }, { ...inline, frameId: undefined },
+    { ...inline, url: 'about:blank' }, { ...inline, url: 'file:///login.html' },
+    { ...inline, url: 'invalid-url' },
+  ])('rejected activity cannot extend the deadline or trust a request URL: %j', async sender => {
+    const { handle_, doLock, touch } = await ready();
+    await vi.advanceTimersByTimeAsync(9000);
+    const request = { type: 'vaultActivity' as const, url: popupFillSender.url };
+    expect(await handle_(request, sender as chrome.runtime.MessageSender)).toEqual({ ok: false, error: 'forbidden' });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(doLock).toHaveBeenCalledOnce();
+    expect(touch).not.toHaveBeenCalled();
+  });
+
+  test('document validation completing after lock cannot touch a new session', async () => {
+    const { ctx, handle_, touch } = await ready();
+    const gate = Promise.withResolvers<ReturnType<typeof browserFrame>>();
+    chromeMock.webNavigation.getFrame.mockReturnValueOnce(gate.promise);
+    const pending = handle_({ type: 'vaultActivity' }, inline);
+    ctx.doLock();
+    await unlockHappyPath(handle_);
+    gate.resolve(browserFrame(0));
+    expect(await pending).toEqual({ ok: false, error: 'locked' });
+    expect(touch).not.toHaveBeenCalled();
+  });
+
+  test('locked requests and activity on an unarmed vault cannot start a timer', async () => {
+    const { ctx, handle_, doLock } = await ready();
+    ctx.autolock.disarm();
+    expect(await handle_({ type: 'vaultActivity' }, popupFillSender)).toEqual({ ok: true });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(doLock).not.toHaveBeenCalled();
+    ctx.doLock();
+    expect(await handle_({ type: 'vaultActivity' }, popupFillSender)).toEqual({ ok: false, error: 'locked' });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test.each(['fillRequest', 'fillTotpRequest'] as const)('successful %s extends the deadline', async type => {
+    const { handle_, entry, doLock, touch } = await ready();
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(await handle_({ type, entryId: entry.id, tabId: 7 }, type === 'fillRequest' ? popupFillSender : inline)).toEqual({ ok: true });
+    await vi.advanceTimersByTimeAsync(9999);
+    expect(doLock).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(doLock).toHaveBeenCalledOnce();
+    expect(touch).toHaveBeenCalledOnce();
+  });
+
+  test('failed fill, TOTP and capture requests do not extend the deadline', async () => {
+    const { handle_, entry, doLock, touch } = await ready();
+    await vi.advanceTimersByTimeAsync(9000);
+    chromeMock.tabs.sendMessage.mockRejectedValue(new Error('disconnected'));
+    expect(await handle_({ type: 'fillRequest', entryId: entry.id, tabId: 7 }, popupFillSender)).toMatchObject({ ok: false });
+    expect(await handle_({ type: 'fillTotpRequest', entryId: entry.id }, inline)).toMatchObject({ ok: false });
+    expect(await handle_({ type: 'getTotpCode', entryId: entry.id }, inline)).toEqual({ ok: false, error: 'forbidden' });
+    expect(await handle_({ type: 'previewTotp', config: { ...config, secret: '!' } }, panel)).toMatchObject({ ok: false });
+    expect(await handle_({ type: 'commitCredentialCapture', captureId: 'missing' }, inline)).toMatchObject({ ok: false });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(doLock).toHaveBeenCalledOnce();
+    expect(touch).not.toHaveBeenCalled();
+  });
+
+  test.each([true, false])('capture touches only after a successful save: %s', async success => {
+    const { ctx, handle_, doLock, touch } = await ready();
+    const { prompt } = await stageAndGetPrompt(handle_, { username: 'new-user', password: 'new-password' });
+    const captureId = (prompt as { prompt: { captureId: string } }).prompt.captureId;
+    vi.spyOn(ctx.vault, 'serialize').mockResolvedValue(new ArrayBuffer(1));
+    if (!success) vi.mocked(writeBytes).mockRejectedValueOnce(new Error('disk full'));
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(await handle_({ type: 'commitCredentialCapture', captureId }, inline)).toMatchObject({ ok: success });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(doLock).toHaveBeenCalledTimes(success ? 0 : 1);
+    expect(touch).toHaveBeenCalledTimes(success ? 1 : 0);
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(doLock).toHaveBeenCalledOnce();
+  });
+
+  test.each(['fillRequest', 'fillTotpRequest', 'commitCredentialCapture'] as const)(
+    '%s completing after lock cannot restart the timer', async type => {
+      const { ctx, handle_, entry, touch, doLock } = await ready();
+      const gate = Promise.withResolvers<void>();
+      const started = Promise.withResolvers<void>();
+      let pending;
+      if (type === 'commitCredentialCapture') {
+        const { prompt } = await stageAndGetPrompt(handle_, { username: 'new-user', password: 'new-password' });
+        const captureId = (prompt as { prompt: { captureId: string } }).prompt.captureId;
+        vi.spyOn(ctx.vault, 'serialize').mockResolvedValue(new ArrayBuffer(1));
+        vi.mocked(writeBytes).mockImplementationOnce(() => { started.resolve(); return gate.promise; });
+        pending = handle_({ type, captureId }, inline);
+      } else {
+        chromeMock.tabs.sendMessage.mockImplementationOnce(() => { started.resolve(); return gate.promise; });
+        pending = handle_({ type, entryId: entry.id, tabId: 7 }, type === 'fillRequest' ? popupFillSender : inline);
+      }
+      await started.promise;
+      await vi.advanceTimersByTimeAsync(10_000);
+      gate.resolve();
+      expect(await pending).toEqual({ ok: false, error: 'locked' });
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(doLock).toHaveBeenCalledOnce();
+      expect(touch).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+});
+
 describe('fillRequest', () => {
   test('nonexistent entry -> noEntry', async () => {
     const { handle_ } = makeCtx();
