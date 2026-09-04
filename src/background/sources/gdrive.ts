@@ -50,18 +50,28 @@ export class GDriveProvider implements CloudProvider {
   }
 
   async getRevision(fileId: string): Promise<string> {
-    const res = await fetch(`${API}/files/${fileId}?fields=headRevisionId`, { headers: await this.authHeader() });
+    const res = await fetch(`${API}/files/${fileId}?fields=headRevisionId`, {
+      headers: await this.authHeader(), cache: 'no-store',
+    });
     if (!res.ok) throw new Error('gdriveMetadata');
-    const data = await res.json() as { headRevisionId: string };
+    const data = await res.json() as { headRevisionId?: unknown } | null;
+    if (typeof data?.headRevisionId !== 'string' || !data.headRevisionId) throw new Error('gdriveMetadata');
     return data.headRevisionId;
   }
 
   async download(fileId: string): Promise<{ bytes: ArrayBuffer; rev: string }> {
-    const res = await fetch(`${API}/files/${fileId}?alt=media`, { headers: await this.authHeader() });
-    if (!res.ok) throw new Error('gdriveDownload');
-    const bytes = await res.arrayBuffer();
-    const rev = await this.getRevision(fileId);
-    return { bytes, rev };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const before = await this.getRevision(fileId);
+      const res = await fetch(`${API}/files/${fileId}?alt=media`, {
+        headers: await this.authHeader(), cache: 'no-store',
+      });
+      if (!res.ok) throw new Error('gdriveDownload');
+      const bytes = await res.arrayBuffer();
+      const after = await this.getRevision(fileId);
+      if (before === after) return { bytes, rev: after };
+      // Discard bytes read across a revision change and retry the complete download.
+    }
+    throw new Error('gdriveDownloadChanged');
   }
 
   async upload(fileId: string, bytes: ArrayBuffer, basedOnRev: string): Promise<UploadResult> {
