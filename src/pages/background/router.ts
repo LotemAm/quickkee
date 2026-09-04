@@ -190,8 +190,25 @@ function defaultEntryTitle(url: string): string {
 /** Builds the SW message handler bound to `ctx`. Moved verbatim from index.ts (plan 009). */
 export function makeRouter(ctx: SwContext) {
   return async function handle_(req: Request, sender: chrome.runtime.MessageSender = {}): Promise<Response> {
-    ctx.autolock.touch();
     switch (req.type) {
+      // Only explicit input and successful fill/capture actions count as activity.
+      // Polls, TOTP refreshes and future status subscriptions must never touch here.
+      case 'vaultActivity': {
+        if (sender.id !== chrome.runtime.id) return { ok: false, error: 'forbidden' };
+        if (!ctx.vault.isOpen()) return { ok: false, error: 'locked' };
+        const token = ctx.vault.lifecycleGeneration;
+        const fromPage = isExtensionPage(sender, 'popup', 'panel') &&
+          new URL(sender.url!).protocol === 'chrome-extension:' &&
+          ['/src/pages/popup/index.html', '/src/pages/panel/index.html'].includes(new URL(sender.url!).pathname);
+        if (!fromPage) {
+          if (!Number.isInteger(sender.tab?.id) || sender.tab!.id! < 0) return { ok: false, error: 'forbidden' };
+          try { await resolveInlineFillTarget(sender, ''); }
+          catch { return { ok: false, error: 'forbidden' }; }
+        }
+        if (!ctx.vault.isSessionCurrent(token)) return { ok: false, error: 'locked' };
+        ctx.autolock.touch();
+        return { ok: true };
+      }
       case 'unlock': {
         const handle = await loadHandle();
         if (!handle) return { ok: false, error: 'noFile' };
@@ -534,7 +551,9 @@ export function makeRouter(ctx: SwContext) {
             } catch { /* Disappearing documents never justify a broader retry. */ }
             if (!ctx.vault.isSessionCurrent(token)) return { ok: false, error: 'locked' };
           }
-          return delivered ? { ok: true } : { ok: false, error: 'fillDeliveryFailed' };
+          if (!delivered) return { ok: false, error: 'fillDeliveryFailed' };
+          ctx.autolock.touch();
+          return { ok: true };
         } catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'fillDeliveryFailed' }; }
       }
       case 'fillTotpRequest': {
@@ -554,6 +573,7 @@ export function makeRouter(ctx: SwContext) {
           if (!valid) return { ok: false, error: 'fillDeliveryFailed' };
           await chrome.tabs.sendMessage(target.tabId, { type: 'fillTotp', code }, { documentId: target.documentId });
           if (!ctx.vault.isSessionCurrent(token)) return { ok: false, error: 'locked' };
+          ctx.autolock.touch();
           return { ok: true };
         } catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'fillDeliveryFailed' }; }
       }
@@ -631,6 +651,7 @@ export function makeRouter(ctx: SwContext) {
         const authority = contentAuthority(sender);
         if (!authority) return { ok: false, error: 'forbidden' };
         if (!ctx.vault.isOpen()) return { ok: false, error: 'locked' };
+        const token = ctx.vault.lifecycleGeneration;
         const record = await ctx.credentialCaptures.authorizeAction(req.captureId, authority);
         if (!record) return { ok: false, error: 'forbidden' };
         if (!ctx.vault.isOpen()) return { ok: false, error: 'locked' };
@@ -641,6 +662,8 @@ export function makeRouter(ctx: SwContext) {
           const classification = classifyCapture(record, ctx.vault);
           if (classification.identical) {
             await ctx.credentialCaptures.dismiss(record.id, authority);
+            if (!ctx.vault.isSessionCurrent(token)) return { ok: false, error: 'locked' };
+            ctx.autolock.touch();
             return { ok: true };
           }
           const matching = ctx.vault.entriesForUrl(record.sourceUrl).filter(entry => !entry.isCard);
@@ -680,6 +703,8 @@ export function makeRouter(ctx: SwContext) {
         const saved = await persistVault(ctx);
         if (!saved.ok) return saved;
         await ctx.credentialCaptures.dismiss(record.id, authority);
+        if (!ctx.vault.isSessionCurrent(token)) return { ok: false, error: 'locked' };
+        ctx.autolock.touch();
         ctx.refreshAllIcons();
         return { ok: true };
       }

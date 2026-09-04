@@ -4,6 +4,7 @@ import {
 } from '../../content/detect';
 import { showPopup, hidePopup } from '../../content/inlinePopup';
 import { sendToSW } from '../../shared/messages';
+import { recordVaultActivity } from '../../shared/vaultActivity';
 import { maskCardNumber } from '../../shared/cardMask';
 import { CARDHOLDER_NAME_KEY } from '../../shared/entry';
 import { extractCredentialCandidate, extractUsernameCandidate, SubmitGestureTracker } from '../../content/credentialCapture';
@@ -93,6 +94,7 @@ document.addEventListener('focusin', ev => {
       if (!res.ok || res.summaries.length === 0) return;
       const cardEntries = res.summaries.map(s => ({ ...s, username: maskCardNumber(s.username) }));
       showPopup(el, cardEntries, entry => {
+        void recordVaultActivity();
         void sendToSW({ type: 'getEntry', entryId: entry.id }).then(full => {
           if (!full.ok || !full.entry) return;
           const cardholderName = full.entry.fields.find(f => f.key === CARDHOLDER_NAME_KEY)?.value ?? '';
@@ -109,7 +111,10 @@ document.addEventListener('focusin', ev => {
       if (!res.ok) return;
       const totpEntries = res.summaries.filter(summary => !summary.isCard && summary.hasTotp);
       if (totpEntries.length === 0) return;
-      showPopup(el, totpEntries, entry => { void sendToSW({ type: 'fillTotpRequest', entryId: entry.id }); });
+      showPopup(el, totpEntries, entry => {
+        void recordVaultActivity();
+        void sendToSW({ type: 'fillTotpRequest', entryId: entry.id });
+      });
     });
     return;
   }
@@ -121,6 +126,7 @@ document.addEventListener('focusin', ev => {
     const loginEntries = res.summaries.filter(s => !s.isCard);
     if (loginEntries.length === 0) return;
     showPopup(el, loginEntries, entry => {
+      void recordVaultActivity();
       void sendToSW({ type: 'getEntry', entryId: entry.id }).then(full => {
         if (full.ok && full.entry) fillAndHide(fields, full.entry.username, full.entry.password);
       });

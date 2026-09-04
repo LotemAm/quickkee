@@ -3,6 +3,7 @@ import { Save, Loader2, FolderClosed, FolderOpen, FileText, CreditCard, X, Lock,
   ChevronRight, ChevronDown, Plus, Pencil, Trash2, Check, Search, Paperclip, KeyRound,
   Database, ShieldCheck } from 'lucide-react';
 import { useStatus } from '../../shared/useStatus';
+import { useVaultActivity } from '../../shared/useVaultActivity';
 import { UnlockScreen } from '../../shared/UnlockScreen';
 import { sendToSW } from '../../shared/messages';
 import { lockVault } from '../../shared/lockVault';
@@ -139,6 +140,7 @@ function GroupTree({ node, ops, depth = 0 }: { node: TreeNode; ops: GroupOps; de
 
 export function Panel() {
   const { locked, dirty, refresh } = useStatus();
+  useVaultActivity(!locked);
   const [tree, setTree] = useState<TreeNode | null>(null);
   const [selGroup, setSelGroup] = useState<string | null>(null);
   const [selEntry, setSelEntry] = useState<string | null>(null);

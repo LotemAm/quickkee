@@ -11,6 +11,7 @@ test('sendToSW forwards to chrome.runtime.sendMessage', async () => {
 
 test('sendToSW is typed per-request (type-level only, no runtime assertions)', () => {
   expectTypeOf(sendToSW({ type: 'getTree' })).resolves.toEqualTypeOf<ResponseFor<'getTree'>>();
+  expectTypeOf(sendToSW({ type: 'vaultActivity' })).resolves.toEqualTypeOf<ResponseFor<'vaultActivity'>>();
   expectTypeOf(sendToSW({ type: 'getEntriesForUrl', url: 'x' })).resolves.toEqualTypeOf<ResponseFor<'getEntriesForUrl'>>();
   expectTypeOf(sendToSW({ type: 'getPendingCredentialPrompt' })).resolves.toEqualTypeOf<ResponseFor<'getPendingCredentialPrompt'>>();
   expectTypeOf(sendToSW({ type: 'getPasswordHealthReport' })).resolves.toEqualTypeOf<ResponseFor<'getPasswordHealthReport'>>();
