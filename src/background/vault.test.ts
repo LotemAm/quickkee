@@ -202,6 +202,101 @@ test('mergeRemote unions concurrent edits from a remote clone', async () => {
   expect(check.getEntry(id)?.username).toBe('local-user');
 });
 
+describe('mergeRemote preserves group and attachment edits', () => {
+  beforeEach(() => vi.useFakeTimers({ toFake: ['Date'] }));
+  afterEach(() => vi.useRealTimers());
+
+  async function openClones(withAttachment = false) {
+    const base = new Vault();
+    await base.open(fixture(), 'correct horse', null);
+    const id = base.entriesForUrl('https://github.com')[0].id;
+    if (withAttachment) await base.addAttachment(id, 'note.txt', bytesOf('original bytes'));
+    const baseBytes = await base.serialize();
+
+    const local = new Vault();
+    const remote = new Vault();
+    await local.open(baseBytes, 'correct horse', null);
+    await remote.open(baseBytes, 'correct horse', null);
+    const group = remote['db']!.getDefaultGroup().groups.find(group => group.name === 'Sites')!;
+    const entry = group.entries.find(entry => entry.uuid.id === id)!;
+    // KeePass serialization has second precision; keep real async crypto timers running.
+    vi.setSystemTime(Math.max(Date.now(), group.lastModTime, entry.lastModTime) + 1000);
+    return { local, remote, id, group, entry };
+  }
+
+  async function mergeAndReopen(local: Vault, remote: Vault) {
+    await local.mergeRemote(await remote.serialize());
+    const reopened = new Vault();
+    await reopened.open(await local.serialize(), 'correct horse', null);
+    return reopened;
+  }
+
+  test('renamed group survives merge into an unchanged peer and reopen', async () => {
+    const { local, remote, group } = await openClones();
+    const previousModified = group.lastModTime;
+
+    remote.updateGroup(group.uuid.id, { Name: 'Renamed sites' });
+
+    const reopened = await mergeAndReopen(local, remote);
+    expect(reopened.getTree().children.find(child => child.groupId === group.uuid.id)?.name).toBe('Renamed sites');
+    expect(group.lastModTime).toBeGreaterThan(previousModified);
+    expect(remote.dirty).toBe(true);
+  });
+
+  test.each(['added', 'replaced'] as const)('%s attachment bytes survive merge into an unchanged peer and reopen', async action => {
+    const { local, remote, id, entry } = await openClones(action === 'replaced');
+    const previousModified = entry.lastModTime;
+    const changedBytes = bytesOf('new attachment bytes');
+
+    await remote.addAttachment(id, 'note.txt', changedBytes);
+
+    const reopened = await mergeAndReopen(local, remote);
+    const mergedBytes = reopened.getAttachmentBytes(id, 'note.txt');
+    expect(mergedBytes).not.toBeNull();
+    expect(new Uint8Array(mergedBytes!)).toEqual(new Uint8Array(changedBytes));
+    expect(entry.lastModTime).toBeGreaterThan(previousModified);
+    expect(remote.dirty).toBe(true);
+  });
+
+  test('removed attachment stays absent after merge into an unchanged peer and reopen', async () => {
+    const { local, remote, id, entry } = await openClones(true);
+    const previousModified = entry.lastModTime;
+
+    remote.removeAttachment(id, 'note.txt');
+
+    const reopened = await mergeAndReopen(local, remote);
+    expect(reopened.getAttachmentBytes(id, 'note.txt')).toBeNull();
+    expect(reopened.getEntry(id)?.attachments).toEqual([]);
+    expect(entry.lastModTime).toBeGreaterThan(previousModified);
+    expect(remote.dirty).toBe(true);
+  });
+
+  test("removing a missing attachment throws 'no attachment' without stamping the entry", async () => {
+    const { remote, id, entry } = await openClones(true);
+    const previousModified = entry.lastModTime;
+
+    expect(() => remote.removeAttachment(id, 'nope.txt')).toThrow('no attachment');
+
+    expect(entry.lastModTime).toBe(previousModified);
+    expect(remote.dirty).toBe(false);
+    expect(new TextDecoder().decode(remote.getAttachmentBytes(id, 'note.txt')!)).toBe('original bytes');
+  });
+
+  test('failed binary creation preserves the attachment, timestamp, and dirty state', async () => {
+    const { remote, id, entry } = await openClones(true);
+    const previousModified = entry.lastModTime;
+    const createBinary = vi.spyOn(remote['db']!, 'createBinary').mockRejectedValueOnce(new Error('binary creation failed'));
+    try {
+      await expect(remote.addAttachment(id, 'note.txt', bytesOf('replacement bytes'))).rejects.toThrow('binary creation failed');
+
+      expect(entry.lastModTime).toBe(previousModified);
+      expect(remote.dirty).toBe(false);
+      expect(new TextDecoder().decode(remote.getAttachmentBytes(id, 'note.txt')!)).toBe('original bytes');
+      expect(remote['db']!.binaries.getAll()).toHaveLength(1);
+    } finally { createBinary.mockRestore(); }
+  });
+});
+
 test('serialize does not clear dirty', async () => {
   const v = new Vault(); await v.open(fixture(), 'correct horse', null);
   const id = v.entriesForUrl('https://github.com')[0].id;
@@ -455,12 +550,6 @@ test('removeAttachment: getAttachment returns null and the pool entry is gone', 
 
   const db = v['db'] as import('kdbxweb').Kdbx;
   expect(db.binaries.getAll()).toHaveLength(0);
-});
-
-test("removeAttachment('nonexistent') throws 'no attachment'", async () => {
-  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
-  const id = v.entriesForUrl('https://github.com')[0].id;
-  expect(() => v.removeAttachment(id, 'nope.txt')).toThrow('no attachment');
 });
 
 test('attachment bytes round-trip exactly through serialize + reload', async () => {
