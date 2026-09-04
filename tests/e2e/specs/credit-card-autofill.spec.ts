@@ -1,4 +1,7 @@
-import { test, expect, openExtensionPage, installDb } from '../helpers';
+import {
+  test, expect, openExtensionPage, installDb, closedInlinePopupText,
+  clickClosedInlineEntry, attemptSyntheticInlineSelection,
+} from '../helpers';
 
 /** Marks the seeded "Localhost Login" entry as a card (number/CVV/cardholder/expiry) via
  *  a direct `updateEntry` SW call — bypasses the panel UI, which is already covered by
@@ -31,8 +34,14 @@ test('card form: focusing a detected cc-number field shows only card entries and
   await site.waitForLoadState('load');
 
   await site.locator('input[autocomplete="cc-number"]').click();
-  await expect(site.getByText('Localhost Login')).toBeVisible();
-  await site.getByText('Localhost Login').click();
+  await expect.poll(() => closedInlinePopupText(site)).toContain('Localhost Login');
+  expect(await site.locator('[data-quickkee-popup]').evaluate(element => element.shadowRoot)).toBeNull();
+  await attemptSyntheticInlineSelection(site);
+  await site.waitForTimeout(300);
+  for (const kind of ['cc-number', 'cc-name', 'cc-csc', 'cc-exp']) {
+    await expect(site.locator(`input[autocomplete="${kind}"]`)).toHaveValue('');
+  }
+  await clickClosedInlineEntry(site, 'Localhost Login');
 
   await expect(site.locator('input[autocomplete="cc-number"]')).toHaveValue('4111111111111111');
   await expect(site.locator('input[autocomplete="cc-name"]')).toHaveValue('Jane Doe');
@@ -56,7 +65,8 @@ test('card form popup masks the card number in the entry picker', async ({ conte
   await site.waitForLoadState('load');
 
   await site.locator('input[autocomplete="cc-number"]').click();
-  await expect(site.getByText('•••• 1111')).toBeVisible();
+  await expect.poll(() => closedInlinePopupText(site)).toContain('•••• 1111');
+  expect(await closedInlinePopupText(site)).not.toContain('4111111111111111');
 });
 
 test('login form excludes card-marked entries from the inline picker', async ({ context, extensionId, http }) => {
@@ -98,8 +108,8 @@ test('card form with <select>-based expiry (real-world shape, e.g. fill.dev) fil
   await site.waitForLoadState('load');
 
   await site.locator('input[autocomplete="cc-number"]').click();
-  await expect(site.getByText('Localhost Login')).toBeVisible();
-  await site.getByText('Localhost Login').click();
+  await expect.poll(() => closedInlinePopupText(site)).toContain('Localhost Login');
+  await site.keyboard.press('Enter');
 
   await expect(site.locator('input[autocomplete="cc-number"]')).toHaveValue('4111111111111111');
   await expect(site.locator('input[autocomplete="cc-name"]')).toHaveValue('Jane Doe');
@@ -130,8 +140,8 @@ test('a card entry with no URL (not tied to one site) still shows in the inline 
   await site.waitForLoadState('load');
 
   await site.locator('input[autocomplete="cc-number"]').click();
-  await expect(site.getByText('Localhost Login')).toBeVisible();
-  await site.getByText('Localhost Login').click();
+  await expect.poll(() => closedInlinePopupText(site)).toContain('Localhost Login');
+  await clickClosedInlineEntry(site, 'Localhost Login');
   await expect(site.locator('input[autocomplete="cc-number"]')).toHaveValue('4111111111111111');
 });
 
@@ -151,8 +161,10 @@ test('card form embedded in an <iframe> (e.g. Google Wallet\'s payment dialog) s
 
   const frame = site.frameLocator('iframe');
   await frame.locator('input[autocomplete="cc-number"]').click();
-  await expect(frame.getByText('Localhost Login')).toBeVisible();
-  await frame.getByText('Localhost Login').click();
+  await expect(frame.locator('[data-quickkee-popup]')).toBeVisible();
+  expect(await frame.locator('[data-quickkee-popup]').evaluate(element => element.shadowRoot)).toBeNull();
+  await expect.poll(() => closedInlinePopupText(site)).toContain('Localhost Login');
+  await frame.locator('input[autocomplete="cc-number"]').press('Enter');
 
   await expect(frame.locator('input[autocomplete="cc-number"]')).toHaveValue('4111111111111111');
   await expect(frame.locator('input[autocomplete="cc-name"]')).toHaveValue('Jane Doe');

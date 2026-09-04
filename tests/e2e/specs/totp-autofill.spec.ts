@@ -1,5 +1,8 @@
 import kdbxweb from 'kdbxweb';
-import { test, expect, openExtensionPage, installDb, openPopupForTab, reReadKdbx, swCmd } from '../helpers';
+import {
+  test, expect, openExtensionPage, installDb, openPopupForTab, reReadKdbx, swCmd,
+  closedInlinePopupText, closedInlinePopupProgress, clickClosedInlineEntry, attemptSyntheticInlineSelection,
+} from '../helpers';
 
 const TOTP_SECRET = 'JBSWY3DPEHPK3PXP';
 
@@ -45,12 +48,20 @@ test('TOTP fills through normal autofill and the focused inline picker shows a l
   await expect(site.locator('#password')).toHaveValue('e2e-pass');
   await expect(site.locator('#otp')).toHaveValue(/^\d{6}$/);
 
+  await site.locator('#username').fill('');
+  await site.locator('#password').fill('');
   await site.locator('#otp').fill('');
   await site.locator('h1').click();
   await site.locator('#otp').click();
-  await expect(site.getByText('Localhost Login')).toBeVisible();
-  await expect(site.locator('[role="progressbar"]')).toBeVisible();
-  await site.getByText('Localhost Login').click();
+  await expect.poll(() => closedInlinePopupText(site)).toContain('Localhost Login');
+  expect(await site.locator('[data-quickkee-popup]').evaluate(element => element.shadowRoot)).toBeNull();
+  const progress = await closedInlinePopupProgress(site);
+  expect(progress.remaining).toBeGreaterThan(0);
+  await expect.poll(async () => (await closedInlinePopupProgress(site)).width).not.toBe(progress.width);
+  await attemptSyntheticInlineSelection(site);
+  await site.waitForTimeout(300);
+  for (const id of ['username', 'password', 'otp']) await expect(site.locator(`#${id}`)).toHaveValue('');
+  await clickClosedInlineEntry(site, 'Localhost Login');
   await expect(site.locator('#otp')).toHaveValue(/^\d{6}$/);
   await expect(site.locator('[data-quickkee-popup]')).toBeHidden();
 });
@@ -79,9 +90,9 @@ test('TOTP lifecycle: create, use from every surface, then remove it', async ({ 
 
   // Inline picker: the focused OTP field offers only TOTP-capable entries and fills a code.
   await site.locator('#otp').click();
-  await expect(site.getByText('TOTP Lifecycle')).toBeVisible();
-  await expect(site.locator('[role="progressbar"]')).toBeVisible();
-  await site.getByText('TOTP Lifecycle').click();
+  await expect.poll(() => closedInlinePopupText(site)).toContain('TOTP Lifecycle');
+  expect((await closedInlinePopupProgress(site)).remaining).toBeGreaterThan(0);
+  await site.keyboard.press('Enter');
   await expect(site.locator('#otp')).toHaveValue(/^\d{6}$/);
 
   // Sidebar: opening the saved entry renders a live code and supports copying it.

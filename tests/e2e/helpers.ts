@@ -193,20 +193,64 @@ function attribute(node: CdpNode, name: string): string | null {
   return index >= 0 ? attrs[index + 1] : null;
 }
 
-async function withPromptNodes<T>(page: Page, run: (nodes: CdpNode[], client: Awaited<ReturnType<BrowserContext['newCDPSession']>>) => Promise<T>): Promise<T> {
+type CdpClient = Awaited<ReturnType<BrowserContext['newCDPSession']>>;
+type WithNodes<T> = (nodes: CdpNode[], client: CdpClient) => Promise<T>;
+
+async function withClosedHostNodes<T>(page: Page, hostAttribute: string, run: WithNodes<T>): Promise<T> {
   const client = await page.context().newCDPSession(page);
   try {
     await client.send('DOM.enable');
     const documentResult = await client.send('DOM.getDocument', { depth: -1, pierce: true }) as unknown as { root: CdpNode };
     const nodes = descendants(documentResult.root);
-    const host = nodes.find(node => attribute(node, 'data-quickkee-credential-prompt') === 'true');
-    if (!host) throw new Error('QuickKee credential prompt not found');
+    const host = nodes.find(node => attribute(node, hostAttribute) === 'true');
+    if (!host) throw new Error(`QuickKee host ${hostAttribute} not found`);
     return await run(descendants(host), client);
   } finally { await client.detach(); }
 }
 
+function withPromptNodes<T>(page: Page, run: WithNodes<T>): Promise<T> {
+  return withClosedHostNodes(page, 'data-quickkee-credential-prompt', run);
+}
+
+function nodesText(nodes: CdpNode[]): string {
+  return nodes.filter(node => node.nodeName === '#text').map(node => node.nodeValue).join(' ').replace(/\s+/g, ' ').trim();
+}
+
 export async function closedCredentialPromptText(page: Page): Promise<string> {
-  return withPromptNodes(page, async nodes => nodes.filter(node => node.nodeName === '#text').map(node => node.nodeValue).join(' ').replace(/\s+/g, ' ').trim());
+  return withPromptNodes(page, async nodes => nodesText(nodes));
+}
+
+export async function closedInlinePopupText(page: Page): Promise<string> {
+  return withClosedHostNodes(page, 'data-quickkee-popup', async nodes => nodesText(nodes));
+}
+
+export async function closedInlinePopupProgress(page: Page): Promise<{ remaining: number; width: string }> {
+  return withClosedHostNodes(page, 'data-quickkee-popup', async nodes => {
+    const bar = nodes.find(node => attribute(node, 'role') === 'progressbar' && attribute(node, 'aria-label') === 'TOTP time remaining');
+    if (!bar) throw new Error('Inline TOTP progress bar not found');
+    return { remaining: Number(attribute(bar, 'aria-valuenow')), width: attribute(bar.children![0], 'style') ?? '' };
+  });
+}
+
+export async function clickClosedInlineEntry(page: Page, title: string): Promise<void> {
+  await withClosedHostNodes(page, 'data-quickkee-popup', async (nodes, client) => {
+    const row = nodes.find(node => attribute(node, 'class')?.split(' ').includes('e') &&
+      node.children?.some(child => attribute(child, 'class') === 't' && nodesText(descendants(child)) === title));
+    if (!row) throw new Error(`Inline entry ${title} not found`);
+    await clickCdpNode(row, client);
+  });
+}
+
+/** Page-world attacks must remain synthetic; successful selection uses browser input below. */
+export async function attemptSyntheticInlineSelection(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const host = document.querySelector('[data-quickkee-popup]')!;
+    const target = host.shadowRoot?.querySelector('.e') ?? host;
+    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, composed: true }));
+    for (const key of ['ArrowDown', 'Enter']) {
+      document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    }
+  });
 }
 
 export async function closedCredentialPromptPrimaryDisabled(page: Page): Promise<boolean> {
@@ -251,14 +295,19 @@ export async function clickClosedCredentialAction(page: Page, action: 'primary' 
   await withPromptNodes(page, async (nodes, client) => {
     const button = nodes.find(node => attribute(node, 'data-action') === action);
     if (!button) throw new Error(`Credential prompt ${action} action not found`);
-    const { object } = await client.send('DOM.resolveNode', { backendNodeId: button.backendNodeId });
-    const result = await client.send('Runtime.callFunctionOn', {
-      objectId: object.objectId,
-      functionDeclaration: 'function(){ const r=this.getBoundingClientRect(); return { x:r.left+r.width/2, y:r.top+r.height/2 }; }',
-      returnByValue: true,
-    });
-    const point = result.result.value as { x: number; y: number };
-    await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 });
-    await client.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+    await clickCdpNode(button, client);
   });
+}
+
+/** For main-frame nodes. Use the focused frame's keyboard for iframe selections. */
+async function clickCdpNode(node: CdpNode, client: CdpClient): Promise<void> {
+  const { object } = await client.send('DOM.resolveNode', { backendNodeId: node.backendNodeId });
+  const result = await client.send('Runtime.callFunctionOn', {
+    objectId: object.objectId,
+    functionDeclaration: 'function(){ const r=this.getBoundingClientRect(); return { x:r.left+r.width/2, y:r.top+r.height/2 }; }',
+    returnByValue: true,
+  });
+  const point = result.result.value as { x: number; y: number };
+  await client.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+  await client.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 });
 }
