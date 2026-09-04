@@ -31,19 +31,29 @@ const str = (v: unknown): string =>
 export class Vault {
   private db: kdbxweb.Kdbx | null = null;
   private creds: kdbxweb.Credentials | null = null;
+  private generation = 0;
   dirty = false;
 
-  async open(bytes: ArrayBuffer, password: string | null, keyFile: ArrayBuffer | null): Promise<void> {
+  /** Identity of the current lifecycle, unchanged by ordinary entry edits. */
+  get lifecycleGeneration(): number { return this.generation; }
+  isSessionCurrent(token: number): boolean { return this.isOpen() && token === this.generation; }
+
+  async open(bytes: ArrayBuffer, password: string | null, keyFile: ArrayBuffer | null): Promise<number> {
+    const generation = this.generation;
     registerArgon2();
     const pv = password ? kdbxweb.ProtectedValue.fromString(password) : null;
     const creds = new kdbxweb.Credentials(pv, keyFile);
-    this.db = await kdbxweb.Kdbx.load(bytes, creds);
+    const db = await kdbxweb.Kdbx.load(bytes, creds);
+    // A lock or another successful open owns the lifecycle now.
+    if (generation !== this.generation) throw new Error('staleSession');
+    this.db = db;
     this.creds = creds;
     this.dirty = false;
+    return ++this.generation;
   }
 
   isOpen() { return this.db !== null; }
-  lock() { this.db = null; this.creds = null; this.dirty = false; }
+  lock() { ++this.generation; this.db = null; this.creds = null; this.dirty = false; }
 
   private get root() { if (!this.db) throw new Error('locked'); return this.db.getDefaultGroup(); }
 

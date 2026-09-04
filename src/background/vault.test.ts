@@ -2,6 +2,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import * as kdbxweb from 'kdbxweb';
+import { vi } from 'vitest';
 import { Vault, isInvalidKey } from './vault';
 import { CARD_FLAG_KEY, OTP_FIELD_KEY } from '../shared/entry';
 
@@ -32,6 +34,49 @@ test('open + read entry by url', async () => {
   expect(matches[0].username).toBe('octocat');
   expect(matches[0].password).toBe('s3cr3t');
   expect(matches[0].fields.find(f => f.key === 'Token')?.value).toBe('abc123');
+});
+
+test('lifecycle tokens survive edits but expire on lock and successful replacement', async () => {
+  const v = new Vault();
+  expect(v.isSessionCurrent(v.lifecycleGeneration)).toBe(false);
+  const first = await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  v.updateEntry(id, { UserName: 'edited' });
+  expect(v.lifecycleGeneration).toBe(first);
+  expect(v.isSessionCurrent(first)).toBe(true);
+  const replacement = await v.open(fixture(), 'correct horse', null);
+  expect(replacement).toBeGreaterThan(first);
+  expect(v.getEntry(id)?.username).toBe('octocat');
+  expect(v.isSessionCurrent(first)).toBe(false);
+  expect(v.isSessionCurrent(replacement)).toBe(true);
+  v.lock();
+  expect(v.lifecycleGeneration).toBeGreaterThan(replacement);
+  expect(v.isSessionCurrent(replacement)).toBe(false);
+});
+
+test.each(['lock', 'replacement'] as const)('a delayed open cannot restore the vault after %s', async action => {
+  const v = new Vault();
+  await v.open(fixture(), 'correct horse', null);
+  const db = await kdbxweb.Kdbx.load(fixture(), new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString('correct horse')));
+  let finish!: (db: kdbxweb.Kdbx) => void;
+  const load = vi.spyOn(kdbxweb.Kdbx, 'load').mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  try {
+    const opening = v.open(fixture(), 'correct horse', null);
+    if (action === 'lock') v.lock();
+    else await v.open(fixture(), 'correct horse', null);
+    const generation = v.lifecycleGeneration;
+    finish(db);
+    await expect(opening).rejects.toThrow('staleSession');
+    expect(v.lifecycleGeneration).toBe(generation);
+    expect(v.isOpen()).toBe(action === 'replacement');
+  } finally { load.mockRestore(); }
+});
+
+test('failed open preserves the existing lifecycle', async () => {
+  const v = new Vault();
+  const token = await v.open(fixture(), 'correct horse', null);
+  await expect(v.open(fixture(), 'wrong', null)).rejects.toBeDefined();
+  expect(v.isSessionCurrent(token)).toBe(true);
 });
 
 test('tree exposes group + entry', async () => {

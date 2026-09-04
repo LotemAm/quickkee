@@ -10,6 +10,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { vi, beforeEach, describe } from 'vitest';
 import { Vault } from '../../background/vault';
+import * as totp from '../../background/totp';
 import { AutoLock } from '../../background/autolock';
 import { makeRouter, type SwContext } from './router';
 import type { DbSource } from '../../shared/dbSource';
@@ -129,6 +130,7 @@ async function unlockHappyPath(handle_: ReturnType<typeof makeRouter>) {
 let chromeMock: {
   runtime: { id: string };
   tabs: { get: ReturnType<typeof vi.fn>; sendMessage: ReturnType<typeof vi.fn> };
+  webNavigation: { getAllFrames: ReturnType<typeof vi.fn>; getFrame: ReturnType<typeof vi.fn> };
   alarms: { create: ReturnType<typeof vi.fn>; clear: ReturnType<typeof vi.fn> };
 };
 
@@ -137,6 +139,10 @@ beforeEach(() => {
   chromeMock = {
     runtime: { id: 'quickkee' },
     tabs: { get: vi.fn(), sendMessage: vi.fn() },
+    webNavigation: {
+      getAllFrames: vi.fn().mockResolvedValue([browserFrame(0)]),
+      getFrame: vi.fn().mockImplementation(async ({ frameId }) => browserFrame(frameId)),
+    },
     alarms: { create: vi.fn(), clear: vi.fn() },
   };
   vi.stubGlobal('chrome', chromeMock);
@@ -299,11 +305,17 @@ describe('importTotp', () => {
   });
 });
 
+const popupFillSender = { id: 'quickkee', url: 'chrome-extension://quickkee/src/pages/popup/index.html' };
+
+function browserFrame(frameId: number, overrides = {}) {
+  return { frameId, documentId: `document-${frameId}`, documentLifecycle: 'active', errorOccurred: false, url: 'https://github.com/login', ...overrides };
+}
+
 describe('fillRequest', () => {
   test('nonexistent entry -> noEntry', async () => {
     const { handle_ } = makeCtx();
     await unlockHappyPath(handle_);
-    expect(await handle_({ type: 'fillRequest', entryId: 'nope', tabId: 1 })).toEqual({ ok: false, error: 'noEntry' });
+    expect(await handle_({ type: 'fillRequest', entryId: 'nope', tabId: 1 }, popupFillSender)).toEqual({ ok: false, error: 'noEntry' });
   });
 
   test('happy path calls chrome.tabs.sendMessage with fill payload', async () => {
@@ -311,8 +323,8 @@ describe('fillRequest', () => {
     await unlockHappyPath(handle_);
     const entry = ctx.vault.entriesForUrl('https://github.com')[0];
     chromeMock.tabs.get.mockResolvedValue({ url: 'https://github.com/login' });
-    expect(await handle_({ type: 'fillRequest', entryId: entry.id, tabId: 7 })).toEqual({ ok: true });
-    expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(7, { type: 'fill', username: entry.username, password: entry.password });
+    expect(await handle_({ type: 'fillRequest', entryId: entry.id, tabId: 7 }, popupFillSender)).toEqual({ ok: true });
+    expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(7, { type: 'fill', username: entry.username, password: entry.password }, { documentId: 'document-0' });
   });
 
   test('entry with TOTP includes a freshly generated code in the fill payload', async () => {
@@ -325,10 +337,10 @@ describe('fillRequest', () => {
         secret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', algorithm: 'SHA1', digits: 8, period: 30,
       });
       chromeMock.tabs.get.mockResolvedValue({ url: 'https://github.com/login' });
-      expect(await handle_({ type: 'fillRequest', entryId: entry.id, tabId: 7 })).toEqual({ ok: true });
+      expect(await handle_({ type: 'fillRequest', entryId: entry.id, tabId: 7 }, popupFillSender)).toEqual({ ok: true });
       expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(7, {
         type: 'fill', username: entry.username, password: entry.password, totp: '94287082',
-      });
+      }, { documentId: 'document-0' });
     } finally { vi.useRealTimers(); }
   });
 
@@ -337,7 +349,7 @@ describe('fillRequest', () => {
     await unlockHappyPath(handle_);
     const entry = ctx.vault.entriesForUrl('https://github.com')[0];
     chromeMock.tabs.get.mockResolvedValue({ url: 'https://evil.example.com' });
-    expect(await handle_({ type: 'fillRequest', entryId: entry.id, tabId: 7 })).toEqual({ ok: false, error: 'urlMismatch' });
+    expect(await handle_({ type: 'fillRequest', entryId: entry.id, tabId: 7 }, popupFillSender)).toEqual({ ok: false, error: 'urlMismatch' });
     expect(chromeMock.tabs.sendMessage).not.toHaveBeenCalled();
   });
 
@@ -350,10 +362,10 @@ describe('fillRequest', () => {
     chromeMock.tabs.get.mockResolvedValue({ url: 'https://github.com/login' });
 
     const entry = ctx.vault.getEntry(entryId)!;
-    expect(await handle_({ type: 'fillRequest', entryId, tabId: 7 })).toEqual({ ok: true });
+    expect(await handle_({ type: 'fillRequest', entryId, tabId: 7 }, popupFillSender)).toEqual({ ok: true });
     expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(7, {
       type: 'fillCard', number: entry.username, cvv: entry.password, cardholderName: 'Jane Doe', expires,
-    });
+    }, { documentId: 'document-0' });
   });
 
   test('card-marked entry without a Cardholder Name field sends empty cardholderName', async () => {
@@ -363,8 +375,8 @@ describe('fillRequest', () => {
     ctx.vault.updateEntry(entryId, { [CARD_FLAG_KEY]: '1' });
     chromeMock.tabs.get.mockResolvedValue({ url: 'https://github.com/login' });
 
-    await handle_({ type: 'fillRequest', entryId, tabId: 7 });
-    expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(7, expect.objectContaining({ type: 'fillCard', cardholderName: '' }));
+    await handle_({ type: 'fillRequest', entryId, tabId: 7 }, popupFillSender);
+    expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(7, expect.objectContaining({ type: 'fillCard', cardholderName: '' }), { documentId: 'document-0' });
   });
 });
 
@@ -372,7 +384,7 @@ describe('TOTP requests', () => {
   const panelSender = { url: 'chrome-extension://quickkee/src/pages/panel/index.html' } as chrome.runtime.MessageSender;
   const popupSender = { url: 'chrome-extension://quickkee/src/pages/popup/index.html' } as chrome.runtime.MessageSender;
   const contentSender = {
-    url: 'https://github.com/login', frameId: 3,
+    url: 'https://github.com/login', frameId: 3, documentId: 'document-3',
     tab: { id: 7, url: 'https://github.com/login' },
   } as chrome.runtime.MessageSender;
 
@@ -428,7 +440,7 @@ describe('TOTP requests', () => {
         secret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', algorithm: 'SHA1', digits: 8, period: 30,
       });
       expect(await handle_({ type: 'fillTotpRequest', entryId: id }, contentSender)).toEqual({ ok: true });
-      expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(7, { type: 'fillTotp', code: '94287082' }, { frameId: 3 });
+      expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(7, { type: 'fillTotp', code: '94287082' }, { documentId: 'document-3' });
     } finally { vi.useRealTimers(); }
   });
 
@@ -440,6 +452,196 @@ describe('TOTP requests', () => {
     const evil = { ...contentSender, url: 'https://evil.example.com', tab: { id: 7, url: 'https://evil.example.com' } } as chrome.runtime.MessageSender;
     expect(await handle_({ type: 'fillTotpRequest', entryId: id }, evil)).toEqual({ ok: false, error: 'urlMismatch' });
     expect(chromeMock.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('document-bound secret delivery', () => {
+  async function ready(kind: 'login' | 'card' | 'totp' = 'login') {
+    const setup = makeCtx();
+    await unlockHappyPath(setup.handle_);
+    const entry = setup.ctx.vault.entriesForUrl('https://github.com')[0];
+    if (kind === 'card') setup.ctx.vault.updateEntry(entry.id, { [CARD_FLAG_KEY]: '1' });
+    if (kind === 'totp') setup.ctx.vault.setTotpConfig(entry.id, {
+      secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30,
+    });
+    chromeMock.tabs.get.mockResolvedValue({ url: 'https://github.com/login' });
+    chromeMock.webNavigation.getAllFrames.mockResolvedValue([
+      browserFrame(0), browserFrame(3), browserFrame(4, { url: 'https://evil.example/login' }),
+    ]);
+    const popup = () => setup.handle_({ type: 'fillRequest', entryId: entry.id, tabId: 7 }, popupFillSender);
+    const inline = () => setup.handle_({ type: 'fillTotpRequest', entryId: entry.id }, {
+      ...contentSender(), frameId: 3, documentId: 'document-3',
+    });
+    return { ...setup, entry, popup, inline };
+  }
+
+  test.each([
+    {}, contentSender(), { ...popupFillSender, id: 'other' },
+    { ...popupFillSender, url: 'chrome-extension://other/src/pages/popup/index.html' },
+    { ...popupFillSender, url: 'chrome-extension://quickkee/src/pages/panel/index.html' },
+    { ...popupFillSender, url: 'chrome-extension://quickkee/nested/src/pages/popup/index.html' },
+  ])('popup fill rejects non-popup senders before reading secrets: %j', async sender => {
+    const { ctx, handle_, entry } = await ready();
+    const getEntry = vi.spyOn(ctx.vault, 'getEntry');
+    expect(await handle_({ type: 'fillRequest', entryId: entry.id, tabId: 7 }, sender)).toEqual({ ok: false, error: 'forbidden' });
+    expect(getEntry).not.toHaveBeenCalled();
+    expect(chromeMock.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  test.each(['login', 'card', 'totp'] as const)('%s popup sends secrets only to matching document IDs', async kind => {
+    const { popup } = await ready(kind);
+    expect(await popup()).toEqual({ ok: true });
+    expect(chromeMock.tabs.sendMessage.mock.calls.map(([tab, message, options]) => ({ tab, type: message.type, options })))
+      .toEqual(['document-0', 'document-3'].map(documentId => ({ tab: 7, type: kind === 'card' ? 'fillCard' : 'fill', options: { documentId } })));
+    if (kind === 'totp') expect(chromeMock.tabs.sendMessage.mock.calls[0][1].totp).toMatch(/^\d{6}$/);
+  });
+
+  test.each(['login', 'card', 'totp'] as const)('URLless %s popup fills only the top document', async kind => {
+    const { ctx, entry, popup } = await ready(kind);
+    ctx.vault.updateEntry(entry.id, { URL: '' });
+    expect(await popup()).toEqual({ ok: true });
+    expect(chromeMock.tabs.sendMessage).toHaveBeenCalledTimes(1);
+    expect(chromeMock.tabs.sendMessage.mock.calls[0][2]).toEqual({ documentId: 'document-0' });
+  });
+
+  test.each(['login', 'card', 'totp'] as const)('%s popup rejects a replacement top after lookup', async kind => {
+    const { popup } = await ready(kind);
+    const gate = Promise.withResolvers<ReturnType<typeof browserFrame>[]>();
+    const started = Promise.withResolvers<void>();
+    chromeMock.webNavigation.getAllFrames.mockImplementationOnce(() => { started.resolve(); return gate.promise; });
+    const filling = popup();
+    await started.promise;
+    chromeMock.webNavigation.getAllFrames.mockResolvedValue([browserFrame(0, { documentId: 'replacement' }), browserFrame(3)]);
+    gate.resolve([browserFrame(0), browserFrame(3)]);
+    expect(await filling).toEqual({ ok: false, error: 'fillDeliveryFailed' });
+    expect(chromeMock.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  test('a child replaced between lookup and delivery is excluded, while the top still fills', async () => {
+    const { popup } = await ready();
+    chromeMock.webNavigation.getAllFrames.mockResolvedValueOnce([browserFrame(0), browserFrame(3)])
+      .mockResolvedValue([browserFrame(0), browserFrame(3, { documentId: 'replacement' })]);
+    expect(await popup()).toEqual({ ok: true });
+    expect(chromeMock.tabs.sendMessage).toHaveBeenCalledTimes(1);
+    expect(chromeMock.tabs.sendMessage.mock.calls[0][2]).toEqual({ documentId: 'document-0' });
+  });
+
+  test('popup rejects navigation of the top URL after tab lookup', async () => {
+    const { popup } = await ready();
+    chromeMock.webNavigation.getAllFrames.mockResolvedValue([browserFrame(0, { url: 'https://evil.example/' }), browserFrame(3)]);
+    expect(await popup()).toEqual({ ok: false, error: 'urlMismatch' });
+    expect(chromeMock.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  test.each([true, false])('a disappearing child succeeds only if another document was delivered: %s', async topSucceeds => {
+    const { popup } = await ready();
+    chromeMock.tabs.sendMessage.mockImplementation(async (_tab, _message, { documentId }) => {
+      if (documentId === 'document-3' || !topSucceeds) throw new Error('Receiving end does not exist');
+    });
+    expect(await popup()).toEqual(topSucceeds ? { ok: true } : { ok: false, error: 'fillDeliveryFailed' });
+    expect(chromeMock.tabs.sendMessage.mock.calls.map(call => call[2])).toEqual([
+      { documentId: 'document-0' }, { documentId: 'document-3' },
+    ]);
+  });
+
+  test('a disappearing top receiver does not prevent a valid child from succeeding', async () => {
+    const { popup } = await ready();
+    chromeMock.tabs.sendMessage.mockRejectedValueOnce(new Error('No receiver')).mockResolvedValue(undefined);
+    expect(await popup()).toEqual({ ok: true });
+    expect(chromeMock.tabs.sendMessage).toHaveBeenCalledTimes(2);
+  });
+
+  test.each(['tab', 'lookup', 'revalidation'] as const)('lock/reopen with the same entry ID cancels a pending %s lookup', async phase => {
+    const { ctx, entry, popup } = await ready();
+    const gate = Promise.withResolvers<unknown>();
+    const started = Promise.withResolvers<void>();
+    const delay = () => { started.resolve(); return gate.promise; };
+    if (phase === 'tab') chromeMock.tabs.get.mockImplementationOnce(delay);
+    else if (phase === 'lookup') chromeMock.webNavigation.getAllFrames.mockImplementationOnce(delay);
+    else chromeMock.webNavigation.getAllFrames.mockResolvedValueOnce([browserFrame(0)]).mockImplementationOnce(delay);
+    const filling = popup();
+    await started.promise;
+    ctx.vault.lock();
+    await ctx.vault.open(fixture(), PW, null);
+    expect(ctx.vault.getEntry(entry.id)).not.toBeNull();
+    gate.resolve(phase === 'tab' ? { url: 'https://github.com/login' } : [browserFrame(0)]);
+    expect(await filling).toEqual({ ok: false, error: 'locked' });
+    expect(chromeMock.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  test.each(['popup', 'inline'] as const)('deferred TOTP generation is canceled by lock/reopen for %s', async route => {
+    const setup = await ready('totp');
+    const gate = Promise.withResolvers<Awaited<ReturnType<typeof totp.generateTotp>>>();
+    const started = Promise.withResolvers<void>();
+    const generate = vi.spyOn(totp, 'generateTotp').mockImplementationOnce(() => { started.resolve(); return gate.promise; });
+    try {
+      const filling = setup[route]();
+      await started.promise;
+      setup.ctx.vault.lock();
+      await setup.ctx.vault.open(fixture(), PW, null);
+      expect(setup.ctx.vault.getEntry(setup.entry.id)).not.toBeNull();
+      gate.resolve({ code: '123456', period: 30, expiresAt: 60_000 });
+      expect(await filling).toEqual({ ok: false, error: 'locked' });
+      expect(chromeMock.tabs.sendMessage).not.toHaveBeenCalled();
+    } finally { generate.mockRestore(); }
+  });
+
+  test.each(['popup', 'inline'] as const)('a document replaced during deferred TOTP generation gets no %s secret', async route => {
+    const setup = await ready('totp');
+    const gate = Promise.withResolvers<Awaited<ReturnType<typeof totp.generateTotp>>>();
+    const started = Promise.withResolvers<void>();
+    const generate = vi.spyOn(totp, 'generateTotp').mockImplementationOnce(() => { started.resolve(); return gate.promise; });
+    try {
+      const filling = setup[route]();
+      await started.promise;
+      chromeMock.webNavigation.getAllFrames.mockResolvedValue([browserFrame(0, { documentId: 'replacement' })]);
+      chromeMock.webNavigation.getFrame.mockResolvedValue(browserFrame(3, { documentId: 'replacement' }));
+      gate.resolve({ code: '123456', period: 30, expiresAt: 60_000 });
+      expect(await filling).toEqual({ ok: false, error: 'fillDeliveryFailed' });
+      expect(chromeMock.tabs.sendMessage).not.toHaveBeenCalled();
+    } finally { generate.mockRestore(); }
+  });
+
+  test.each(['lookup', 'revalidation'] as const)('inline cancels lock/reopen during %s', async phase => {
+    const { ctx, inline } = await ready('totp');
+    const gate = Promise.withResolvers<ReturnType<typeof browserFrame>>();
+    const started = Promise.withResolvers<void>();
+    if (phase === 'revalidation') chromeMock.webNavigation.getFrame.mockResolvedValueOnce(browserFrame(3));
+    chromeMock.webNavigation.getFrame.mockImplementationOnce(() => { started.resolve(); return gate.promise; });
+    const filling = inline();
+    await started.promise;
+    ctx.vault.lock();
+    await ctx.vault.open(fixture(), PW, null);
+    gate.resolve(browserFrame(3));
+    expect(await filling).toEqual({ ok: false, error: 'locked' });
+    expect(chromeMock.tabs.sendMessage).not.toHaveBeenCalled();
+  });
+
+  test('session replacement after a successful send cancels the remaining recipients', async () => {
+    const { ctx, popup } = await ready();
+    chromeMock.tabs.sendMessage.mockImplementationOnce(async () => { await ctx.vault.open(fixture(), PW, null); });
+    expect(await popup()).toEqual({ ok: false, error: 'locked' });
+    expect(chromeMock.tabs.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  test('ordinary edits do not cancel the fill session', async () => {
+    const { ctx, entry, popup } = await ready();
+    chromeMock.tabs.get.mockImplementationOnce(async () => {
+      ctx.vault.updateEntry(entry.id, { Title: 'Edited title' });
+      return { url: 'https://github.com/login' };
+    });
+    expect(await popup()).toEqual({ ok: true });
+  });
+
+  test('missing metadata and failed inline sends never fall back to frame IDs or broadcast', async () => {
+    const { inline } = await ready('totp');
+    chromeMock.webNavigation.getFrame.mockResolvedValueOnce(null);
+    expect(await inline()).toEqual({ ok: false, error: 'noFillTargets' });
+    expect(chromeMock.tabs.sendMessage).not.toHaveBeenCalled();
+    chromeMock.tabs.sendMessage.mockRejectedValue(new Error('No receiver'));
+    expect(await inline()).toEqual({ ok: false, error: 'No receiver' });
+    expect(chromeMock.tabs.sendMessage).toHaveBeenCalledTimes(1);
+    expect(chromeMock.tabs.sendMessage.mock.calls[0][2]).toEqual({ documentId: 'document-3' });
   });
 });
 

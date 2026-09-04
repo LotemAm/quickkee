@@ -126,6 +126,22 @@ const CARD_IFRAME_PAGE = `<!doctype html><html><body>
 <iframe src="/card" title="payment form"></iframe>
 </body></html>`;
 
+// Every document exposes all three secret destinations so cross-origin leakage is observable.
+function autofillFramePage(children = ''): string {
+  return `<!doctype html><html><body><h1>Autofill boundary</h1>
+<form>
+  <input id="username" autocomplete="username" />
+  <input id="password" type="password" autocomplete="current-password" />
+  <input id="otp" autocomplete="one-time-code" inputmode="numeric" maxlength="6" />
+</form>
+<form>
+  <input id="cc-number" autocomplete="cc-number" />
+  <input id="cc-name" autocomplete="cc-name" />
+  <input id="cc-exp" autocomplete="cc-exp" placeholder="MM/YY" />
+  <input id="cc-csc" autocomplete="cc-csc" />
+</form>${children}</body></html>`;
+}
+
 // Two-step (username -> password) fixture for plan 018's spike (shape "a":
 // a plain, full-page GET form navigation from step one to step two).
 // The identifier field is type="text" (not "email"): QuickKee's real
@@ -216,7 +232,13 @@ const CREDENTIAL_LANDING_PAGE = '<!doctype html><html><body><h1>Account page</h1
 export async function startHttpFixture() {
   const server = http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'text/html' });
-    if (req.url === '/single') res.end(SINGLE_STEP_PAGE);
+    if (req.url === '/autofill-frames') {
+      const port = (server.address() as AddressInfo).port;
+      res.end(autofillFramePage(`<iframe id="matching" title="matching form" src="http://localhost:${port}/autofill-frame"></iframe>
+<iframe id="unrelated" title="unrelated form" src="http://127.0.0.1:${port}/autofill-frame"></iframe>`));
+    }
+    else if (req.url === '/autofill-frame') res.end(autofillFramePage());
+    else if (req.url === '/single') res.end(SINGLE_STEP_PAGE);
     else if (req.url === '/otp') res.end(OTP_PAGE);
     else if (req.url === '/totp-qr') res.end(TOTP_QR_PAGE);
     else if (req.url === '/step1') res.end(STEP1_PAGE);
@@ -246,6 +268,7 @@ export async function startHttpFixture() {
     cardUrl: `http://localhost:${port}/card`,
     cardSelectUrl: `http://localhost:${port}/card-select`,
     cardIframeUrl: `http://localhost:${port}/card-iframe`,
+    autofillFramesUrl: `http://localhost:${port}/autofill-frames`,
     credentialLoginUrl: `http://localhost:${port}/credential-login`,
     newCredentialLoginUrl: `http://127.0.0.1:${port}/credential-login`,
     credentialSignupUrl: `http://127.0.0.1:${port}/credential-signup`,
