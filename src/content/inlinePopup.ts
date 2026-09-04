@@ -6,6 +6,7 @@ type EntryStub = Pick<EntrySummary, 'id' | 'title' | 'username'>
   & Partial<Pick<EntrySummary, 'hasTotp' | 'totpPeriod'>>;
 
 let host: HTMLElement | null = null;
+let root: ShadowRoot | null = null;
 let activeIndex = 0;
 let currentEntries: EntryStub[] = [];
 let currentField: HTMLElement | null = null;
@@ -15,7 +16,7 @@ let dark = false;
 let progressTimer: ReturnType<typeof setInterval> | null = null;
 
 function updateProgressBars(): void {
-  const shadow = host?.shadowRoot;
+  const shadow = root;
   if (!shadow) return;
   shadow.querySelectorAll<HTMLElement>('.bar[data-period]').forEach(bar => {
     const period = Number(bar.dataset.period);
@@ -37,10 +38,10 @@ function ensureHost(): ShadowRoot {
     host = document.createElement('div');
     host.setAttribute('data-quickkee-popup', 'true');
     host.style.cssText = 'position:absolute;z-index:2147483647;display:none';
-    host.attachShadow({ mode: 'open' });
+    root = host.attachShadow({ mode: 'closed' });
     document.body.appendChild(host);
   }
-  return host.shadowRoot!;
+  return root!;
 }
 
 function render(shadow: ShadowRoot): void {
@@ -100,7 +101,11 @@ function render(shadow: ShadowRoot): void {
       fill.style.width = `${(remainingMs / periodMs) * 100}%`;
       bar.appendChild(fill); row.appendChild(bar);
     }
-    row.addEventListener('mousedown', ev => { ev.preventDefault(); select(i); });
+    row.addEventListener('mousedown', ev => {
+      if (!ev.isTrusted) return;
+      ev.preventDefault();
+      select(i);
+    });
 
     panel.appendChild(row);
   });
@@ -111,27 +116,29 @@ function render(shadow: ShadowRoot): void {
 
 function select(i: number): void {
   const entry = currentEntries[i];
-  if (entry && currentOnSelect) currentOnSelect(entry);
+  const onSelect = currentOnSelect;
   hidePopup();
+  if (entry && onSelect) onSelect(entry);
 }
 
 function onKeydown(ev: KeyboardEvent): void {
-  if (!host || host.style.display === 'none' || currentEntries.length === 0) return;
+  if (!ev.isTrusted || !host || host.style.display === 'none' || currentEntries.length === 0) return;
   if (ev.key === 'ArrowDown') {
     ev.preventDefault();
     activeIndex = (activeIndex + 1) % currentEntries.length;
-    render(host.shadowRoot!);
+    render(root!);
   } else if (ev.key === 'ArrowUp') {
     ev.preventDefault();
     activeIndex = (activeIndex - 1 + currentEntries.length) % currentEntries.length;
-    render(host.shadowRoot!);
+    render(root!);
   } else if (ev.key === 'Enter') {
     ev.preventDefault();
     select(activeIndex);
   } else if (ev.key === 'Escape') {
     ev.preventDefault();
+    const field = currentField;
     hidePopup();
-    currentField?.focus();
+    field?.focus();
   }
 }
 
@@ -160,5 +167,14 @@ export function showPopup(field: HTMLElement, entries: EntryStub[], onSelect: (e
 
 export function hidePopup(): void {
   if (host) host.style.display = 'none';
+  root?.replaceChildren();
+  currentEntries = [];
+  currentOnSelect = null;
+  currentField = null;
+  activeIndex = 0;
   if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+  if (keydownBound) {
+    document.removeEventListener('keydown', onKeydown, true);
+    keydownBound = false;
+  }
 }
