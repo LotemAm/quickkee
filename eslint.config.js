@@ -5,7 +5,7 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import jsxA11y from 'eslint-plugin-jsx-a11y';
 
 export default tseslint.config(
-  { ignores: ['**/dist_chrome/**', '**/playwright-report/**', '**/test-results/**', '**/node_modules/**', 'plans/**', 'docs/**', 'public/**', '.claude/worktrees/**'] },
+  { ignores: ['**/dist_chrome/**', '**/dist_firefox/**', '**/playwright-report/**', '**/test-results/**', '**/node_modules/**', 'plans/**', 'docs/**', 'public/**', '.claude/worktrees/**'] },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {

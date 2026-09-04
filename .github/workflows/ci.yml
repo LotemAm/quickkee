@@ -7,7 +7,7 @@ on:
 
 jobs:
   verify:
-    name: Typecheck & Test
+    name: Typecheck, Lint & Test
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -19,6 +19,7 @@ jobs:
           cache: 'yarn'
       - run: yarn install --immutable
       - run: yarn typecheck
+      - run: yarn lint
       - run: yarn test
 
   build:
