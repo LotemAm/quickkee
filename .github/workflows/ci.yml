@@ -41,7 +41,8 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: quickkee-chrome
-          path: quickkee.zip
+          path: release/quickkee.zip
+          if-no-files-found: error
 
   e2e:
     name: E2E Tests
