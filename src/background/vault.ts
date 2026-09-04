@@ -351,7 +351,11 @@ export class Vault {
   updateGroup(id: string, fields: Record<string, string>): void {
     if (!this.db) throw new Error('locked');
     const g = this.findGroup(id); if (!g) throw new Error('no group');
-    if (fields.Name != null) g.name = fields.Name; this.dirty = true;
+    if (fields.Name != null) {
+      g.name = fields.Name;
+      g.times.update();
+    }
+    this.dirty = true;
   }
 
   createGroup(parentId: string, name: string): string {
@@ -379,6 +383,7 @@ export class Vault {
     const e = this.findEntry(entryId); if (!e) throw new Error('no entry');
     const bin = await this.db.createBinary(data);
     e.binaries.set(name, bin);
+    e.times.update();
     // Cleans up the previous pool entry if `name` was overwritten and its hash isn't shared elsewhere.
     await this.db.cleanup({ binaries: true });
     this.dirty = true;
@@ -388,6 +393,7 @@ export class Vault {
     if (!this.db) throw new Error('locked');
     const e = this.findEntry(entryId); if (!e) throw new Error('no entry');
     if (!e.binaries.delete(name)) throw new Error('no attachment');
+    e.times.update();
     this.db.cleanup({ binaries: true });
     this.dirty = true;
   }
