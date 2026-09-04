@@ -15,16 +15,44 @@ export class DropboxProvider implements CloudProvider {
   async auth(): Promise<void> { await this.getToken(); }
 
   async listKdbxFiles(): Promise<RemoteFile[]> {
-    const res = await fetch(`${API}/files/list_folder`, {
-      method: 'POST',
-      headers: { ...(await this.authHeader()), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: '', recursive: true }),
-    });
-    if (!res.ok) throw new Error('dropboxList');
-    const data = await res.json() as { entries: { '.tag': string; id: string; name: string; rev?: string }[] };
-    return data.entries
-      .filter(e => e['.tag'] === 'file' && e.name.toLowerCase().endsWith('.kdbx'))
-      .map(e => ({ fileId: e.id, name: e.name, rev: e.rev ?? '' }));
+    const files: RemoteFile[] = [];
+    let cursor: string | undefined;
+    while (true) {
+      const headers = { ...(await this.authHeader()), 'Content-Type': 'application/json' };
+      try {
+        const res = await fetch(`${API}/files/list_folder${cursor ? '/continue' : ''}`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(cursor ? { cursor } : { path: '', recursive: true }),
+        });
+        if (!res.ok) throw new Error('dropboxList');
+        const data = await res.json() as {
+          entries: { '.tag': string; id: string; name: string; rev?: string }[];
+          has_more: boolean;
+          cursor?: string;
+        };
+        if (!data || !Array.isArray(data.entries) || typeof data.has_more !== 'boolean'
+          || (data.has_more && (typeof data.cursor !== 'string' || !data.cursor))) {
+          throw new Error('dropboxList');
+        }
+        for (const entry of data.entries) {
+          if (!entry || !['file', 'folder', 'deleted'].includes(entry['.tag']) || typeof entry.name !== 'string') {
+            throw new Error('dropboxList');
+          }
+          if (entry['.tag'] !== 'file') continue;
+          if (typeof entry.id !== 'string' || !entry.id || (entry.rev !== undefined && typeof entry.rev !== 'string')) {
+            throw new Error('dropboxList');
+          }
+          if (entry.name.toLowerCase().endsWith('.kdbx')) {
+            files.push({ fileId: entry.id, name: entry.name, rev: entry.rev ?? '' });
+          }
+        }
+        if (!data.has_more) return files;
+        cursor = data.cursor;
+      } catch {
+        throw new Error('dropboxList');
+      }
+    }
   }
 
   async getRevision(fileId: string): Promise<string> {

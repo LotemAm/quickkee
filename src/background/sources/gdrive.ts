@@ -16,14 +16,37 @@ export class GDriveProvider implements CloudProvider {
 
   async listKdbxFiles(): Promise<RemoteFile[]> {
     const q = encodeURIComponent("name contains '.kdbx' and trashed = false");
-    const res = await fetch(`${API}/files?q=${q}&fields=${encodeURIComponent('files(id,name,headRevisionId)')}`, {
-      headers: await this.authHeader(),
-    });
-    if (!res.ok) throw new Error('gdriveList');
-    const data = await res.json() as { files: { id: string; name: string; headRevisionId?: string }[] };
-    return data.files
-      .filter(f => f.name.toLowerCase().endsWith('.kdbx'))
-      .map(f => ({ fileId: f.id, name: f.name, rev: f.headRevisionId ?? '' }));
+    const url = `${API}/files?q=${q}&fields=${encodeURIComponent('nextPageToken,files(id,name,headRevisionId)')}`;
+    const files: RemoteFile[] = [];
+    let pageToken: string | undefined;
+    while (true) {
+      const headers = await this.authHeader();
+      try {
+        const res = await fetch(`${url}${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`, { headers });
+        if (!res.ok) throw new Error('gdriveList');
+        const data = await res.json() as {
+          files: { id: string; name: string; headRevisionId?: string }[];
+          nextPageToken?: string;
+        };
+        if (!data || !Array.isArray(data.files)
+          || (data.nextPageToken !== undefined && typeof data.nextPageToken !== 'string')) {
+          throw new Error('gdriveList');
+        }
+        for (const file of data.files) {
+          if (!file || typeof file.id !== 'string' || !file.id || typeof file.name !== 'string'
+            || (file.headRevisionId !== undefined && typeof file.headRevisionId !== 'string')) {
+            throw new Error('gdriveList');
+          }
+          if (file.name.toLowerCase().endsWith('.kdbx')) {
+            files.push({ fileId: file.id, name: file.name, rev: file.headRevisionId ?? '' });
+          }
+        }
+        if (!data.nextPageToken) return files;
+        pageToken = data.nextPageToken;
+      } catch {
+        throw new Error('gdriveList');
+      }
+    }
   }
 
   async getRevision(fileId: string): Promise<string> {

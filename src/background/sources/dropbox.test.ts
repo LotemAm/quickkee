@@ -2,21 +2,129 @@ import { DropboxProvider } from './dropbox';
 import { afterEach, vi } from 'vitest';
 
 const token = () => Promise.resolve('TOKEN');
-function mockFetch(handler: (url: string, init: RequestInit) => Response) {
-  globalThis.fetch = vi.fn((url: RequestInfo | URL, init?: RequestInit) =>
-    Promise.resolve(handler(String(url), init ?? {}))) as unknown as typeof fetch;
+type Handler = (url: string, init: RequestInit) => Response;
+let verifyFetch: () => void;
+const requestAssertions: (() => void)[] = [];
+function mockFetch(...handlers: Handler[]) {
+  let i = 0;
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+    const handler = handlers[i++];
+    if (!handler) throw new Error(`Unexpected fetch: ${String(url)}`);
+    return handler(String(url), init ?? {});
+  });
+  verifyFetch = () => expect(fetch).toHaveBeenCalledTimes(handlers.length);
 }
-afterEach(() => { vi.restoreAllMocks(); });
+afterEach(() => {
+  try {
+    verifyFetch();
+    for (const assertRequest of requestAssertions) assertRequest();
+  } finally {
+    requestAssertions.length = 0;
+    vi.restoreAllMocks();
+  }
+});
+
+function listPage(body: unknown, cursor?: string): Handler {
+  return listResponse(() => new Response(JSON.stringify(body), { status: 200 }), cursor);
+}
+
+function listResponse(response: () => Response, cursor?: string): Handler {
+  return (url, init) => {
+    // Provider error handling must not swallow request assertion failures.
+    requestAssertions.push(() => {
+      expect(url).toBe(`https://api.dropboxapi.com/2/files/list_folder${cursor === undefined ? '' : '/continue'}`);
+      expect(init).toEqual({
+        method: 'POST',
+        headers: { Authorization: 'Bearer TOKEN', 'Content-Type': 'application/json' },
+        body: JSON.stringify(cursor === undefined ? { path: '', recursive: true } : { cursor }),
+      });
+    });
+    return response();
+  };
+}
 
 test('listKdbxFiles filters to .kdbx files', async () => {
-  mockFetch(() => new Response(JSON.stringify({
+  mockFetch(listPage({
     entries: [
       { '.tag': 'file', id: 'id:1', name: 'vault.kdbx', rev: 'r1' },
       { '.tag': 'file', id: 'id:2', name: 'notes.txt', rev: 'r2' },
+      { '.tag': 'folder', id: 'id:3', name: 'folder.kdbx' },
     ],
-  }), { status: 200 }));
+    has_more: false,
+    cursor: 'finished',
+  }));
   const files = await new DropboxProvider(token).listKdbxFiles();
   expect(files).toEqual([{ fileId: 'id:1', name: 'vault.kdbx', rev: 'r1' }]);
+});
+
+test('listKdbxFiles consumes every page through empty pages in provider order', async () => {
+  const cursor = 'opaque+/=?&#% token';
+  mockFetch(
+    listPage({ entries: [], has_more: true, cursor }),
+    listPage({
+      entries: [
+        { '.tag': 'file', id: 'id:1', name: 'Vault.KDBX', rev: 'r1' },
+        { '.tag': 'folder', id: 'id:folder', name: 'folder.kdbx' },
+        { '.tag': 'file', id: 'id:notes', name: 'notes.txt', rev: 'r2' },
+      ],
+      has_more: true, cursor: 'third',
+    }, cursor),
+    listPage({ entries: [], has_more: true, cursor: 'fourth' }, 'third'),
+    listPage({
+      entries: [{ '.tag': 'file', id: 'id:2', name: 'later.kdbx' }],
+      has_more: false, cursor: 'finished',
+    }, 'fourth'),
+  );
+  expect(await new DropboxProvider(token).listKdbxFiles()).toEqual([
+    { fileId: 'id:1', name: 'Vault.KDBX', rev: 'r1' },
+    { fileId: 'id:2', name: 'later.kdbx', rev: '' },
+  ]);
+});
+
+test.each([false, true])('listKdbxFiles rejects a later HTTP/network failure (network: %s)', async (network) => {
+  mockFetch(
+    listPage({
+      entries: [{ '.tag': 'file', id: 'id:1', name: 'vault.kdbx', rev: 'r1' }],
+      has_more: true, cursor: 'second',
+    }),
+    listResponse(() => {
+      if (network) throw new TypeError('Failed to fetch');
+      return new Response('', { status: 503 });
+    }, 'second'),
+  );
+  await expect(new DropboxProvider(token).listKdbxFiles()).rejects.toThrow('dropboxList');
+});
+
+test.each([
+  null,
+  { entries: [] },
+  { entries: [], has_more: 'false' },
+  { entries: [], has_more: true },
+  { entries: [], has_more: true, cursor: '' },
+  { entries: [], has_more: true, cursor: 42 },
+  { has_more: false },
+  { entries: {}, has_more: false },
+  { entries: [null], has_more: false },
+  { entries: [{ '.tag': 'file', name: 'vault.kdbx' }], has_more: false },
+  { entries: [{ '.tag': 'file', id: 'id:1', name: 42 }], has_more: false },
+  { entries: [{ '.tag': 'file', id: 'id:1', name: 'vault.kdbx', rev: 42 }], has_more: false },
+])('listKdbxFiles rejects a malformed later page: %j', async (page) => {
+  mockFetch(
+    listPage({
+      entries: [{ '.tag': 'file', id: 'id:1', name: 'vault.kdbx', rev: 'r1' }],
+      has_more: true, cursor: 'second',
+    }),
+    listPage(page, 'second'),
+  );
+  await expect(new DropboxProvider(token).listKdbxFiles()).rejects.toThrow('dropboxList');
+});
+
+test('listKdbxFiles rejects invalid JSON on a later page', async () => {
+  mockFetch(
+    listPage({ entries: [], has_more: true, cursor: 'second' }),
+    listResponse(() => new Response('{', { status: 200 }), 'second'),
+  );
+  await expect(new DropboxProvider(token).listKdbxFiles()).rejects.toThrow('dropboxList');
 });
 
 test('getRevision reads rev from metadata', async () => {
