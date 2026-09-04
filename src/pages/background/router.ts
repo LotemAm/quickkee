@@ -4,6 +4,7 @@ import { loadHandle, ensurePermission, hasPermission, readBytes, writeBytes } fr
 import { loadSettings } from '../../shared/settings';
 import { generatePassword, DEFAULT_PWGEN } from '../../shared/pwgen';
 import { urlMatches } from '../../background/matcher';
+import { resolvePopupFillTargets, resolveInlineFillTarget, revalidatePopupFillTarget, revalidateInlineFillTarget } from '../../background/fillTargets';
 import type { Request, Response } from '../../shared/messages';
 import { CARDHOLDER_NAME_KEY } from '../../shared/entry';
 import { arrayBufferToBase64, base64ToArrayBuffer } from '../../shared/bytes';
@@ -495,48 +496,66 @@ export function makeRouter(ctx: SwContext) {
       case 'generatePassword':
         return { ok: true, password: generatePassword(req.opts ?? DEFAULT_PWGEN) };
       case 'fillRequest': {
+        if (sender.id !== chrome.runtime.id || !isExtensionPage(sender, 'popup') ||
+          new URL(sender.url!).pathname !== '/src/pages/popup/index.html') return { ok: false, error: 'forbidden' };
+        if (!ctx.vault.isOpen()) return { ok: false, error: 'locked' };
+        const token = ctx.vault.lifecycleGeneration;
         const entry = ctx.vault.getEntry(req.entryId);
         if (!entry) return { ok: false, error: 'noEntry' };
-        let tab: chrome.tabs.Tab;
-        try { tab = await chrome.tabs.get(req.tabId); }
-        catch { return { ok: false, error: 'noTab' }; }
-        // Entries without a URL can't be validated — allow (explicit user action from the popup).
-        if (entry.url && (!tab.url || !urlMatches(entry.url, tab.url)))
-          return { ok: false, error: 'urlMismatch' };
-        // Card-marked entries are filled into detected card-form fields (cc-number/cc-csc/
-        // cc-exp/cc-name) rather than generic username/password fields; regular login
-        // entries keep going through the plain 'fill' message.
-        if (entry.isCard) {
-          const cardholderName = entry.fields.find(f => f.key === CARDHOLDER_NAME_KEY)?.value ?? '';
-          await chrome.tabs.sendMessage(req.tabId, {
-            type: 'fillCard', number: entry.username, cvv: entry.password, cardholderName, expires: entry.expires,
-          });
-        } else {
-          try {
+        try {
+          let tab: chrome.tabs.Tab;
+          try { tab = await chrome.tabs.get(req.tabId); }
+          catch { return { ok: false, error: 'noTab' }; }
+          if (!ctx.vault.isSessionCurrent(token)) return { ok: false, error: 'locked' };
+          if (entry.url && (!tab.url || !urlMatches(entry.url, tab.url)))
+            return { ok: false, error: 'urlMismatch' };
+          const { top, targets } = await resolvePopupFillTargets(req.tabId, entry.url);
+          if (!ctx.vault.isSessionCurrent(token)) return { ok: false, error: 'locked' };
+          let totp: string | undefined;
+          if (!entry.isCard) {
             const config = ctx.vault.getTotpConfig(entry.id);
-            const totp = config ? (await generateTotp(config)).code : undefined;
-            await chrome.tabs.sendMessage(req.tabId, {
-              type: 'fill', username: entry.username, password: entry.password, ...(totp ? { totp } : {}),
-            });
-          } catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'invalidTotp' }; }
-        }
-        return { ok: true };
+            if (config) {
+              totp = (await generateTotp(config)).code;
+              if (!ctx.vault.isSessionCurrent(token)) return { ok: false, error: 'locked' };
+            }
+          }
+          const message = entry.isCard ? {
+            type: 'fillCard', number: entry.username, cvv: entry.password,
+            cardholderName: entry.fields.find(f => f.key === CARDHOLDER_NAME_KEY)?.value ?? '', expires: entry.expires,
+          } : { type: 'fill', username: entry.username, password: entry.password, ...(totp ? { totp } : {}) };
+          let delivered = false;
+          for (const target of targets) {
+            try {
+              const valid = await revalidatePopupFillTarget(top, target);
+              if (!ctx.vault.isSessionCurrent(token)) return { ok: false, error: 'locked' };
+              if (!valid) continue;
+              await chrome.tabs.sendMessage(target.tabId, message, { documentId: target.documentId });
+              delivered = true;
+            } catch { /* Disappearing documents never justify a broader retry. */ }
+            if (!ctx.vault.isSessionCurrent(token)) return { ok: false, error: 'locked' };
+          }
+          return delivered ? { ok: true } : { ok: false, error: 'fillDeliveryFailed' };
+        } catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'fillDeliveryFailed' }; }
       }
       case 'fillTotpRequest': {
         if (!ctx.vault.isOpen()) return { ok: false, error: 'locked' };
+        const token = ctx.vault.lifecycleGeneration;
         const entry = ctx.vault.getEntry(req.entryId);
         if (!entry) return { ok: false, error: 'noEntry' };
-        const tabId = sender.tab?.id;
-        const pageUrl = sender.url ?? sender.tab?.url;
-        if (tabId == null || !pageUrl) return { ok: false, error: 'forbidden' };
-        if (entry.url && !urlMatches(entry.url, pageUrl)) return { ok: false, error: 'urlMismatch' };
         try {
+          const target = await resolveInlineFillTarget(sender, entry.url);
+          if (!ctx.vault.isSessionCurrent(token)) return { ok: false, error: 'locked' };
           const config = ctx.vault.getTotpConfig(entry.id);
           if (!config) return { ok: false, error: 'noTotp' };
           const { code } = await generateTotp(config);
-          await chrome.tabs.sendMessage(tabId, { type: 'fillTotp', code }, { frameId: sender.frameId ?? 0 });
+          if (!ctx.vault.isSessionCurrent(token)) return { ok: false, error: 'locked' };
+          const valid = await revalidateInlineFillTarget(target);
+          if (!ctx.vault.isSessionCurrent(token)) return { ok: false, error: 'locked' };
+          if (!valid) return { ok: false, error: 'fillDeliveryFailed' };
+          await chrome.tabs.sendMessage(target.tabId, { type: 'fillTotp', code }, { documentId: target.documentId });
+          if (!ctx.vault.isSessionCurrent(token)) return { ok: false, error: 'locked' };
           return { ok: true };
-        } catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'invalidTotp' }; }
+        } catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'fillDeliveryFailed' }; }
       }
       case 'scheduleClipboardClear':
         await ctx.persistPendingClipboardHash(req.textHash);
