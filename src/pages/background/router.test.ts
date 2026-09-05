@@ -16,6 +16,7 @@ import { makeRouter, type SwContext } from './router';
 import type { DbSource } from '../../shared/dbSource';
 import { CARD_FLAG_KEY, CARDHOLDER_NAME_KEY } from '../../shared/entry';
 import { CredentialCaptureStore } from '../../background/credentialCaptureStore';
+import { createVaultStatusPublisher } from '../../background/vaultStatus';
 
 // Keep mock factories free of outer-scope references — vi.mock is hoisted above imports
 // and above local `const`/`let` declarations, so factories may only build fresh vi.fn()s.
@@ -307,6 +308,31 @@ describe('importTotp', () => {
 
 const popupFillSender = { id: 'quickkee', url: 'chrome-extension://quickkee/src/pages/popup/index.html' };
 
+test('router publishes opens, dirty changes and error completion while unchanged reads stay quiet', async () => {
+  const { ctx, handle_ } = makeCtx();
+  const status = createVaultStatusPublisher(() => ({ generation: ctx.vault.lifecycleGeneration,
+    locked: !ctx.vault.isOpen(), dirty: ctx.vault.dirty, dbName: ctx.getHandle()?.name }), 'worker');
+  ctx.publishStatus = vi.fn(status.publish);
+  const initial = status.publish();
+  await unlockHappyPath(handle_);
+  const opened = status.publish();
+  expect(opened).toMatchObject({ locked: false, dirty: false, dbName: 'vault.kdbx' });
+  expect(opened.sequence).toBeGreaterThan(initial.sequence);
+  for (let i = 0; i < 3; i++) {
+    await handle_({ type: 'getStatus' });
+    await handle_({ type: 'getSyncStatus' });
+  }
+  expect(status.publish()).toBe(opened);
+  await handle_({ type: 'createEntry', groupId: ctx.vault.getTree().groupId, fields: { Title: 'New' } });
+  expect(status.publish()).toMatchObject({ dirty: true, generation: opened.generation, sequence: opened.sequence + 1 });
+  const calls = vi.mocked(ctx.publishStatus).mock.calls.length;
+  const failure = vi.spyOn(ctx.vault, 'getTree').mockImplementationOnce(() => { throw new Error('test failure'); });
+  await expect(handle_({ type: 'getTree' })).rejects.toThrow('test failure');
+  expect(ctx.publishStatus).toHaveBeenCalledTimes(calls + 1);
+  failure.mockRestore();
+  ctx.autolock.disarm();
+});
+
 function browserFrame(frameId: number, overrides = {}) {
   return { frameId, documentId: `document-${frameId}`, documentLifecycle: 'active', errorOccurred: false, url: 'https://github.com/login', ...overrides };
 }
@@ -341,7 +367,7 @@ describe('explicit vault activity deadlines', () => {
       expect(await handle_({ type: 'getSyncStatus' }, popupFillSender)).toMatchObject({ ok: true });
       const code = await handle_({ type: 'getTotpCode', entryId: entry.id }, popupFillSender);
       expect(code.ok).toBe(second < 10);
-      expect(await handle_({ type: 'previewTotp', config }, panel)).toMatchObject({ ok: true });
+      expect(await handle_({ type: 'previewTotp', config }, panel)).toMatchObject({ ok: second < 10 });
       await handle_({ type: 'getEntrySummariesForUrl', url: inline.url! }, inline);
       await handle_({ type: 'getPendingCredentialPrompt' }, inline);
     }

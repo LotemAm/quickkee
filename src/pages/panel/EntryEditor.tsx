@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Copy, Check, Eye, EyeOff, X, Plus, Trash2, RefreshCw, SlidersHorizontal, Paperclip, Download, ChevronDown, QrCode, Loader2 } from 'lucide-react';
 import { sendToSW } from '../../shared/messages';
+import { useSessionLifetime } from '../../shared/useSessionLifetime';
 import { CARD_FLAG_KEY, CARDHOLDER_NAME_KEY, type EntryView, type AttachmentMeta } from '../../shared/entry';
 import type { PwGenOpts } from '../../shared/pwgen';
 import { useClipboardTimer } from '../../shared/useClipboardTimer';
@@ -37,6 +38,7 @@ export function EntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChan
   onCreated?: (entryId: string, groupId?: string) => void;
   onDeleted: () => void;
 }) {
+  const captureLifetime = useSessionLifetime();
   const [e, setE] = useState<EntryView | null>(null);
   const [showPass, setShowPass] = useState(false);
   const [showCardNumber, setShowCardNumber] = useState(false);
@@ -64,6 +66,7 @@ export function EntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChan
   const { copy, state: clipState, cancel } = useClipboardTimer(clearSecs);
   useEffect(() => { setSelectedGroupId(groupId ?? ''); }, [entryId, groupId]);
   useEffect(() => {
+    const isAlive = captureLifetime();
     setShowPass(false);
     setShowCardNumber(false);
     setDeleteError('');
@@ -84,6 +87,7 @@ export function EntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChan
       return;
     }
     sendToSW({ type: 'getEntry', entryId }).then(r => {
+      if (!isAlive()) return;
       if (r.ok && r.entry) {
         setE(r.entry); setExpires(r.entry.expires);
         setIsCard(r.entry.isCard);
@@ -94,6 +98,7 @@ export function EntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChan
       }
     });
     sendToSW({ type: 'getTotpConfig', entryId }).then(r => {
+      if (!isAlive()) return;
       if (r.ok) { setInitialTotp(r.config); setTotp(r.config); }
       else setTotpError(r.error);
     });
@@ -162,25 +167,27 @@ export function EntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChan
     </div>);
   };
   async function scanPageQr() {
+    const isAlive = captureLifetime();
     if (scanningTotp) return;
     const scanVersion = ++scanVersionRef.current;
     setScanningTotp(true);
     setScanTotpError('');
     try {
       const result = await scanVisibleTabForTotp();
-      if (scanVersion !== scanVersionRef.current) return;
+      if (!isAlive() || scanVersion !== scanVersionRef.current) return;
       setInitialTotp(result.config);
       setTotp(result.config);
       setTotpError('');
     } catch (error) {
-      if (scanVersion === scanVersionRef.current) {
+      if (isAlive() && scanVersion === scanVersionRef.current) {
         setScanTotpError(error instanceof Error ? error.message : 'Could not scan the visible page. Try again.');
       }
     } finally {
-      if (scanVersion === scanVersionRef.current) setScanningTotp(false);
+      if (isAlive() && scanVersion === scanVersionRef.current) setScanningTotp(false);
     }
   }
   async function save() {
+    const isAlive = captureLifetime();
     setSaveError('');
     if (!selectedGroupId) { setSaveError('Select a group.'); return; }
     const fields: Record<string, string> = {
@@ -197,16 +204,18 @@ export function EntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChan
     if (entryId === null) {
       try {
         const r = await sendToSW({ type: 'createEntry', groupId: selectedGroupId, fields, ...(totp ? { totp } : {}) });
+        if (!isAlive()) return;
         if (r.ok) onCreated?.(r.entryId, selectedGroupId);
         else setSaveError(r.error);
-      } catch { setSaveError('Could not create entry.'); }
+      } catch { if (isAlive()) setSaveError('Could not create entry.'); }
       return;
     }
     const removeKeys = origKeys.filter(k => !keptKeys.has(k));
     try {
       const result = await sendToSW({ type: 'updateEntry', entryId, fields, expires, removeKeys, totp, groupId: selectedGroupId });
+      if (!isAlive()) return;
       if (!result.ok) { setSaveError(result.error); return; }
-    } catch { setSaveError('Could not update entry.'); return; }
+    } catch { if (isAlive()) setSaveError('Could not update entry.'); return; }
     // Sync origKeys to what was just persisted: Apply Changes doesn't trigger a
     // getEntry refetch (onChanged only reloads the tree), so without this a field
     // added on one Apply-changes click can never be removed by a later one — its
@@ -215,28 +224,36 @@ export function EntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChan
     onChanged(selectedGroupId);
   }
   async function del() {
+    const isAlive = captureLifetime();
     if (entryId === null) return;
     if (!confirm('Delete this entry?')) return;
     const r = await sendToSW({ type: 'deleteEntry', entryId });
+    if (!isAlive()) return;
     if (r.ok) onDeleted();
     else setDeleteError(r.error);
   }
   async function onFilePicked(ev: React.ChangeEvent<HTMLInputElement>) {
+    const isAlive = captureLifetime();
     const file = ev.target.files?.[0];
     ev.target.value = '';
     if (!file || entryId === null) return;
     setAttachError('');
-    const data = arrayBufferToBase64(await file.arrayBuffer());
+    const bytes = await file.arrayBuffer();
+    if (!isAlive()) return;
+    const data = arrayBufferToBase64(bytes);
     const r = await sendToSW({ type: 'addAttachment', entryId, name: file.name, data });
+    if (!isAlive()) return;
     if (r.ok) {
       setAttachments(a => [...a.filter(x => x.name !== file.name), { name: file.name, size: file.size }]);
       onChanged();
     } else setAttachError(r.error);
   }
   async function removeAttachment(name: string) {
+    const isAlive = captureLifetime();
     if (entryId === null) return;
     if (!confirm(`Remove attachment "${name}"?`)) return;
     const r = await sendToSW({ type: 'removeAttachment', entryId, name });
+    if (!isAlive()) return;
     if (r.ok) { setAttachments(a => a.filter(x => x.name !== name)); onChanged(); }
     else setAttachError(r.error);
   }

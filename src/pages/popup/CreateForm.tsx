@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Plus, Link, Copy, LogIn, RefreshCw, SlidersHorizontal, History, Loader2, QrCode } from 'lucide-react';
 import { sendToSW } from '../../shared/messages';
+import { useSessionLifetime } from '../../shared/useSessionLifetime';
 import { copyWithClear } from '../../shared/clipboard';
 import type { PwGenOpts } from '../../shared/pwgen';
 import { loadDraft, saveDraft, clearDraft } from '../../shared/createDraft';
@@ -21,6 +22,7 @@ export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwge
   scanPage: { disabled: boolean; scanning: boolean; description: string; onClick: () => void };
   onCreated: () => void;
 }) {
+  const captureLifetime = useSessionLifetime();
   const [title, setTitle] = useState(''); const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [groupId, setGroupId] = useState(defaultGroupId);
@@ -35,8 +37,9 @@ export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwge
   const [totpReset, setTotpReset] = useState(0);
   const noClass = !opts.lower && !opts.upper && !opts.digits && !opts.symbols;
   function regenerate(o: PwGenOpts) {
+    const isAlive = captureLifetime();
     if (!o.lower && !o.upper && !o.digits && !o.symbols) return;
-    sendToSW({ type: 'generatePassword', opts: o }).then(r => r.ok && setPassword(r.password));
+    sendToSW({ type: 'generatePassword', opts: o }).then(r => isAlive() && r.ok && setPassword(r.password));
   }
   // Restore a persisted draft (the popup unmounts whenever it loses focus), or
   // start fresh — generating the first password only when there is no draft.
@@ -62,35 +65,43 @@ export function CreateForm({ url, tabId, groups, defaultGroupId, clearSecs, pwge
     void saveDraft({ url, title, username, password, groupId, entryUrl, opts, savedAt: Date.now() });
   }, [hydrated, url, title, username, password, groupId, entryUrl, opts]);
   async function create(): Promise<string | null> {
+    const isAlive = captureLifetime();
     const r = await sendToSW({
       type: 'createEntry', groupId,
       fields: { Title: title, UserName: username, Password: password, URL: entryUrl },
       ...(totp ? { totp } : {}),
     });
+    if (!isAlive()) return null;
     await sendToSW({ type: 'save' });
+    if (!isAlive()) return null;
     await clearDraft(url);
+    if (!isAlive()) return null;
     setRestored(false);
     return r.ok ? r.entryId : null;
   }
   async function discardDraft() {
+    const isAlive = captureLifetime();
     await clearDraft(url);
+    if (!isAlive()) return;
     setTitle(''); setUsername(''); setGroupId(defaultGroupId);
     setEntryUrl(canonicalPageOrigin(url)); setOpts(pwgen); regenerate(pwgen);
     setTotp(null); setTotpError(''); setTotpReset(n => n + 1);
     setRestored(false);
   }
   async function createAndSave() {
+    const isAlive = captureLifetime();
     setSaving(true);
-    try { await create(); } finally { setSaving(false); }
-    onCreated();
+    try { await create(); } finally { if (isAlive()) setSaving(false); }
+    if (isAlive()) onCreated();
   }
   async function createAndFill() {
+    const isAlive = captureLifetime();
     setSaving(true);
     try {
       const entryId = await create();
-      if (entryId) await sendToSW({ type: 'fillRequest', entryId, tabId });
-    } finally { setSaving(false); }
-    onCreated();
+      if (isAlive() && entryId) await sendToSW({ type: 'fillRequest', entryId, tabId });
+    } finally { if (isAlive()) setSaving(false); }
+    if (isAlive()) onCreated();
   }
   const isFullUrl = entryUrl === url;
   return (

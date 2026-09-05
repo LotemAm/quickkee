@@ -44,6 +44,7 @@ export interface SwContext {
   online(): boolean;
   cloudConnected?(provider: 'dropbox' | 'gdrive'): Promise<boolean>;
   persistPendingClipboardHash(hash: string | null): Promise<void>;
+  publishStatus?(): void;
 }
 
 export function depsFor(ctx: SwContext, src: CloudFileSource): SyncDeps {
@@ -68,6 +69,7 @@ function validSecretBytes(bytes: number[], expectedLength?: number): boolean {
 }
 
 async function finishOpen(ctx: SwContext): Promise<void> {
+  ctx.publishStatus?.();
   const settings = await loadSettings();
   ctx.autolock.arm(settings.autoCloseHours);
   ctx.refreshAllIcons();
@@ -190,6 +192,7 @@ function defaultEntryTitle(url: string): string {
 /** Builds the SW message handler bound to `ctx`. Moved verbatim from index.ts (plan 009). */
 export function makeRouter(ctx: SwContext) {
   return async function handle_(req: Request, sender: chrome.runtime.MessageSender = {}): Promise<Response> {
+    try {
     switch (req.type) {
       // Only explicit input and successful fill/capture actions count as activity.
       // Polls, TOTP refreshes and future status subscriptions must never touch here.
@@ -254,6 +257,7 @@ export function makeRouter(ctx: SwContext) {
       }
       case 'previewTotp': {
         if (!isExtensionPage(sender, 'panel')) return { ok: false, error: 'forbidden' };
+        if (!ctx.vault.isOpen()) return { ok: false, error: 'locked' };
         try { return { ok: true, ...await generateTotp(req.config) }; }
         catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'invalidTotp' }; }
       }
@@ -709,5 +713,6 @@ export function makeRouter(ctx: SwContext) {
         return { ok: true };
       }
     }
+    } finally { ctx.publishStatus?.(); }
   };
 }

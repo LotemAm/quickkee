@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Save, Loader2, FolderClosed, FolderOpen, FileText, CreditCard, X, Lock,
   ChevronRight, ChevronDown, Plus, Pencil, Trash2, Check, Search, Paperclip, KeyRound,
   Database, ShieldCheck } from 'lucide-react';
 import { useStatus } from '../../shared/useStatus';
+import { useSessionLifetime } from '../../shared/useSessionLifetime';
 import { useVaultActivity } from '../../shared/useVaultActivity';
 import { UnlockScreen } from '../../shared/UnlockScreen';
 import { sendToSW } from '../../shared/messages';
@@ -139,8 +140,24 @@ function GroupTree({ node, ops, depth = 0 }: { node: TreeNode; ops: GroupOps; de
 }
 
 export function Panel() {
-  const { locked, dirty, refresh } = useStatus();
+  const { locked, dirty, refresh, sessionKey } = useStatus();
   useVaultActivity(!locked);
+  const [unlockNotice, setUnlockNotice] = useState('');
+  useEffect(() => { void loadSettings().then(s => applyTheme(s.theme)); }, []);
+  if (locked) return (
+    <div className="min-h-screen flex flex-col justify-center" style={{ background: 'var(--bg)' }}>
+      <UnlockScreen onUnlocked={notice => {
+        setUnlockNotice(notice ?? '');
+        void refresh();
+      }} />
+    </div>);
+  return <UnlockedPanel key={sessionKey} dirty={dirty} refresh={refresh} unlockNotice={unlockNotice} />;
+}
+
+function UnlockedPanel({ dirty, refresh, unlockNotice }: {
+  dirty: boolean; refresh: () => Promise<void>; unlockNotice: string;
+}) {
+  const captureLifetime = useSessionLifetime();
   const [tree, setTree] = useState<TreeNode | null>(null);
   const [selGroup, setSelGroup] = useState<string | null>(null);
   const [selEntry, setSelEntry] = useState<string | null>(null);
@@ -158,48 +175,64 @@ export function Panel() {
   const [readingTotpQr, setReadingTotpQr] = useState(false);
   const [savingTotpImport, setSavingTotpImport] = useState(false);
   const [view, setView] = useState<'vault' | 'health'>('vault');
-  const [unlockNotice, setUnlockNotice] = useState('');
   const totpFileInput = useRef<HTMLInputElement>(null);
-  useEffect(() => { loadSettings().then(s => { applyTheme(s.theme); setClearSecs(s.clipboardClearSeconds); setPwgen(s.pwgen); }); }, []);
-  const reload = async (): Promise<TreeNode | null> => {
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (savedTimer.current !== null) clearTimeout(savedTimer.current); }, []);
+  useEffect(() => {
+    const isAlive = captureLifetime();
+    void loadSettings().then(s => { if (isAlive()) { setClearSecs(s.clipboardClearSeconds); setPwgen(s.pwgen); } });
+  }, [captureLifetime]);
+  const reload = useCallback(async (): Promise<TreeNode | null> => {
+    const isAlive = captureLifetime();
+    if (!isAlive()) return null;
     const r = await sendToSW({ type: 'getTree' });
-    if (!r.ok) return null;
+    if (!isAlive() || !r.ok) return null;
     setTree(r.tree);
     setSelGroup(g => g ?? r.tree.groupId);
     setExpanded(e => e.size ? e : new Set([r.tree.groupId]));
     return r.tree;
-  };
+  }, [captureLifetime]);
 
   const toggle = (id: string) => setExpanded(e => {
     const n = new Set(e); if (n.has(id)) n.delete(id); else n.add(id); return n;
   });
   async function addGroup(parentId: string) {
+    const isAlive = captureLifetime();
     const r = await sendToSW({ type: 'createGroup', parentId, name: 'New Group' });
+    if (!isAlive()) return;
     setExpanded(e => new Set(e).add(parentId));
-    await reload(); refresh();
+    await reload();
+    if (!isAlive()) return;
+    void refresh();
     if (r.ok) { setSelGroup(r.groupId); setSelEntry(null); setCreatingEntry(false); setEditing(r.groupId); }
   }
   async function renameGroup(id: string, name: string) {
+    const isAlive = captureLifetime();
     if (name) await sendToSW({ type: 'updateGroup', groupId: id, fields: { Name: name } });
-    setEditing(null); await reload(); refresh();
+    if (!isAlive()) return;
+    setEditing(null); await reload();
+    if (isAlive()) void refresh();
   }
   async function deleteGroup(node: TreeNode) {
+    const isAlive = captureLifetime();
     const label = node.children.length || node.entries.length
       ? `Delete "${node.name}" and everything inside it?`
       : `Delete "${node.name}"?`;
     if (!confirm(label)) return;
     await sendToSW({ type: 'deleteGroup', groupId: node.groupId });
+    if (!isAlive()) return;
     setSelGroup(g => g === node.groupId ? (tree ? tree.groupId : null) : g);
     setSelEntry(null);
     setCreatingEntry(false);
-    await reload(); refresh();
+    await reload();
+    if (isAlive()) void refresh();
   }
-  useEffect(() => { if (!locked) reload(); }, [locked]);
+  useEffect(() => { void reload(); }, [reload]);
   useEffect(() => {
-    if (locked) return;
-    consumeOpenEntry().then(id => { if (id) setPendingOpenEntry(id); });
+    const isAlive = captureLifetime();
+    consumeOpenEntry().then(id => { if (isAlive() && id) setPendingOpenEntry(id); });
     return watchOpenEntry(id => setPendingOpenEntry(id));
-  }, [locked]);
+  }, [captureLifetime]);
   useEffect(() => {
     if (!pendingOpenEntry || !tree) return;
     const found = findEntryGroup(tree, pendingOpenEntry);
@@ -212,22 +245,22 @@ export function Panel() {
     setCreatingEntry(false);
     setPendingOpenEntry(null);
   }, [pendingOpenEntry, tree]);
-  if (locked) return (
-    <div className="min-h-screen flex flex-col justify-center" style={{ background: 'var(--bg)' }}>
-      <UnlockScreen onUnlocked={notice => {
-        setUnlockNotice(notice ?? '');
-        void refresh();
-      }} />
-    </div>);
-  async function save() { setSaving(true);
+  async function save() {
+    const isAlive = captureLifetime();
+    setSaving(true);
     const r = await sendToSW({ type: 'save' });
+    if (!isAlive()) return;
     setSaved(r.ok ? 'Saved' : 'Save failed');
     if (r.ok) setLastSavedAt(new Date());
-    refresh(); setSaving(false); setTimeout(() => setSaved(''), 2000); }
+    void refresh(); setSaving(false);
+    if (savedTimer.current !== null) clearTimeout(savedTimer.current);
+    savedTimer.current = setTimeout(() => setSaved(''), 2000);
+  }
 
   async function openHealthEntry(entryId: string): Promise<boolean> {
+    const isAlive = captureLifetime();
     const latestTree = await reload();
-    if (!latestTree) return false;
+    if (!isAlive() || !latestTree) return false;
     const found = findEntryGroup(latestTree, entryId);
     if (!found) return false;
     setView('vault');
@@ -249,37 +282,44 @@ export function Panel() {
   }
 
   async function readTotpExport(files: FileList | null) {
+    const isAlive = captureLifetime();
     if (!files?.length) return;
     setReadingTotpQr(true);
     setTotpImportError('');
     try {
       const chunks = [];
       for (const file of Array.from(files)) {
-        chunks.push(googleAuthenticatorImporter.parse(await decodeQrImage(file)));
+        const decoded = await decodeQrImage(file);
+        if (!isAlive()) return;
+        chunks.push(googleAuthenticatorImporter.parse(decoded));
       }
       setTotpImport(mergeTotpImportChunks(chunks));
     } catch (error) {
-      setTotpImportError(error instanceof Error ? error.message : 'Could not import authenticator QR code');
+      if (isAlive()) setTotpImportError(error instanceof Error ? error.message : 'Could not import authenticator QR code');
     } finally {
-      setReadingTotpQr(false);
-      if (totpFileInput.current) totpFileInput.current.value = '';
+      if (isAlive()) {
+        setReadingTotpQr(false);
+        if (totpFileInput.current) totpFileInput.current.value = '';
+      }
     }
   }
 
   async function saveTotpAssignments(assignments: TotpImportAssignment[]) {
+    const isAlive = captureLifetime();
     setSavingTotpImport(true);
     setTotpImportError('');
     try {
       const result = await sendToSW({ type: 'importTotp', assignments });
+      if (!isAlive()) return;
       if (result.ok) {
         setTotpImport(null);
         await reload();
-        refresh();
+        if (isAlive()) void refresh();
       } else setTotpImportError(result.error);
     } catch {
-      setTotpImportError('Could not import authenticator keys');
+      if (isAlive()) setTotpImportError('Could not import authenticator keys');
     } finally {
-      setSavingTotpImport(false);
+      if (isAlive()) setSavingTotpImport(false);
     }
   }
 
@@ -315,7 +355,10 @@ export function Panel() {
               ? <><Loader2 size={13} className="animate-spin" /> Saving</>
               : <><Save size={13} /> {dirty ? 'Save *' : 'Saved'}{saved && ` · ${saved}`}</>}
           </button>
-          <button className="icon-btn" aria-label="Lock database" title="Lock database" onClick={() => lockVault(dirty).then(refresh)}>
+          <button className="icon-btn" aria-label="Lock database" title="Lock database" onClick={() => {
+            const isAlive = captureLifetime();
+            void lockVault(dirty).then(() => { if (isAlive()) void refresh(); });
+          }}>
             <Lock size={16} />
           </button>
           <PanelActionsMenu importBusy={readingTotpQr} onImportTotp={beginTotpImport} />
@@ -405,20 +448,23 @@ export function Panel() {
               groups={groupOptions}
               clearSecs={clearSecs} pwgen={pwgen}
               onChanged={destinationGroupId => {
+                const isAlive = captureLifetime();
+                if (!isAlive()) return;
                 if (destinationGroupId) setSelGroup(destinationGroupId);
                 refresh();
                 void reload().then(latestTree => {
-                  if (!latestTree || !selEntry) return;
+                  if (!isAlive() || !latestTree || !selEntry) return;
                   const found = findEntryGroup(latestTree, selEntry);
                   if (found) setExpanded(current => new Set([...current, ...found.ancestors]));
                 });
               }}
               onCreated={(id, destinationGroupId) => {
+                if (!captureLifetime()()) return;
                 setCreatingEntry(false); setSelEntry(id);
                 if (destinationGroupId) setSelGroup(destinationGroupId);
                 refresh(); void reload();
               }}
-              onDeleted={() => { setSelEntry(null); refresh(); reload(); }} />
+              onDeleted={() => { if (captureLifetime()()) { setSelEntry(null); void refresh(); void reload(); } }} />
           </div>
         </div>)}
       </>)}
