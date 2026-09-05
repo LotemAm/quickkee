@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Settings, Cloud, CloudOff, RefreshCw, PanelRight, Lock, Plus, X } from 'lucide-react';
 import { useStatus } from '../../shared/useStatus';
 import { useSessionLifetime } from '../../shared/useSessionLifetime';
@@ -9,7 +9,7 @@ import { lockVault } from '../../shared/lockVault';
 import { loadSettings } from '../../shared/settings';
 import { applyTheme } from '../../shared/theme';
 import { DEFAULT_PWGEN, type PwGenOpts } from '../../shared/pwgen';
-import type { EntryView, TreeNode } from '../../shared/entry';
+import type { EntrySummary, EntryView, TreeNode } from '../../shared/entry';
 import { EntryCard } from './EntryCard';
 import { CreateForm } from './CreateForm';
 import { useClipboardTimer } from '../../shared/useClipboardTimer';
@@ -20,7 +20,7 @@ import { ScannedTotpDialog } from './ScannedTotpDialog';
 import { saveScannedTotp, type ScannedTotpDestination } from './saveScannedTotp';
 import { flattenGroups } from '../../shared/groups';
 
-function collectEntries(node: TreeNode, acc: { id: string; title: string; username: string; url: string }[] = []) {
+function collectEntries(node: TreeNode, acc: EntrySummary[] = []): EntrySummary[] {
   for (const e of node.entries) acc.push(e);
   for (const c of node.children) collectEntries(c, acc);
   return acc;
@@ -50,7 +50,8 @@ function UnlockedPopup({ dirty, refresh, unlockNotice, sessionKey }: {
   const captureLifetime = useSessionLifetime();
   const [entries, setEntries] = useState<EntryView[]>([]);
   const [tree, setTree] = useState<TreeNode | null>(null);
-  const [searchResults, setSearchResults] = useState<EntryView[]>([]);
+  const [dataRevision, setDataRevision] = useState(0);
+  const previousDirty = useRef(dirty);
   const [q, setQ] = useState(''); const [tab, setTab] = useState<{ id: number; url: string } | null>(null);
   const [rootGroup, setRootGroup] = useState(''); const [clearSecs, setClearSecs] = useState(30);
   const [pwgen, setPwgen] = useState<PwGenOpts>(DEFAULT_PWGEN);
@@ -61,6 +62,25 @@ function UnlockedPopup({ dirty, refresh, unlockNotice, sessionKey }: {
   const [scanned, setScanned] = useState<ScannedPageTotp | null>(null);
   const [notice, setNotice] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
 
+  useEffect(() => {
+    if (previousDirty.current === dirty) return;
+    previousDirty.current = dirty;
+    if (dirty) return;
+    const isAlive = captureLifetime();
+    let ignore = false;
+    // Refresh searchable metadata after save acknowledgement, without unmounting
+    // an in-progress implicit CreateForm by replacing its URL-matched entry list.
+    void (async () => {
+      try {
+        const result = await sendToSW({ type: 'getTree' });
+        if (ignore || !isAlive() || !result.ok) return;
+        setTree(result.tree);
+        setRootGroup(result.tree.groupId);
+        setDataRevision(revision => revision + 1);
+      } catch { /* Keep the last loaded summaries if metadata refresh is unavailable. */ }
+    })();
+    return () => { ignore = true; };
+  }, [dirty, captureLifetime]);
   const reloadVaultData = useCallback(async (url: string): Promise<boolean> => {
     const isAlive = captureLifetime();
     if (!isAlive()) return false;
@@ -74,6 +94,8 @@ function UnlockedPopup({ dirty, refresh, unlockNotice, sessionKey }: {
       setTree(treeResult.tree);
       setRootGroup(treeResult.tree.groupId);
     }
+    // Any accepted vault data invalidates mounted rows' cached and pending details.
+    if (entryResult.ok || treeResult.ok) setDataRevision(revision => revision + 1);
     return entryResult.ok && treeResult.ok;
   }, [captureLifetime]);
 
@@ -115,20 +137,7 @@ function UnlockedPopup({ dirty, refresh, unlockNotice, sessionKey }: {
   useEffect(() => {
     setScanned(current => current && (current.tabId !== tab?.id || current.pageUrl !== tab?.url) ? null : current);
   }, [tab?.id, tab?.url]);
-  useEffect(() => {
-    const query = q.trim().toLowerCase();
-    if (!query || !tree) { setSearchResults([]); return; }
-    let ignore = false;
-    const ids = collectEntries(tree)
-      .filter(e => `${e.title} ${e.username} ${e.url}`.toLowerCase().includes(query))
-      .map(e => e.id);
-    Promise.all(ids.map(id => sendToSW({ type: 'getEntry', entryId: id })))
-      .then(rs => {
-        if (ignore) return;
-        setSearchResults(rs.flatMap(r => (r.ok && r.entry) ? [r.entry] : []));
-      });
-    return () => { ignore = true; };
-  }, [q, tree]);
+
   useEffect(() => {
     const isAlive = captureLifetime();
     const tick = () => sendToSW({ type: 'getSyncStatus' }).then(r => isAlive() && r.ok && setSync(r));
@@ -192,7 +201,11 @@ function UnlockedPopup({ dirty, refresh, unlockNotice, sessionKey }: {
     return null;
   }
 
-  const searching = q.trim().length > 0;
+  const query = q.trim().toLowerCase();
+  const searchResults = useMemo(() => query && tree
+    ? collectEntries(tree).filter(e => `${e.title} ${e.username} ${e.url}`.toLowerCase().includes(query))
+    : [], [query, tree]);
+  const searching = query.length > 0;
   const shown = searching ? searchResults : entries;
   const groupNames = tree ? buildGroupNames(tree) : new Map<string, string>();
   const scanPageControl = {
@@ -251,7 +264,7 @@ function UnlockedPopup({ dirty, refresh, unlockNotice, sessionKey }: {
               <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
               <input className="input pl-9" placeholder="Search…" value={q} onChange={e => setQ(e.target.value)} />
             </div>
-            {shown.map(e => tab && <EntryCard key={e.id} entry={e} tabId={tab.id} onCopy={copy} groupName={groupNames.get(e.id)} />)}
+            {shown.map(e => tab && <EntryCard key={`${dataRevision}:${searching ? 'search' : 'url'}:${e.id}`} entry={e} tabId={tab.id} onCopy={copy} groupName={groupNames.get(e.id)} />)}
             {searching && shown.length === 0 &&
               <div className="empty-state mt-6">No entries match your search.</div>}
             {!searching && entries.length === 0 && tab && rootGroup && tree &&
