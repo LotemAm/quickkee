@@ -119,8 +119,9 @@ function SelectedEntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onCha
     return () => { cancelled = true; };
   }, [entryId, loadAttempt, captureLifetime]);
   useEffect(() => {
+    const isAlive = captureLifetime();
     const onKey = (ev: KeyboardEvent) => {
-      if (!e || !ev.ctrlKey) return;
+      if (!isAlive() || !e || !ev.ctrlKey) return;
       const active = document.activeElement;
       const inputFocused = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
       if (ev.key === 'c' && !inputFocused && !window.getSelection()?.toString()) {
@@ -133,7 +134,7 @@ function SelectedEntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onCha
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [e, copy]);
+  }, [e, copy, captureLifetime]);
 
   if (!e) return (
     <div className="p-4">

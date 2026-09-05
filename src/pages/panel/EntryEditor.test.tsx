@@ -1,4 +1,4 @@
-import { StrictMode } from 'react';
+import { StrictMode, useLayoutEffect } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { beforeEach, expect, test, vi } from 'vitest';
@@ -495,4 +495,22 @@ test('changing creation group resets card fields, expiry, TOTP, custom fields an
   expect(screen.getByRole('button', { name: 'Add Authenticator code' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled();
   expect(screen.getByText('More').closest('details')).not.toHaveAttribute('open');
+});
+
+
+test('keyboard shortcuts cannot copy the old entry during the replacement commit', async () => {
+  function Selection({ entryId }: { entryId: string }) {
+    useLayoutEffect(() => {
+      if (entryId === 'B') {
+        window.dispatchEvent(new KeyboardEvent('keydown', { ctrlKey: true, key: 'c' }));
+        window.dispatchEvent(new KeyboardEvent('keydown', { ctrlKey: true, key: 'b' }));
+      }
+    }, [entryId]);
+    return editor(entryId);
+  }
+  const view = render(<Selection entryId="entry-1" />);
+  await screen.findByDisplayValue('Acme');
+  holdLoads();
+  view.rerender(<Selection entryId="B" />);
+  expect(mocks.copyWithClear).not.toHaveBeenCalled();
 });
