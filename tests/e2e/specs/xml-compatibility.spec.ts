@@ -217,4 +217,3 @@ test('production extension worker runtime has no native XML globals', async ({},
     } finally { await context.close(); }
   } finally { build('build:chrome:test'); }
 });
-

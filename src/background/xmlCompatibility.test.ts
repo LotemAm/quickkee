@@ -196,4 +196,3 @@ test.each([
 ])('bounded malformed vault XML rejects: %s', async xml => {
   await expect(kdbxweb.Kdbx.loadXml(xml, credentials('password', null))).rejects.toBeInstanceOf(kdbxweb.KdbxError);
 });
-
