@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Copy, Check, Eye, EyeOff, X, Plus, Trash2, RefreshCw, SlidersHorizontal, Paperclip, Download, ChevronDown, QrCode, Loader2 } from 'lucide-react';
+import { Copy, Check, Eye, EyeOff, X, Plus, Trash2, RefreshCw, SlidersHorizontal, Paperclip, Download, ChevronDown, QrCode, Loader2, KeyRound, CreditCard } from 'lucide-react';
 import { sendToSW } from '../../shared/messages';
 import { useSessionLifetime } from '../../shared/useSessionLifetime';
 import { CARD_FLAG_KEY, CARDHOLDER_NAME_KEY, type EntryView, type AttachmentMeta } from '../../shared/entry';
@@ -325,6 +325,16 @@ function SelectedEntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onCha
     {clipState && <ClipboardBar state={clipState} onCancel={cancel} />}
     <div className="p-4">
       <div className="card">
+        <div className="segmented mb-3" role="group" aria-label="Entry type">
+          <button type="button" className="segmented-item" aria-pressed={!isCard}
+            onClick={() => setIsCard(false)}>
+            <KeyRound size={14} aria-hidden="true" /> Login
+          </button>
+          <button type="button" className="segmented-item" aria-pressed={isCard}
+            onClick={() => setIsCard(true)}>
+            <CreditCard size={14} aria-hidden="true" /> Credit card
+          </button>
+        </div>
         {field('Title', 'title')}
         {field(isCard ? 'Card Number' : 'Username', 'username')}
         {field(isCard ? 'CVV' : 'Password', 'password')}
@@ -403,12 +413,6 @@ function SelectedEntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onCha
                 ))}
               </select>
             </div>
-
-            <label className="flex cursor-pointer items-center gap-2 text-sm" style={{ color: 'var(--text)' }}>
-              <input className="h-4 w-4 accent-[var(--primary)]" type="checkbox" checked={isCard}
-                onChange={ev => setIsCard(ev.target.checked)} />
-              Mark as credit card data
-            </label>
 
             <section aria-labelledby="attachments-heading">
               <div id="attachments-heading" className="section-title block">Attachments</div>

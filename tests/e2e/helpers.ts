@@ -109,7 +109,7 @@ export async function openEntryEditorMore(page: Page): Promise<void> {
   await expect(section).not.toHaveAttribute('open', '');
   await section.locator('summary').click();
   await expect(section).toHaveAttribute('open', '');
-  await expect(page.getByLabel('Mark as credit card data')).toBeVisible();
+  await expect(page.getByLabel('Group', { exact: true })).toBeVisible();
 }
 
 export async function installDb(page: Page, kdbxPath: string = E2E_KDBX): Promise<void> {
