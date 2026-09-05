@@ -59,6 +59,30 @@ export async function openExtensionPage(
   return page;
 }
 
+/** Stop the actual extension service worker using Chromium's lifecycle control. */
+export async function stopExtensionWorker(page: Page, extensionId: string): Promise<void> {
+  const client = await page.context().newCDPSession(page);
+  const versions = new Map<string, { scriptURL: string; runningStatus: string }>();
+  const stopped = new Set<string>();
+  try {
+    client.on('ServiceWorker.workerVersionUpdated', ({ versions: updates }) => {
+      for (const version of updates) {
+        versions.set(version.versionId, version);
+        if (version.runningStatus === 'stopped') stopped.add(version.versionId);
+      }
+    });
+    await client.send('ServiceWorker.enable');
+    const running = () => [...versions].find(([, version]) =>
+      version.scriptURL.startsWith(`chrome-extension://${extensionId}/`) && version.runningStatus === 'running');
+    await expect.poll(() => running()?.[0], { timeout: 5000 }).toBeDefined();
+    const versionId = running()![0];
+    stopped.delete(versionId);
+    await client.send('ServiceWorker.stopWorker', { versionId });
+    // UnlockScreen may immediately wake a new worker. Preserve the observed stop transition.
+    await expect.poll(() => stopped.has(versionId), { timeout: 5000 }).toBe(true);
+  } finally { await client.detach(); }
+}
+
 /** A real Chromium WebAuthn implementation backed by CDP's internal virtual
  * authenticator. This proves browser PRF behavior, not physical hardware. */
 export async function addPrfAuthenticator(page: Page): Promise<void> {

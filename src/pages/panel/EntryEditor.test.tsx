@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { EntryEditor } from './EntryEditor';
@@ -86,4 +86,44 @@ test('changes an existing entry group through the same update request', async ()
     type: 'updateEntry', entryId: 'entry-1', groupId: 'root',
   })));
   expect(onChanged).toHaveBeenCalledWith('root');
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+test('a held attachment file read sends no attachment or parent callback after session unmount', async () => {
+  const fileRead = deferred<ArrayBuffer>();
+  const onChanged = vi.fn();
+  const view = render(<EntryEditor entryId="entry-1" groupId="group-1" clearSecs={30}
+    groups={[{ groupId: 'group-1', name: 'Sites', depth: 0 }]}
+    pwgen={{ length: 20, lower: true, upper: true, digits: true, symbols: true }}
+    onChanged={onChanged} onDeleted={vi.fn()} />);
+  await screen.findByRole('button', { name: 'Apply changes' });
+  const file = new File(['private attachment'], 'private.txt');
+  Object.defineProperty(file, 'arrayBuffer', { value: () => fileRead.promise });
+  fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [file] } });
+  view.unmount();
+  await act(async () => { fileRead.resolve(new ArrayBuffer(8)); });
+  expect(mocks.sendToSW.mock.calls.some(([request]) => request.type === 'addAttachment')).toBe(false);
+  expect(onChanged).not.toHaveBeenCalled();
+});
+
+test.each(['createEntry', 'updateEntry'])('%s reply cannot invoke parent callbacks after session unmount', async type => {
+  const reply = deferred<unknown>();
+  const original = mocks.sendToSW.getMockImplementation()!;
+  mocks.sendToSW.mockImplementation((request: { type: string }) => request.type === type ? reply.promise : original(request));
+  const onChanged = vi.fn(); const onCreated = vi.fn();
+  const view = render(<EntryEditor entryId={type === 'createEntry' ? null : 'entry-1'} groupId="group-1" clearSecs={30}
+    groups={[{ groupId: 'group-1', name: 'Sites', depth: 0 }]}
+    pwgen={{ length: 20, lower: true, upper: true, digits: true, symbols: true }}
+    onChanged={onChanged} onCreated={onCreated} onDeleted={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: type === 'createEntry' ? 'Create' : 'Apply changes' }));
+  await waitFor(() => expect(mocks.sendToSW.mock.calls.some(([request]) => request.type === type)).toBe(true));
+  view.unmount();
+  await act(async () => { reply.resolve({ ok: true, entryId: 'new' }); });
+  expect(onChanged).not.toHaveBeenCalled();
+  expect(onCreated).not.toHaveBeenCalled();
 });

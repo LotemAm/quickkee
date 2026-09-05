@@ -9,6 +9,7 @@ import { clearAllDrafts } from '../../shared/createDraft';
 import { makeRouter, depsFor, CLIPBOARD_CLEAR_ALARM, type SwContext } from './router';
 import { registerTestCommands } from './testCommands';
 import { CredentialCaptureStore } from '../../background/credentialCaptureStore';
+import { createVaultStatusPublisher } from '../../background/vaultStatus';
 import {
   GOOGLE_HOSTED_CALLBACK_MESSAGE,
   handleHostedGoogleOAuthMessage,
@@ -65,9 +66,14 @@ const onlineNow = () => (typeof navigator !== 'undefined' ? navigator.onLine : t
 
 // Tracks tabs with an active cert-warning badge so match-count updates don't overwrite them.
 const warnedTabs = new Set<number>();
+const vaultStatus = createVaultStatusPublisher(() => ({
+  generation: vault.lifecycleGeneration, locked: !vault.isOpen(), dbName: handle?.name, dirty: vault.dirty,
+}));
+chrome.runtime.onConnect.addListener(vaultStatus.connect);
 
 function doLock() {
   vault.lock(); handle = null; currentSource = null; autolock.disarm();
+  vaultStatus.publish();
   void clearAllDrafts(); void credentialCaptures.clearAll(); refreshAllIcons();
 }
 
@@ -83,6 +89,7 @@ const ctx: SwContext = {
   refreshAllIcons,
   online: onlineNow,
   persistPendingClipboardHash,
+  publishStatus: vaultStatus.publish,
 };
 
 const handle_ = makeRouter(ctx);
@@ -117,6 +124,7 @@ chrome.alarms.create('keepalive', { periodInMinutes: 0.5 });
 async function tryRetry() {
   if (currentSource?.kind === 'cloud' && onlineNow()) {
     try { await retryPending(currentSource, depsFor(ctx, currentSource)); } catch { /* stays pending */ }
+    finally { vaultStatus.publish(); }
   }
 }
 if (typeof self !== 'undefined' && 'addEventListener' in self) self.addEventListener('online', () => void tryRetry());

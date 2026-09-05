@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../shared/useStatus', () => ({
-  useStatus: () => ({ locked: false, dirty: mocks.dirty, refresh: mocks.refresh }),
+  useStatus: () => ({ locked: false, sessionKey: 'fixture:1', dirty: mocks.dirty, refresh: mocks.refresh }),
 }));
 vi.mock('../../shared/messages', () => ({ sendToSW: mocks.sendToSW }));
 vi.mock('../../shared/settings', () => ({

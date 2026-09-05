@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Search, Settings, Cloud, CloudOff, RefreshCw, PanelRight, Lock, Plus, X } from 'lucide-react';
 import { useStatus } from '../../shared/useStatus';
+import { useSessionLifetime } from '../../shared/useSessionLifetime';
 import { useVaultActivity } from '../../shared/useVaultActivity';
 import { UnlockScreen } from '../../shared/UnlockScreen';
 import { sendToSW } from '../../shared/messages';
@@ -32,8 +33,21 @@ function buildGroupNames(node: TreeNode, map: Map<string, string> = new Map()) {
 }
 
 export function Popup() {
-  const { locked, dirty, refresh } = useStatus();
+  const { locked, dirty, refresh, sessionKey } = useStatus();
   useVaultActivity(!locked);
+  const [unlockNotice, setUnlockNotice] = useState('');
+  useEffect(() => { void loadSettings().then(s => applyTheme(s.theme)); }, []);
+  if (locked) return <UnlockScreen onUnlocked={notice => {
+    setUnlockNotice(notice ?? '');
+    void refresh();
+  }} />;
+  return <UnlockedPopup key={sessionKey} dirty={dirty} refresh={refresh} unlockNotice={unlockNotice} />;
+}
+
+function UnlockedPopup({ dirty, refresh, unlockNotice }: {
+  dirty: boolean; refresh: () => Promise<void>; unlockNotice: string;
+}) {
+  const captureLifetime = useSessionLifetime();
   const [entries, setEntries] = useState<EntryView[]>([]);
   const [tree, setTree] = useState<TreeNode | null>(null);
   const [searchResults, setSearchResults] = useState<EntryView[]>([]);
@@ -42,26 +56,31 @@ export function Popup() {
   const [pwgen, setPwgen] = useState<PwGenOpts>(DEFAULT_PWGEN);
   const [sync, setSync] = useState<{ source: string | null; pendingUpload: boolean; online: boolean } | null>(null);
   const [creating, setCreating] = useState(false);
-  const [unlockNotice, setUnlockNotice] = useState('');
   const [scanning, setScanning] = useState(false);
   const [scanError, setScanError] = useState('');
   const [scanned, setScanned] = useState<ScannedPageTotp | null>(null);
   const [notice, setNotice] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
 
   const reloadVaultData = useCallback(async (url: string): Promise<boolean> => {
+    const isAlive = captureLifetime();
+    if (!isAlive()) return false;
     const [entryResult, treeResult] = await Promise.all([
       sendToSW({ type: 'getEntriesForUrl', url }),
       sendToSW({ type: 'getTree' }),
     ]);
+    if (!isAlive()) return false;
     if (entryResult.ok) setEntries(entryResult.entries);
     if (treeResult.ok) {
       setTree(treeResult.tree);
       setRootGroup(treeResult.tree.groupId);
     }
     return entryResult.ok && treeResult.ok;
-  }, []);
+  }, [captureLifetime]);
 
-  useEffect(() => { loadSettings().then(s => { applyTheme(s.theme); setClearSecs(s.clipboardClearSeconds); setPwgen(s.pwgen); }); }, []);
+  useEffect(() => {
+    const isAlive = captureLifetime();
+    void loadSettings().then(s => { if (isAlive()) { setClearSecs(s.clipboardClearSeconds); setPwgen(s.pwgen); } });
+  }, [captureLifetime]);
   useEffect(() => {
     const p = new URLSearchParams(location.search);
     if (import.meta.env.VITE_QK_TEST === '1') {
@@ -87,19 +106,15 @@ export function Popup() {
       chrome.tabs.onUpdated.removeListener(onUpdated);
     };
   }, []);
-  useEffect(() => { if (locked || !tab) return;
+  useEffect(() => { if (!tab) return;
+    const isAlive = captureLifetime();
     setCreating(false);
     void reloadVaultData(tab.url);
-    loadDraft(tab.url).then(d => d && setCreating(true));
-  }, [locked, tab, reloadVaultData]);
+    loadDraft(tab.url).then(d => isAlive() && d && setCreating(true));
+  }, [tab, reloadVaultData, captureLifetime]);
   useEffect(() => {
-    if (locked) {
-      setScanned(null);
-      setScanError('');
-      return;
-    }
     setScanned(current => current && (current.tabId !== tab?.id || current.pageUrl !== tab?.url) ? null : current);
-  }, [locked, tab?.id, tab?.url]);
+  }, [tab?.id, tab?.url]);
   useEffect(() => {
     const query = q.trim().toLowerCase();
     if (!query || !tree) { setSearchResults([]); return; }
@@ -115,16 +130,17 @@ export function Popup() {
     return () => { ignore = true; };
   }, [q, tree]);
   useEffect(() => {
-    if (locked) return;
-    const tick = () => sendToSW({ type: 'getSyncStatus' }).then(r => r.ok && setSync(r));
+    const isAlive = captureLifetime();
+    const tick = () => sendToSW({ type: 'getSyncStatus' }).then(r => isAlive() && r.ok && setSync(r));
     void tick();
     const iv = setInterval(tick, 4000);
     return () => clearInterval(iv);
-  }, [locked]);
+  }, [captureLifetime]);
 
   const { copy, state: clipState, cancel } = useClipboardTimer(clearSecs);
 
   async function scanPage() {
+    const isAlive = captureLifetime();
     if (scanning) return;
     setScanning(true);
     setScanError('');
@@ -132,25 +148,34 @@ export function Popup() {
     setScanned(null);
     try {
       const result = await scanVisibleTabForTotp();
+      if (!isAlive()) return;
       const loaded = await reloadVaultData(result.pageUrl);
+      if (!isAlive()) return;
       if (!loaded) throw new Error('Could not load vault entries for this page.');
       setTab({ id: result.tabId, url: result.pageUrl });
       setCreating(false);
       setScanned(result);
     } catch (error) {
+      if (!isAlive()) return;
       setScanError(error instanceof Error ? error.message : 'Could not scan the visible page. Try again.');
     } finally {
-      setScanning(false);
+      if (isAlive()) setScanning(false);
     }
   }
 
   async function confirmScanned(destination: ScannedTotpDestination): Promise<string | null> {
+    const isAlive = captureLifetime();
     if (!scanned) return 'The scanned code is no longer available. Scan the page again.';
-    const result = await saveScannedTotp(scanned.config, destination);
+    const result = await saveScannedTotp(scanned.config, destination, request => {
+      if (!isAlive()) return Promise.resolve({ ok: false, error: 'staleSession' });
+      return sendToSW(request);
+    });
+    if (!isAlive()) return null;
     if (result.status === 'failed') return 'Could not add the authenticator code. The vault was not changed.';
 
     setScanned(null);
     await Promise.allSettled([reloadVaultData(scanned.pageUrl), refresh()]);
+    if (!isAlive()) return null;
     if (result.status === 'saved') {
       setNotice({ kind: 'success', message: 'Authenticator code saved.' });
     } else if (result.status === 'unsaved') {
@@ -167,10 +192,6 @@ export function Popup() {
     return null;
   }
 
-  if (locked) return <UnlockScreen onUnlocked={notice => {
-    setUnlockNotice(notice ?? '');
-    void refresh();
-  }} />;
   const searching = q.trim().length > 0;
   const shown = searching ? searchResults : entries;
   const groupNames = tree ? buildGroupNames(tree) : new Map<string, string>();
@@ -193,7 +214,10 @@ export function Popup() {
               {!sync.online ? <CloudOff size={15} /> : sync.pendingUpload ? <RefreshCw size={15} /> : <Cloud size={15} />}
             </span>
           )}
-          <button className="icon-btn" aria-label="Lock database" title="Lock database" onClick={() => lockVault(dirty).then(refresh)}>
+          <button className="icon-btn" aria-label="Lock database" title="Lock database" onClick={() => {
+            const isAlive = captureLifetime();
+            void lockVault(dirty).then(() => { if (isAlive()) void refresh(); });
+          }}>
             <Lock size={16} />
           </button>
           <button className="icon-btn" aria-label="Open side panel" title="Open side panel" onClick={() => tab && chrome.sidePanel.open({ tabId: tab.id })}>
