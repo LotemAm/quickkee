@@ -24,22 +24,23 @@ afterEach(() => {
   }
 });
 
-function listPage(body: unknown, pageToken?: string): Handler {
-  return listResponse(() => new Response(JSON.stringify(body), { status: 200 }), pageToken);
+function listPage(body: unknown, pageToken?: string, accessToken = 'TOKEN'): Handler {
+  return listResponse(() => new Response(JSON.stringify(body), { status: 200 }), pageToken, accessToken);
 }
 
-function listResponse(response: () => Response, pageToken?: string): Handler {
+function listResponse(response: () => Response, pageToken?: string, accessToken = 'TOKEN'): Handler {
   return (url, init) => {
     // Provider error handling must not swallow request assertion failures.
     requestAssertions.push(() => {
       const request = new URL(url);
       expect(`${request.origin}${request.pathname}`).toBe('https://www.googleapis.com/drive/v3/files');
       expect(Object.fromEntries(request.searchParams)).toEqual({
-        q: "name contains '.kdbx' and trashed = false",
+        q: "trashed = false and mimeType != 'application/vnd.google-apps.folder'",
         fields: 'nextPageToken,files(id,name,headRevisionId)',
         ...(pageToken === undefined ? {} : { pageToken }),
       });
-      expect(init).toEqual({ headers: { Authorization: 'Bearer TOKEN' } });
+      if (pageToken !== undefined) expect(url).toContain(`&pageToken=${encodeURIComponent(pageToken)}`);
+      expect(init).toEqual({ headers: { Authorization: `Bearer ${accessToken}` } });
     });
     return response();
   };
@@ -69,6 +70,45 @@ test('listKdbxFiles maps Drive files', async () => {
   }));
   const files = await new GDriveProvider(token).listKdbxFiles();
   expect(files).toEqual([{ fileId: 'd1', name: 'vault.kdbx', rev: 'h1' }]);
+});
+
+test('listKdbxFiles filters mixed filenames by case-insensitive suffix across pages', async () => {
+  mockSequence(
+    listPage({
+      files: [
+        { id: 'personal', name: 'Personal.kdbx', headRevisionId: 'h1' },
+        { id: 'notes', name: 'notes.txt' },
+      ],
+      nextPageToken: 'second',
+    }),
+    listPage({
+      files: [
+        { id: 'team', name: 'TEAM.KDBX', headRevisionId: 'h2' },
+        { id: 'backup', name: 'archive.kdbx.bak' },
+        { id: 'prefix', name: '.kdbx-not-a-vault.txt' },
+      ],
+    }, 'second'),
+  );
+  expect(await new GDriveProvider(token).listKdbxFiles()).toEqual([
+    { fileId: 'personal', name: 'Personal.kdbx', rev: 'h1' },
+    { fileId: 'team', name: 'TEAM.KDBX', rev: 'h2' },
+  ]);
+});
+
+test.each([
+  { firstPage: 'empty', files: [] },
+  { firstPage: 'non-vault', files: [{ id: 'notes', name: 'notes.txt' }] },
+])('listKdbxFiles finds later vaults after an $firstPage page with refreshed auth', async ({ files }) => {
+  const pageToken = 'opaque+/=?&#% token';
+  const getToken = vi.fn().mockResolvedValueOnce('FIRST').mockResolvedValueOnce('SECOND');
+  mockSequence(
+    listPage({ files, nextPageToken: pageToken }, undefined, 'FIRST'),
+    listPage({ files: [{ id: 'personal', name: 'Personal.kdbx' }] }, pageToken, 'SECOND'),
+  );
+  expect(await new GDriveProvider(getToken).listKdbxFiles()).toEqual([
+    { fileId: 'personal', name: 'Personal.kdbx', rev: '' },
+  ]);
+  expect(getToken).toHaveBeenCalledTimes(2);
 });
 
 test('listKdbxFiles follows opaque tokens through empty pages in provider order', async () => {

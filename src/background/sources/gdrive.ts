@@ -15,7 +15,7 @@ export class GDriveProvider implements CloudProvider {
   async auth(): Promise<void> { await this.getToken(); }
 
   async listKdbxFiles(): Promise<RemoteFile[]> {
-    const q = encodeURIComponent("name contains '.kdbx' and trashed = false");
+    const q = encodeURIComponent("trashed = false and mimeType != 'application/vnd.google-apps.folder'");
     const url = `${API}/files?q=${q}&fields=${encodeURIComponent('nextPageToken,files(id,name,headRevisionId)')}`;
     const files: RemoteFile[] = [];
     let pageToken: string | undefined;
