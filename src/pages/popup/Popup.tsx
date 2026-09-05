@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Settings, Cloud, CloudOff, RefreshCw, PanelRight, Lock, Plus, X } from 'lucide-react';
 import { useStatus } from '../../shared/useStatus';
 import { useSessionLifetime } from '../../shared/useSessionLifetime';
@@ -51,6 +51,7 @@ function UnlockedPopup({ dirty, refresh, unlockNotice, sessionKey }: {
   const [entries, setEntries] = useState<EntryView[]>([]);
   const [tree, setTree] = useState<TreeNode | null>(null);
   const [dataRevision, setDataRevision] = useState(0);
+  const previousDirty = useRef(dirty);
   const [q, setQ] = useState(''); const [tab, setTab] = useState<{ id: number; url: string } | null>(null);
   const [rootGroup, setRootGroup] = useState(''); const [clearSecs, setClearSecs] = useState(30);
   const [pwgen, setPwgen] = useState<PwGenOpts>(DEFAULT_PWGEN);
@@ -61,6 +62,24 @@ function UnlockedPopup({ dirty, refresh, unlockNotice, sessionKey }: {
   const [scanned, setScanned] = useState<ScannedPageTotp | null>(null);
   const [notice, setNotice] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
 
+  useEffect(() => {
+    if (previousDirty.current === dirty) return;
+    previousDirty.current = dirty;
+    const isAlive = captureLifetime();
+    let ignore = false;
+    // Refresh searchable metadata on mutation/save status changes, without unmounting
+    // an in-progress implicit CreateForm by replacing its URL-matched entry list.
+    void (async () => {
+      try {
+        const result = await sendToSW({ type: 'getTree' });
+        if (ignore || !isAlive() || !result.ok) return;
+        setTree(result.tree);
+        setRootGroup(result.tree.groupId);
+        setDataRevision(revision => revision + 1);
+      } catch { /* Keep the last loaded summaries if metadata refresh is unavailable. */ }
+    })();
+    return () => { ignore = true; };
+  }, [dirty, captureLifetime]);
   const reloadVaultData = useCallback(async (url: string): Promise<boolean> => {
     const isAlive = captureLifetime();
     if (!isAlive()) return false;

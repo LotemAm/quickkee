@@ -216,3 +216,56 @@ test.each(['getTree', 'getEntriesForUrl'])('accepted partial refresh invalidates
   expect(mocks.copy).toHaveBeenCalledExactlyOnceWith('fresh', 'Password');
   expect(reads()).toHaveLength(2);
 });
+
+test('external vault mutation/save refreshes searchable TOTP metadata without fetching full URL entries or search details', async () => {
+  mocks.send.mockImplementation(async (request: Request) => request.type === 'getTotpCode'
+    ? { ok: true, code: '654321', period: 30, expiresAt: Date.now() + 30_000 } : respond(request));
+  await load(); search('match 000');
+  expect(screen.queryByRole('button', { name: 'Show authenticator code' })).not.toBeInTheDocument();
+  tree = { ...tree, children: [{ ...tree.children[0], entries: [{ ...summaries[0], hasTotp: true, totpPeriod: 30 }] }] };
+  act(() => onMessage.fire({ type: 'snapshot', snapshot: {
+    workerIdentity: 'worker', generation: 1, sequence: 2, locked: false, dirty: true,
+  } }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Show authenticator code' }));
+  await screen.findByText('654321');
+  tree = { ...tree, children: [{ ...tree.children[0], entries: [{ ...summaries[0], title: 'Saved metadata' }] }] };
+  act(() => onMessage.fire({ type: 'snapshot', snapshot: {
+    workerIdentity: 'worker', generation: 1, sequence: 3, locked: false, dirty: false,
+  } }));
+  search('user-0');
+  await screen.findByText('Saved metadata');
+  expect(screen.queryByRole('button', { name: 'Show authenticator code' })).not.toBeInTheDocument();
+  expect(screen.queryByText('654321')).not.toBeInTheDocument();
+  expect(reads()).toHaveLength(0);
+  expect(mocks.send.mock.calls.filter(([r]) => r.type === 'getEntriesForUrl')).toHaveLength(1);
+  expect(mocks.send.mock.calls.filter(([r]) => r.type === 'getTree')).toHaveLength(3);
+});
+
+test('a superseded mutation metadata read cannot overwrite saved summaries or complete old password work', async () => {
+  const staleTree = deferred<unknown>();
+  const staleDetails = deferred<unknown>();
+  let requestedTree = 0;
+  mocks.send.mockImplementation(async (request: Request) => {
+    if (request.type === 'getTree' && ++requestedTree === 2) return staleTree.promise;
+    if (request.type === 'getEntry') return staleDetails.promise;
+    return respond(request);
+  });
+  await load(); search('user-0');
+  fireEvent.click(screen.getByRole('button', { name: 'Copy password' }));
+  act(() => onMessage.fire({ type: 'snapshot', snapshot: {
+    workerIdentity: 'worker', generation: 1, sequence: 2, locked: false, dirty: true,
+  } }));
+  tree = { ...tree, children: [{ ...tree.children[0], entries: [{ ...summaries[0], title: 'Current saved metadata' }] }] };
+  act(() => onMessage.fire({ type: 'snapshot', snapshot: {
+    workerIdentity: 'worker', generation: 1, sequence: 3, locked: false, dirty: false,
+  } }));
+  await screen.findByText('Current saved metadata');
+  await act(async () => {
+    staleTree.resolve({ ok: true, tree: { ...tree, children: [] } });
+    staleDetails.resolve({ ok: true, entry: details(summaries[0], 'obsolete') });
+  });
+  expect(screen.getByText('Current saved metadata')).toBeVisible();
+  expect(mocks.copy).not.toHaveBeenCalled();
+  expect(reads()).toHaveLength(1);
+  expect(mocks.send.mock.calls.filter(([r]) => r.type === 'getEntriesForUrl')).toHaveLength(1);
+});

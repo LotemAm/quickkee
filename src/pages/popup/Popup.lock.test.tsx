@@ -175,3 +175,33 @@ test.each(['lock', 'disconnect', 'replacement'])('%s while creating cancels pers
   expect(mocks.send).not.toHaveBeenCalledWith({ type: 'save' });
   expect(mocks.send.mock.calls.some(([r]) => r.type === 'fillRequest')).toBe(false);
 });
+
+test('mutation and save metadata refreshes keep the implicit creation form mounted until its save completes', async () => {
+  const save = deferred<unknown>();
+  let created = false;
+  mocks.send.mockImplementation(async (request: Request) => {
+    if (request.type === 'getEntriesForUrl') return { ok: true, entries: created ? [entry] : [] };
+    if (request.type === 'createEntry') { created = true; return { ok: true, entryId: entry.id }; }
+    if (request.type === 'save') return save.promise;
+    return respond(request);
+  });
+  render(<Popup />); transition(false);
+  await waitFor(() => expect(screen.getByPlaceholderText('Password')).toHaveValue('generated'));
+  fireEvent.change(screen.getByPlaceholderText('Title'), { target: { value: 'Creation must finish' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Create & Save' }));
+  await waitFor(() => expect(mocks.send).toHaveBeenCalledWith({ type: 'save' }));
+  for (const [dirty, sequence] of [[true, 2], [false, 3]] as const) {
+    await act(async () => onMessage.fire({ type: 'snapshot', snapshot: {
+      workerIdentity: 'worker', generation: 1, sequence, locked: false, dirty,
+    } }));
+    expect(screen.getByPlaceholderText('Title')).toHaveValue('Creation must finish');
+    expect(screen.getByPlaceholderText('Password')).toHaveValue('generated');
+    expect(mocks.send.mock.calls.filter(([r]) => r.type === 'getEntriesForUrl')).toHaveLength(1);
+    expect(mocks.clearDraft).not.toHaveBeenCalled();
+  }
+  await act(async () => { save.resolve({ ok: true }); });
+  await screen.findByText('Private login');
+  expect(mocks.clearDraft).toHaveBeenCalledTimes(1);
+  expect(mocks.send.mock.calls.filter(([r]) => r.type === 'createEntry')).toHaveLength(1);
+  expect(mocks.send.mock.calls.filter(([r]) => r.type === 'save')).toHaveLength(1);
+});
