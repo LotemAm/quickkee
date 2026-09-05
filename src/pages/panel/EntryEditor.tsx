@@ -10,7 +10,7 @@ import { PasswordRulesPanel } from '../../shared/PasswordRulesPanel';
 import { arrayBufferToBase64, formatBytes } from '../../shared/bytes';
 import { downloadAttachment } from '../../shared/attachments';
 import { TotpSetup } from '../../shared/TotpSetup';
-import type { TotpConfig } from '../../background/totp';
+import { toOtpUri, type TotpConfig } from '../../background/totp';
 import { IconTooltipButton } from '../../shared/IconTooltipButton';
 import { scanVisibleTabForTotp } from '../popup/scanVisibleTabForTotp';
 import type { GroupOption } from '../../shared/groups';
@@ -28,7 +28,7 @@ const BLANK_ENTRY: EntryView = {
   hasTotp: false, totpPeriod: null, attachments: [],
 };
 
-export function EntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChanged, onCreated, onDeleted }: {
+interface EntryEditorProps {
   entryId: string | null;
   groupId?: string;
   groups: GroupOption[];
@@ -37,9 +37,19 @@ export function EntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChan
   onChanged: (groupId?: string) => void;
   onCreated?: (entryId: string, groupId?: string) => void;
   onDeleted: () => void;
-}) {
+}
+
+export function EntryEditor(props: EntryEditorProps) {
+  // A selection owns every field, reveal state and async continuation below it.
+  const key = props.entryId === null ? `create:${props.groupId ?? ''}` : `entry:${props.entryId}`;
+  return <SelectedEntryEditor key={key} {...props} />;
+}
+
+function SelectedEntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChanged, onCreated, onDeleted }: EntryEditorProps) {
   const captureLifetime = useSessionLifetime();
-  const [e, setE] = useState<EntryView | null>(null);
+  const [e, setE] = useState<EntryView | null>(entryId === null ? BLANK_ENTRY : null);
+  const [loadError, setLoadError] = useState('');
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [showPass, setShowPass] = useState(false);
   const [showCardNumber, setShowCardNumber] = useState(false);
   const [expires, setExpires] = useState<number | null>(null);
@@ -66,47 +76,52 @@ export function EntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChan
   const { copy, state: clipState, cancel } = useClipboardTimer(clearSecs);
   useEffect(() => { setSelectedGroupId(groupId ?? ''); }, [entryId, groupId]);
   useEffect(() => {
+    if (entryId === null) return;
     const isAlive = captureLifetime();
-    setShowPass(false);
-    setShowCardNumber(false);
-    setDeleteError('');
-    setSaveError('');
-    setOpts(pwgen);
-    setShowRules(false);
-    setIsCard(false);
-    setCardholderName('');
-    setAttachError('');
-    setInitialTotp(null);
-    setTotp(null);
-    setTotpError('');
-    setScanningTotp(false);
-    setScanTotpError('');
-    scanVersionRef.current += 1;
-    if (entryId === null) {
-      setE(BLANK_ENTRY); setExpires(null); setCustom([]); setOrigKeys([]); setAttachments([]);
-      return;
-    }
-    sendToSW({ type: 'getEntry', entryId }).then(r => {
-      if (!isAlive()) return;
-      if (r.ok && r.entry) {
-        setE(r.entry); setExpires(r.entry.expires);
-        setIsCard(r.entry.isCard);
-        setCardholderName(r.entry.fields.find(f => f.key === CARDHOLDER_NAME_KEY)?.value ?? '');
-        setCustom(r.entry.fields.filter(f => f.key !== CARDHOLDER_NAME_KEY).map(f => ({ key: f.key, value: f.value })));
-        setOrigKeys(r.entry.fields.map(f => f.key));
-        setAttachments(r.entry.attachments);
+    let cancelled = false;
+    setLoadError('');
+    void (async () => {
+      try {
+        const [entryResult, totpResult] = await Promise.all([
+          sendToSW({ type: 'getEntry', entryId }),
+          sendToSW({ type: 'getTotpConfig', entryId }),
+        ]);
+        if (!isAlive() || cancelled) return;
+        if (!entryResult.ok) throw new Error(entryResult.error);
+        if (!totpResult.ok) throw new Error(totpResult.error);
+        const loaded = entryResult.entry;
+        if (!loaded || loaded.id !== entryId
+          || [loaded.title, loaded.username, loaded.password, loaded.url].some(value => typeof value !== 'string')
+          || !Array.isArray(loaded.fields) || !Array.isArray(loaded.attachments)) {
+          throw new Error('Could not load the selected entry.');
+        }
+        if (totpResult.config === undefined) throw new Error('Could not load the authenticator configuration.');
+        // Validate before mounting TotpSetup, which serializes the configuration.
+        if (totpResult.config !== null) toOtpUri(totpResult.config);
+        const fields = loaded.fields.filter(f => f.key !== CARDHOLDER_NAME_KEY)
+          .map(f => ({ key: f.key, value: f.value }));
+        const keys = loaded.fields.map(f => f.key);
+        setExpires(loaded.expires);
+        setIsCard(loaded.isCard);
+        setCardholderName(loaded.fields.find(f => f.key === CARDHOLDER_NAME_KEY)?.value ?? '');
+        setCustom(fields);
+        setOrigKeys(keys);
+        setAttachments(loaded.attachments);
+        setInitialTotp(totpResult.config);
+        setTotp(totpResult.config);
+        setE(loaded);
+      } catch (error) {
+        if (isAlive() && !cancelled) {
+          setLoadError(error instanceof Error && error.message ? error.message : 'Could not load the selected entry.');
+        }
       }
-    });
-    sendToSW({ type: 'getTotpConfig', entryId }).then(r => {
-      if (!isAlive()) return;
-      if (r.ok) { setInitialTotp(r.config); setTotp(r.config); }
-      else setTotpError(r.error);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entryId]);
+    })();
+    return () => { cancelled = true; };
+  }, [entryId, loadAttempt, captureLifetime]);
   useEffect(() => {
+    const isAlive = captureLifetime();
     const onKey = (ev: KeyboardEvent) => {
-      if (!e || !ev.ctrlKey) return;
+      if (!isAlive() || !e || !ev.ctrlKey) return;
       const active = document.activeElement;
       const inputFocused = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
       if (ev.key === 'c' && !inputFocused && !window.getSelection()?.toString()) {
@@ -119,9 +134,16 @@ export function EntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChan
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [e, copy]);
+  }, [e, copy, captureLifetime]);
 
-  if (!e) return null;
+  if (!e) return (
+    <div className="p-4">
+      {loadError ? <>
+        <p className="alert-error mb-3" role="alert">{loadError}</p>
+        <button className="btn-xs" onClick={() => setLoadAttempt(attempt => attempt + 1)}>Retry</button>
+      </> : <p role="status">Loading entry…</p>}
+    </div>
+  );
   const field = (label: string, key: 'title' | 'username' | 'url' | 'password') => {
     const secret = key === 'password';
     // Card Number (username, when isCard) gets the same mask/reveal UX as Password/CVV, but
@@ -142,9 +164,7 @@ export function EntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChan
         {key === 'password' && (
           <button className="icon-btn" aria-label="Generate password" title="Generate password"
             disabled={noClass}
-            onClick={() => sendToSW({ type: 'generatePassword', opts }).then(r => {
-              if (r.ok) { setE({ ...e, password: r.password }); setShowPass(true); }
-            })}>
+            onClick={generatePassword}>
             <RefreshCw size={14} />
           </button>
         )}
@@ -166,9 +186,21 @@ export function EntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChan
       )}
     </div>);
   };
+  async function generatePassword() {
+    const isAlive = captureLifetime();
+    if (!isAlive()) return;
+    try {
+      const result = await sendToSW({ type: 'generatePassword', opts });
+      if (!isAlive()) return;
+      if (result.ok) {
+        setE(current => current ? { ...current, password: result.password } : current);
+        setShowPass(true);
+      } else setSaveError(result.error);
+    } catch { if (isAlive()) setSaveError('Could not generate password.'); }
+  }
   async function scanPageQr() {
     const isAlive = captureLifetime();
-    if (scanningTotp) return;
+    if (!isAlive() || scanningTotp) return;
     const scanVersion = ++scanVersionRef.current;
     setScanningTotp(true);
     setScanTotpError('');
@@ -188,10 +220,11 @@ export function EntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChan
   }
   async function save() {
     const isAlive = captureLifetime();
+    if (!isAlive() || !e || (entryId !== null && e.id !== entryId)) return;
     setSaveError('');
     if (!selectedGroupId) { setSaveError('Select a group.'); return; }
     const fields: Record<string, string> = {
-      Title: e!.title, UserName: e!.username, URL: e!.url, Password: e!.password,
+      Title: e.title, UserName: e.username, URL: e.url, Password: e.password,
       [CARD_FLAG_KEY]: isCard ? '1' : '',
     };
     const keptKeys = new Set<string>();
@@ -212,7 +245,7 @@ export function EntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChan
     }
     const removeKeys = origKeys.filter(k => !keptKeys.has(k));
     try {
-      const result = await sendToSW({ type: 'updateEntry', entryId, fields, expires, removeKeys, totp, groupId: selectedGroupId });
+      const result = await sendToSW({ type: 'updateEntry', entryId: e.id, fields, expires, removeKeys, totp, groupId: selectedGroupId });
       if (!isAlive()) return;
       if (!result.ok) { setSaveError(result.error); return; }
     } catch { if (isAlive()) setSaveError('Could not update entry.'); return; }
@@ -225,37 +258,51 @@ export function EntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChan
   }
   async function del() {
     const isAlive = captureLifetime();
-    if (entryId === null) return;
+    if (!isAlive() || !e || entryId === null || e.id !== entryId) return;
     if (!confirm('Delete this entry?')) return;
-    const r = await sendToSW({ type: 'deleteEntry', entryId });
-    if (!isAlive()) return;
-    if (r.ok) onDeleted();
-    else setDeleteError(r.error);
+    try {
+      const r = await sendToSW({ type: 'deleteEntry', entryId: e.id });
+      if (!isAlive()) return;
+      if (r.ok) onDeleted();
+      else setDeleteError(r.error);
+    } catch { if (isAlive()) setDeleteError('Could not delete entry.'); }
   }
   async function onFilePicked(ev: React.ChangeEvent<HTMLInputElement>) {
     const isAlive = captureLifetime();
     const file = ev.target.files?.[0];
     ev.target.value = '';
-    if (!file || entryId === null) return;
+    if (!isAlive() || !file || !e || entryId === null || e.id !== entryId) return;
     setAttachError('');
-    const bytes = await file.arrayBuffer();
-    if (!isAlive()) return;
-    const data = arrayBufferToBase64(bytes);
-    const r = await sendToSW({ type: 'addAttachment', entryId, name: file.name, data });
-    if (!isAlive()) return;
-    if (r.ok) {
-      setAttachments(a => [...a.filter(x => x.name !== file.name), { name: file.name, size: file.size }]);
-      onChanged();
-    } else setAttachError(r.error);
+    try {
+      const bytes = await file.arrayBuffer();
+      if (!isAlive()) return;
+      const data = arrayBufferToBase64(bytes);
+      const r = await sendToSW({ type: 'addAttachment', entryId: e.id, name: file.name, data });
+      if (!isAlive()) return;
+      if (r.ok) {
+        setAttachments(a => [...a.filter(x => x.name !== file.name), { name: file.name, size: file.size }]);
+        onChanged();
+      } else setAttachError(r.error);
+    } catch { if (isAlive()) setAttachError('Could not add attachment.'); }
   }
   async function removeAttachment(name: string) {
     const isAlive = captureLifetime();
-    if (entryId === null) return;
+    if (!isAlive() || !e || entryId === null || e.id !== entryId) return;
     if (!confirm(`Remove attachment "${name}"?`)) return;
-    const r = await sendToSW({ type: 'removeAttachment', entryId, name });
-    if (!isAlive()) return;
-    if (r.ok) { setAttachments(a => a.filter(x => x.name !== name)); onChanged(); }
-    else setAttachError(r.error);
+    try {
+      const r = await sendToSW({ type: 'removeAttachment', entryId: e.id, name });
+      if (!isAlive()) return;
+      if (r.ok) { setAttachments(a => a.filter(x => x.name !== name)); onChanged(); }
+      else setAttachError(r.error);
+    } catch { if (isAlive()) setAttachError('Could not remove attachment.'); }
+  }
+  async function download(name: string) {
+    const isAlive = captureLifetime();
+    if (!isAlive() || !e || entryId === null || e.id !== entryId) return;
+    try {
+      const error = await downloadAttachment(e.id, name);
+      if (isAlive() && error) setAttachError(error);
+    } catch { if (isAlive()) setAttachError('Could not download attachment.'); }
   }
   return (
   <div>
@@ -343,7 +390,7 @@ export function EntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChan
                   <span className="flex-1 truncate text-sm">{a.name}</span>
                   <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{formatBytes(a.size)}</span>
                   <button className="icon-btn" aria-label={`Download ${a.name}`} title="Download"
-                    onClick={() => downloadAttachment(entryId!, a.name).then(err => { if (err) setAttachError(err); })}>
+                    onClick={() => download(a.name)}>
                     <Download size={15} />
                   </button>
                   <button className="icon-btn" aria-label={`Remove ${a.name}`} title="Remove" onClick={() => removeAttachment(a.name)}>
