@@ -723,3 +723,163 @@ test('dirty stays cleared and pendingUpload is true when upload throws after cac
   expect(d.vault.dirty).toBe(false);
   expect(out.pendingUpload).toBe(true);
 });
+
+describe.each(['locked', 'dirty replacement'] as const)('atomic cloud open from %s', initial => {
+  test.each(['cached decrypt', 'remote decrypt', 'merge', 'serialize', 'cache abort'] as const)(
+    '%s failure retains the live session', async phase => {
+      const p = new FakeCloudProvider();
+      const fileId = `atomic-${initial}-${phase}`;
+      p.setFile(fileId, 'candidate.kdbx', baseBytes(), 'r2');
+      const d = deps(p); const src = source(fileId, 'original');
+      let id: string | undefined;
+      if (initial === 'dirty replacement') {
+        await d.vault.open(baseBytes(), PW, null);
+        id = d.vault.entriesForUrl('https://github.com')[0].id;
+        d.vault.updateEntry(id, { UserName: 'old unsaved secret' });
+      }
+      const before = { generation: d.vault.lifecycleGeneration, version: d.vault.mutationVersion,
+        dirty: d.vault.dirty, entry: id ? d.vault.getEntry(id) : null };
+      if (phase !== 'remote decrypt' && phase !== 'cache abort') await putCache(cacheKey('dropbox', fileId), {
+        bytes: baseBytes(), basedOnRev: phase === 'cached decrypt' ? 'r2' : 'r1',
+        pendingUpload: phase !== 'cached decrypt', lastSyncedAt: 0,
+      });
+      const gate = Promise.withResolvers<void>(); const started = Promise.withResolvers<void>();
+      const failure = new Error(`failed ${phase}`);
+      const hold = phase.includes('decrypt') ? vi.spyOn(kdbxweb.Kdbx, 'load').mockImplementationOnce(async () => {
+        started.resolve(); await gate.promise; throw failure;
+      }) : phase === 'merge' ? vi.spyOn(Vault.prototype, 'mergeRemote').mockImplementationOnce(async () => {
+        started.resolve(); await gate.promise; throw failure;
+      }) : phase === 'serialize' ? vi.spyOn(Vault.prototype, 'serialize').mockImplementationOnce(async () => {
+        started.resolve(); await gate.promise; throw failure;
+      }) : (() => {
+        const put = IDBObjectStore.prototype.put;
+        return vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementationOnce(function (this: IDBObjectStore, value, key) {
+          const request = put.call(this, value, key);
+          request.addEventListener('success', () => { this.transaction.abort(); started.resolve(); });
+          return request;
+        });
+      })();
+      const onOpened = vi.fn();
+      const opening = openCloud(src, { ...d, onOpened }, PW, null);
+      const rejected = expect(opening).rejects.toBeDefined();
+      try {
+        await started.promise;
+        // Even after decryption, a preparing candidate cannot expose plaintext through live reads.
+        expect(d.vault.isOpen()).toBe(initial !== 'locked');
+        expect(d.vault.lifecycleGeneration).toBe(before.generation);
+        if (id) expect(d.vault.getEntry(id)).toEqual(before.entry);
+        else expect(() => d.vault.getTree()).toThrow('locked');
+        gate.resolve(); await rejected;
+        expect(d.vault.lifecycleGeneration).toBe(before.generation);
+        expect(d.vault.mutationVersion).toBe(before.version);
+        expect(d.vault.dirty).toBe(before.dirty);
+        expect(src.basedOnRev).toBe('original'); expect(onOpened).not.toHaveBeenCalled();
+        if (id) expect(d.vault.getEntry(id)).toEqual(before.entry);
+      } finally { gate.resolve(); await Promise.allSettled([opening, rejected]); hold.mockRestore(); }
+    },
+  );
+});
+
+describe.each(['revision', 'decrypt', 'merge', 'serialize', 'cache commit'] as const)('cloud preparation waiting at %s', phase => {
+  test.each(['lock', 'new open', 'source', 'edit'] as const)('%s discards the late candidate and preserves intervening state', async action => {
+    const p = new FakeCloudProvider(); const fileId = `late-open-${phase}-${action}`;
+    p.setFile(fileId, 'candidate.kdbx', baseBytes(), 'r2');
+    const d = deps(p); const src = source(fileId, 'original');
+    await d.vault.open(baseBytes(), PW, null);
+    const id = d.vault.entriesForUrl('https://github.com')[0].id; d.vault.updateEntry(id, { UserName: 'old dirty' });
+    const replacement = await d.vault.prepareOpen(baseBytes(), PW, null);
+    let current = true;
+    if (phase === 'merge' || phase === 'serialize') await putCache(cacheKey('dropbox', fileId), {
+      bytes: baseBytes(), basedOnRev: 'r1', pendingUpload: true, lastSyncedAt: 0,
+    });
+    const intervene = () => {
+      if (action === 'lock') d.vault.lock();
+      else if (action === 'new open') { d.vault.adoptPrepared(replacement); d.vault.updateEntry(id, { UserName: 'new dirty' }); }
+      else if (action === 'source') current = false;
+      else d.vault.updateEntry(id, { UserName: 'intervening edit' });
+    };
+    const gate = Promise.withResolvers<void>(); const started = Promise.withResolvers<void>();
+    const hold = phase === 'revision' ? vi.spyOn(p, 'getRevision').mockImplementationOnce(async () => {
+      started.resolve(); await gate.promise; return 'r2';
+    }) : phase === 'decrypt' ? (() => {
+      const load = kdbxweb.Kdbx.load.bind(kdbxweb.Kdbx);
+      return vi.spyOn(kdbxweb.Kdbx, 'load').mockImplementationOnce(async (...args) => {
+        started.resolve(); await gate.promise; return load(...args);
+      });
+    })() : phase === 'merge' ? (() => {
+      const merge = Vault.prototype.mergeRemote;
+      return vi.spyOn(Vault.prototype, 'mergeRemote').mockImplementationOnce(async function (this: Vault, ...args) {
+        started.resolve(); await gate.promise; return merge.apply(this, args);
+      });
+    })() : phase === 'serialize' ? (() => {
+      const serialize = Vault.prototype.serialize;
+      return vi.spyOn(Vault.prototype, 'serialize').mockImplementationOnce(async function (this: Vault) {
+        const bytes = await serialize.call(this); started.resolve(); await gate.promise; return bytes;
+      });
+    })() : (() => {
+      const put = IDBObjectStore.prototype.put;
+      return vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementationOnce(function (this: IDBObjectStore, value, key) {
+        const request = put.call(this, value, key);
+        request.addEventListener('success', () => { intervene(); started.resolve(); }); return request;
+      });
+    })();
+    const onOpened = vi.fn();
+    const opening = openCloud(src, { ...d, isCurrent: () => current, onOpened }, PW, null);
+    const rejected = expect(opening).rejects.toThrow('staleSession');
+    try {
+      await started.promise; if (phase !== 'cache commit') intervene();
+      const generation = d.vault.lifecycleGeneration; const version = d.vault.mutationVersion;
+      const entry = d.vault.getEntry(id); const dirty = d.vault.dirty;
+      gate.resolve(); await rejected;
+      expect(d.vault.lifecycleGeneration).toBe(generation); expect(d.vault.mutationVersion).toBe(version);
+      expect(d.vault.getEntry(id)).toEqual(entry); expect(d.vault.dirty).toBe(dirty);
+      expect(d.vault.isOpen()).toBe(action !== 'lock'); expect(src.basedOnRev).toBe('original');
+      expect(onOpened).not.toHaveBeenCalled(); expect(p.uploads).toHaveLength(0);
+    } finally { gate.resolve(); await Promise.allSettled([opening, rejected]); hold.mockRestore(); replacement.discard(); }
+  });
+});
+
+test('an edit while cloud open waits behind a save cancels before preparing the candidate', async () => {
+  const { p, d, src, id } = await opened('edit-before-queued-open');
+  d.vault.updateEntry(id, { UserName: 'saving' });
+  p.setFile('queued-candidate', 'candidate.kdbx', baseBytes(), 'r2');
+  const next = source('queued-candidate', 'original');
+  const gate = Promise.withResolvers<void>(); const started = Promise.withResolvers<void>();
+  const upload = p.upload.bind(p);
+  const hold = vi.spyOn(p, 'upload').mockImplementationOnce(async (...args) => {
+    started.resolve(); await gate.promise; return upload(...args);
+  });
+  const saving = saveCloud(src, d); let opening: Promise<unknown> | undefined;
+  const prepare = vi.spyOn(d.vault, 'prepareOpen');
+  try {
+    await started.promise; opening = openCloud(next, d, PW, null);
+    d.vault.updateEntry(id, { UserName: 'later unsaved edit' });
+    const rejected = expect(opening).rejects.toThrow('staleSession');
+    gate.resolve(); await saving; await rejected;
+    expect(prepare).not.toHaveBeenCalled(); expect(d.vault.getEntry(id)?.username).toBe('later unsaved edit');
+    expect(d.vault.dirty).toBe(true); expect(next.basedOnRev).toBe('original');
+  } finally { gate.resolve(); await Promise.allSettled([saving, opening]); hold.mockRestore(); prepare.mockRestore(); }
+});
+
+test.each(['save', 'retry'] as const)('%s queued behind an open cannot acknowledge the adopted session', async mode => {
+  const { p, d, src, id } = await opened(`queued-after-open-${mode}`);
+  d.vault.updateEntry(id, { UserName: 'old pending' });
+  await saveCloud(src, { ...d, online: () => false });
+  p.setFile(`replacement-${mode}`, 'candidate.kdbx', baseBytes(), 'r2');
+  const next = source(`replacement-${mode}`, 'original');
+  const gate = Promise.withResolvers<void>(); const started = Promise.withResolvers<void>();
+  const revision = p.getRevision.bind(p);
+  const hold = vi.spyOn(p, 'getRevision').mockImplementationOnce(async fileId => {
+    started.resolve(); await gate.promise; return revision(fileId);
+  });
+  const opening = openCloud(next, { ...d, onOpened: () => d.vault.updateEntry(id, { UserName: 'new unsaved' }) }, PW, null);
+  let queued: Promise<unknown> | undefined;
+  try {
+    await started.promise;
+    queued = mode === 'save' ? saveCloud(src, d) : retryPending(src, d);
+    const rejected = expect(queued).rejects.toThrow('staleSession'); gate.resolve();
+    await opening; await rejected;
+    expect(d.vault.getEntry(id)?.username).toBe('new unsaved'); expect(d.vault.dirty).toBe(true);
+    expect(p.uploads).toHaveLength(0); expect((await getCache(cacheKey('dropbox', src.fileId)))?.pendingUpload).toBe(true);
+  } finally { gate.resolve(); await Promise.allSettled([opening, queued]); hold.mockRestore(); }
+});

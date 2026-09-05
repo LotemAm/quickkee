@@ -10,6 +10,8 @@ export interface SyncDeps {
   online: () => boolean;
   /** Saves/retries require the active source; opens guard the preceding source instead. */
   isCurrent?: () => boolean;
+  /** Synchronously adopt and bind caller state. Return the adopted session; no async callbacks. */
+  commitOpen?: (adopt: () => number) => number;
   /** Carries this open's own lifecycle token to its caller without changing OpenOutcome. */
   onOpened?: (session: number) => void;
 }
@@ -65,51 +67,68 @@ async function serialize(op: Operation, baseRev: string): Promise<Snapshot> {
   return { bytes, baseRev, mutationVersion };
 }
 
-/** Open a cloud file, guarding the pre-open phase before adopting our own new session. */
+/** Prepare privately on the live Vault queue; only the final synchronous commit publishes it. */
 export function openCloud(
   src: CloudFileSource, deps: SyncDeps, password: string | null, keyFile: ArrayBuffer | null,
 ): Promise<OpenOutcome> {
   const requested = operation(src, deps);
+  const mutationVersion = deps.vault.mutationVersion;
+  const guardOpen = () => {
+    guard(requested);
+    if (deps.vault.mutationVersion !== mutationVersion) throw new Error('staleSession');
+  };
   return queueCloud(deps.vault, async () => {
-    guard(requested);
+    guardOpen();
     const cache = await getCache(requested.key);
-    guard(requested);
+    guardOpen();
     let remoteRev: string;
     let offline = false;
     try {
       remoteRev = await requested.provider.getRevision(requested.fileId);
     } catch {
-      guard(requested);
+      guardOpen();
       if (!cache) throw new Error('offlineNoCache');
       remoteRev = cache.basedOnRev;
       offline = true;
     }
-    guard(requested);
+    guardOpen();
     let bytes = cache?.bytes;
     let rev = remoteRev;
     let remoteBytes: ArrayBuffer | undefined;
     if (!cache || remoteRev !== cache.basedOnRev) {
       const remote = await requested.provider.download(requested.fileId);
-      guard(requested);
+      guardOpen();
       rev = remote.rev;
       if (cache?.pendingUpload) remoteBytes = remote.bytes;
       else bytes = remote.bytes;
     }
-    guard(requested);
-    const session = await deps.vault.open(bytes!, password, keyFile);
-    const opened = { ...requested, session };
-    guard(opened);
-    deps.onOpened?.(session);
-    if (remoteBytes) {
-      await deps.vault.mergeRemote(remoteBytes, () => isCurrent(opened));
-      guard(opened);
-      await writeCache(opened, await serialize(opened, rev), rev, true);
-    } else if (!cache || remoteRev !== cache.basedOnRev) {
-      await writeCache(opened, { bytes: bytes!, baseRev: rev }, rev, false);
-    }
-    guard(opened);
-    src.basedOnRev = rev;
-    return { basedOnRev: rev, merged: !!remoteBytes, offline };
+    guardOpen();
+    const prepared = await deps.vault.prepareOpen(bytes!, password, keyFile);
+    try {
+      guardOpen();
+      if (remoteBytes) {
+        await prepared.mergeRemote(remoteBytes, () => isCurrent(requested) && deps.vault.mutationVersion === mutationVersion);
+        guardOpen();
+        const merged = await prepared.serialize();
+        guardOpen();
+        await writeCache(requested, { bytes: merged, baseRev: rev }, rev, true);
+        guardOpen();
+        prepared.markCached();
+      } else if (!cache || remoteRev !== cache.basedOnRev) {
+        await writeCache(requested, { bytes: bytes!, baseRev: rev }, rev, false);
+      }
+      guardOpen();
+      const adopt = () => {
+        guardOpen();
+        const session = deps.vault.adoptPrepared(prepared);
+        src.basedOnRev = rev;
+        return session;
+      };
+      // Non-router callers adopt directly. Router callers bind source, timer and status here.
+      const session = deps.commitOpen ? deps.commitOpen(adopt) : adopt();
+      deps.onOpened?.(session);
+      return { basedOnRev: rev, merged: !!remoteBytes, offline };
+    } finally { prepared.discard(); }
   });
 }
 
