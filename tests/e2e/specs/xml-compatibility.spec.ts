@@ -1,16 +1,20 @@
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { chromium, type Page } from '@playwright/test';
+import { chromium, type Page, type Worker } from '@playwright/test';
 import kdbxweb from 'kdbxweb';
 import { test, expect, installDb, openExtensionPage, reReadKdbx } from '../helpers';
 import { cloudInstall, cloudSetRemote, cloudUploadCount, reReadCloudKdbx } from '../cloudSeam';
 import type { Request, ResponseFor } from '../../../src/shared/messages';
 import { registerArgon2 } from '../../../src/background/crypto';
+import { registerXmlParser } from '../../../src/background/xml';
+
+test.beforeAll(() => registerXmlParser());
 
 const password = 'xml-compatibility-fixture-only';
 const text = 'עברית 日本語 😀 & < > " \'';
 const multiline = 'LF\nCRLF\r\nCR\rfinal';
+const allLineEndings = 'LF\nCRLF\r\nCR\rNEL\u0085LS\u2028final';
 const expiry = Date.parse('2035-06-07T08:09:10.000Z');
 const attachment = [0, 1, 13, 10, 127, 128, 255];
 const modes = ['password', 'key-v1', 'both-v2', 'binary-key'] as const;
@@ -21,6 +25,12 @@ type Mode = typeof modes[number];
 const baseline: Record<3 | 4, string> = {
   "3": "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",
   "4": "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"
+};
+
+// Separate old-parser fixtures additionally contain NEL and Unicode line separator.
+const supplemental: Record<3 | 4, string> = {
+  "3": "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",
+  "4": "A9mimmf7S7UAAAQAAhAAAAAxwfLmv3FDUL5YBSFq/Fr/AwQAAAABAAAABCAAAAB70zwoDKW6w5qLeoAMdFL+3UF8a6IARis6hD6dTxGW5QcQAAAA7IcTVj63K6NvjHzbjlGT0wtdAAAAAAFCBQAAACRVVUlEEAAAAMnZ85piikRgv3QNCMGKT+pCAQAAAFMgAAAAXQr727SDv7W6JHkhPBerUO5NL5P310ehaNifheK4wtwFAQAAAFIIAAAA4JMEAAAAAAAAAAQAAAAA0K0K7UQGfp6iwp0H+U8m3qBCp1wCp6YnpzE7BwIXnoLmtsYWYxaiACj+MRwJJKrvXXE+l5RP4aa+KOfSr0Q6xpR2CXfOL4hiZ/AZbSJi9y3LqjHUIK5/o+pgbonqvUrEACelQAcAANYIPS+BxXNXFl7HccoaTIXljp0EIBmJQ1KMnX9oCA+Q9Ok3Hcsz4OhaCueTNFRgYTfnYxNCQzxK0HGzNc/DKg1rWDx3qd8HPExu5uXPQNmHamxy7Vt/d4Dy65ntVeFFhNwyDCnCKqZ89LMSIwyTArpyTb3jbu2ovetJOyS3NeqLzoyCdgtJ71M9XtMTor478KVPIry3dKeDHHVWfIPvyZtOUfehj7LY5GVUMzU4l6xh8EfgShlYrHQZgYdVPMZQHIzRGbCWhnHJzPBd1zNemTmeiljh4rnDwoCuAgYYJldV2e/iual5L486JVnfRQaz30CBMDhFD9eAid3ZWXThMEAZCV7W/stGJGI/OMP7HN5Bx5QJgQPuYbaU2/UEJouu+NUlPOJ0uJCljJtGJUTQ0cvPfbfbk8Vzy0HUPVkfXHNut/AfAbb2uNerNAjgmhE/Azo9oi3fFN/r7XehRRGWkUYfoGJOh2zYyVBBFpfwpBS0s1kduEz8QxRLwaNbH5vmRDdOOfBFL5VOdewFUb/IZiADpYQ8DQmfsZEHuUjvGwMkapYKwnxj/oN+oy90+TbF8sAKCG9MdcLu2LPcEf1VtShEgvBTKTkHWqNFqEdChPyyfAfzYgjAl8nCMOXq3DN3Jc1UvYL/UiV/45/J4Fd3SetbLhPHtoqmJcRea2++Y+Y2UrU/Tv7nWyC26LukvBUTT7fqgZTw/t8NKZCaSjIIAgng4+kbJxG3tX8kN+Tg5SXAUq8Eiyf3GTyYWVt5It3CFPUDvNNGRZAC2tgba7ot7g+euYvVOfUJT2AYL1tQ/zYOEARE/7iS7N2LkQhFGLUycHY1zefYNPwehPTTkGPtM9a9f2RyUTzFryKJG5gAzzN+aKQn7z6I5nzgrTsrC+BeVmwRkdN8XC7lYMZFVgIppdYQSoNOnVuEAVCw/HSx5SKZ9ci4EjOLn9DnpcFNjveG3Ll+gpUWeyHLuKvsTscjTMacLUKf0bs6K9sdrN5IiIzXrKWo9oab366X+pLrwNVP+thrYvzE0rWeOF+G5+IUxUdGUAjLlUeT+2V+d2v22TvzeZKmGQplH93+uNY6lmFPOPBH8mnJ1ol/dGE0ol7qOf8f47+oeofTqhNyJ4AobbV6VFQZXU2dYBM7f4yxWo+nHrWD9vC8Iy7QC1Sb+OcW024y4fK18GhE9doSqqV8Osbw6Xx2kixcxaN7tpWsGz1JrTA6bQKj9jJ5eZzebf9oUh1S/mbNKCUoQyZrhihV74XDrbtllYsHdnMZIdOhKvBEW/BIobniy1azqF3UMsVjLK/gJ6b0d3ZtUfU4PbHCoqdkS97QUxC91yH0tmJ1Pl9EMR70B5raY657x0THmQ1moNfvBoOZRfJEOYxUslrdeLHH5VxGKd9qysHXuLpj1nn7//V7zbUWtwp6Sig5DB36SY7HFXmPMrTLn7SlXmU1SOk+LSudH4r343m5kSmIKe5f0fRZ1l6LvvS5SfFD3JNyPleb/hrgy4S7AMcoCsDX9lLSxgSDZ6r0oYrWOpl3HJr+CG9R2laBp4m0zDkAIPxVN0emhxtF3LwizFxa/k4t45xB0kOh1sJh2swcu3BNfo3oS7eUF+zkSW0k4DJdzmE8ch/WRFqMG5NfpWnbeFVGvdJvuk0n/dB5qTj2+grY+OwJM9do3Ehn4bwxS6gXrwwckQClgTzoM69pWTSdSBcKNEDpmM7fWmCYSyYgJoPqyDNgABOjcedQZXYq8zK+/J56QyYDtGfcRp2ndEzie1genhOj/+xvsJOoChW+drv/mkE2+O4IjfhEXpwdAAxGyxHfp79GINbNi6atzm2YY8onzsD7bTwFSxmBdcMa9e3hiMk442+M5A5NEwmtdTVSbL3xhwn3LCx7w1Mz/VIsYWmnzRA2+urL5gtgInxFEKY8NSaMGof6TAxZj+A8yb6z/49EfxeQv9H5GXASrVq2lmYg0Ar0YpWaSmHgrzOBgFCY7ADRbxTRC6fIlNdi75xxpc/N/HY+48uPdFVZH4ytUgb8B1QdxMssCDdXRTlFcHcXSWONXR1nu+sDS+SmTZ5GS+Q1NvJ5uDrR0q/kNOc0UZxBpB6C6FcQWWPoe80FwuFNdDfv3LtJM5SvLkhWAiAfmY7joK4RgV5FAWcy6pCPeZsRt3UeE96EAUcvpXGE01rNZPcL+t52QsmSqzp3n2cTWYWFHl2Xlw559sDfm2Vo5vfabB3Zfi+E5nJwKqQPX1OtyWvbFEh6o4EVa+aZd+iIhpys6pA7leXCWc2JIMBF5jsPrCJ1pX8cer67g8ssp+JOq1v1NRq9ho09rEB9HhEs0veAGJ3MCi/5c24PFRGLp3tJqdvA/eDaY+Gp7qN0q045hzLG9rplzqOwDHsGRNZRjLY+BnAA+WA2dC2XjbtTqUqsh+PfPgGytlUOKDsW2EnXHA7qUi+oZNUYFyUpLn2XcrksDfyZ2E2SwK54Q7O3CECd73S3q6KZeWiYPq5HGUH1jDo0MYNtWpuEFRZ0TVEEtVms6W4AAAAA"
 };
 
 function bytes(b64: string): ArrayBuffer {
@@ -54,19 +64,19 @@ function historyValues(db: kdbxweb.Kdbx) {
   }));
 }
 
-function assertPreserved(db: kdbxweb.Kdbx, version: 3 | 4, username = 'current-user') {
+function assertPreserved(db: kdbxweb.Kdbx, version: 3 | 4, username = 'current-user', lines = multiline) {
   const current = entry(db);
   expect(db.versionMajor).toBe(version);
   expect(db.meta.name).toBe('XML ' + text);
-  expect(db.getDefaultGroup().groups.find(group => group.name === 'Group ' + text)?.notes).toBe(multiline);
+  expect(db.getDefaultGroup().groups.find(group => group.name === 'Group ' + text)?.notes).toBe(lines);
   expect(current.fields.get('Title')).toBe(text);
   expect(current.fields.get('UserName')).toBe(username);
-  expect(current.fields.get('Notes')).toBe(multiline);
+  expect(current.fields.get('Notes')).toBe(lines);
   expect(current.fields.get('Empty')).toBe('');
-  expect(current.fields.get('Custom ' + text)).toBe(text + multiline);
+  expect(current.fields.get('Custom ' + text)).toBe(text + lines);
   for (const field of ['Password', 'Protected custom']) {
     expect(current.fields.get(field)).toBeInstanceOf(kdbxweb.ProtectedValue);
-    expect((current.fields.get(field) as kdbxweb.ProtectedValue).getText()).toBe(text + multiline);
+    expect((current.fields.get(field) as kdbxweb.ProtectedValue).getText()).toBe(text + lines);
   }
   expect(current.fields.get('otp')).toBeInstanceOf(kdbxweb.ProtectedValue);
   expect((current.fields.get('otp') as kdbxweb.ProtectedValue).getText()).toBe('otpauth://totp/XML:test?secret=JBSWY3DPEHPK3PXP&issuer=XML');
@@ -76,8 +86,8 @@ function assertPreserved(db: kdbxweb.Kdbx, version: 3 | 4, username = 'current-u
   expect(current.times.creationTime?.toISOString()).toBe('2025-01-02T03:04:05.000Z');
   expect(current.history.some(old => old.fields.get('UserName') === 'fixture-user')).toBe(true);
   const old = current.history.find(item => item.fields.get('UserName') === 'fixture-user')!;
-  expect(old.fields.get('Notes')).toBe(multiline);
-  expect((old.fields.get('Password') as kdbxweb.ProtectedValue).getText()).toBe(text + multiline);
+  expect(old.fields.get('Notes')).toBe(lines);
+  expect((old.fields.get('Password') as kdbxweb.ProtectedValue).getText()).toBe(text + lines);
   const binary = current.binaries.get('bytes & <.bin');
   if (!binary || !('value' in binary)) throw new Error('Fixture attachment not resolved');
   const value = binary.value;
@@ -94,6 +104,13 @@ async function access(mode: Mode) {
     keyFile, pwd,
     credentials: new kdbxweb.Credentials(pwd ? kdbxweb.ProtectedValue.fromString(pwd) : null, keyFile),
   };
+}
+
+async function parserRuntime(worker: Worker) {
+  return worker.evaluate(xml => ({
+    DOMParser: typeof globalThis.DOMParser, XMLSerializer: typeof globalThis.XMLSerializer,
+    parsedText: new DOMParser().parseFromString(xml, 'application/xml').documentElement.textContent,
+  }), '<root>' + allLineEndings + '</root>');
 }
 
 async function savedBytes(page: Page): Promise<ArrayBuffer> {
@@ -135,10 +152,14 @@ for (const version of [3, 4] as const) {
         DOMParser: typeof globalThis.DOMParser, XMLSerializer: typeof globalThis.XMLSerializer,
       }));
       expect(globals).toEqual({ DOMParser: 'undefined', XMLSerializer: 'undefined' });
-      console.log('XML_WORKER_RUNTIME ' + JSON.stringify({ version, mode, ...globals }));
+      console.log('XML_WORKER_RUNTIME ' + JSON.stringify({ version, mode, phase: 'before-open', ...globals }));
       await installDb(page, fixturePath);
       const unlock: Request = { type: 'unlock', password: material.pwd, keyFile: material.keyFile ? Array.from(material.keyFile) : null };
       expect(await request(page, unlock)).toEqual({ ok: true });
+      const configuredParser = await worker.evaluateHandle(() => globalThis.DOMParser);
+      const configured = await parserRuntime(worker);
+      expect(configured).toEqual({ DOMParser: 'function', XMLSerializer: 'undefined', parsedText: allLineEndings });
+      console.log('XML_WORKER_RUNTIME ' + JSON.stringify({ version, mode, phase: 'after-open', ...configured }));
       const details = await request(page, { type: 'getEntry', entryId: initialId });
       if (!details.ok || !details.entry) throw new Error('Worker did not open the fixture entry');
       expect(details.entry.password).toBe(text + multiline);
@@ -155,12 +176,34 @@ for (const version of [3, 4] as const) {
       expect(historyValues(reopened)).toEqual(historyValues(initial));
       expect(await request(page, { type: 'lock' })).toEqual({ ok: true });
       expect(await request(page, unlock)).toEqual({ ok: true });
+      expect(await configuredParser.evaluate(parser => parser === globalThis.DOMParser)).toBe(true);
+      await configuredParser.dispose();
       const after = await request(page, { type: 'getEntry', entryId: initialId });
       if (!after.ok || !after.entry) throw new Error('Worker did not reopen saved fixture');
       expect(after.entry.password).toBe(text + multiline);
       expect(after.entry.username).toBe('worker ' + text);
     });
   }
+
+  test('actual worker KDBX ' + version + ' preserves old-written NEL and line separators', async ({ context, extensionId }, testInfo) => {
+    registerArgon2();
+    const initial = await kdbxweb.Kdbx.load(bytes(supplemental[version]), (await access('password')).credentials);
+    assertPreserved(initial, version, 'current-user', allLineEndings);
+    const fixturePath = testInfo.outputPath('xml-supplemental.kdbx');
+    writeFileSync(fixturePath, new Uint8Array(bytes(supplemental[version])));
+    const page = await openExtensionPage(context, extensionId, 'src/pages/popup/index.html');
+    await installDb(page, fixturePath);
+    expect(await request(page, { type: 'unlock', password, keyFile: null })).toEqual({ ok: true });
+    const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
+    expect(await parserRuntime(worker)).toEqual({
+      DOMParser: 'function', XMLSerializer: 'undefined', parsedText: allLineEndings,
+    });
+    expect(await request(page, { type: 'updateEntry', entryId: entry(initial).uuid.id, fields: { UserName: 'unicode ' + text } })).toEqual({ ok: true });
+    expect((await request(page, { type: 'save' })).ok).toBe(true);
+    const reopened = await reReadKdbx(page, password);
+    assertPreserved(reopened, version, 'unicode ' + text, allLineEndings);
+    expect(historyValues(reopened)).toEqual(historyValues(initial));
+  });
 
   test('actual worker KDBX ' + version + ' cloud merge retains divergent changes and XML metadata', async ({ context, extensionId }) => {
     registerArgon2();
@@ -171,8 +214,8 @@ for (const version of [3, 4] as const) {
     const id = entry(remote).uuid.id;
     const remoteEntry = remote.createEntry(remote.getDefaultGroup());
     remoteEntry.fields.set('Title', 'Remote ' + text);
-    remoteEntry.fields.set('Notes', multiline);
-    remoteEntry.fields.set('Password', kdbxweb.ProtectedValue.fromString(text + multiline));
+    remoteEntry.fields.set('Notes', allLineEndings);
+    remoteEntry.fields.set('Password', kdbxweb.ProtectedValue.fromString(text + allLineEndings));
     remoteEntry.times.expires = true;
     remoteEntry.times.expiryTime = new Date(expiry);
     await cloudSetRemote(page, Buffer.from(await remote.save()).toString('base64'));
@@ -183,8 +226,8 @@ for (const version of [3, 4] as const) {
     assertPreserved(merged, version, 'local ' + text);
     const received = merged.getDefaultGroup().entries.find(item => item.uuid.id === remoteEntry.uuid.id)!;
     expect(received.fields.get('Title')).toBe('Remote ' + text);
-    expect(received.fields.get('Notes')).toBe(multiline);
-    expect((received.fields.get('Password') as kdbxweb.ProtectedValue).getText()).toBe(text + multiline);
+    expect(received.fields.get('Notes')).toBe(allLineEndings);
+    expect((received.fields.get('Password') as kdbxweb.ProtectedValue).getText()).toBe(text + allLineEndings);
     expect(received.times.expiryTime?.getTime()).toBe(expiry);
   });
 }
@@ -192,7 +235,7 @@ for (const version of [3, 4] as const) {
 // The production worker must be observed directly too: the test build has extra commands.
 // Rebuild only with no fixture context open, and restore the test build for subsequent specs.
 // eslint-disable-next-line no-empty-pattern
-test('production extension worker runtime has no native XML globals', async ({}, testInfo) => {
+test('production extension worker has no native XML globals before opening a vault', async ({}, testInfo) => {
   // Two bounded builds (60s each), plus worker startup and observation.
   test.setTimeout(180_000);
   const yarn = process.platform === 'win32' ? 'yarn.cmd' : 'yarn';
@@ -209,7 +252,7 @@ test('production extension worker runtime has no native XML globals', async ({},
         DOMParser: typeof globalThis.DOMParser, XMLSerializer: typeof globalThis.XMLSerializer,
       }));
       expect(globals).toEqual({ DOMParser: 'undefined', XMLSerializer: 'undefined' });
-      console.log('XML_PRODUCTION_RUNTIME ' + JSON.stringify(globals));
+      console.log('XML_PRODUCTION_RUNTIME ' + JSON.stringify({ phase: 'before-open', ...globals }));
       const page = await openExtensionPage(context, new URL(worker.url()).host, 'src/pages/popup/index.html');
       expect(await request(page, { type: 'getStatus' })).toMatchObject({ ok: true, locked: true });
       const noTestHarness = await page.evaluate(() => !('__qkTest' in window));
