@@ -512,6 +512,8 @@ describe('explicit vault activity deadlines', () => {
       const code = await handle_({ type: 'getTotpCode', entryId: entry.id }, popupFillSender);
       expect(code.ok).toBe(second < 10);
       expect(await handle_({ type: 'previewTotp', config }, panel)).toMatchObject({ ok: second < 10 });
+      expect(await handle_({ type: 'getEntryNotes', entryId: entry.id }, panel)).toEqual(second < 10
+        ? { ok: true, notes: ctx.vault.getEntryNotes(entry.id) } : { ok: false, error: 'locked' });
       await handle_({ type: 'getEntrySummariesForUrl', url: inline.url! }, inline);
       await handle_({ type: 'getPendingCredentialPrompt' }, inline);
     }
@@ -712,6 +714,50 @@ describe('fillRequest', () => {
 
     await handle_({ type: 'fillRequest', entryId, tabId: 7 }, popupFillSender);
     expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(7, expect.objectContaining({ type: 'fillCard', cardholderName: '' }), { documentId: 'document-0' });
+  });
+});
+
+describe('panel-only Notes reads', () => {
+  const panel = { url: 'chrome-extension://quickkee/src/pages/panel/index.html' } as chrome.runtime.MessageSender;
+
+  test('permits the panel and extension tab, rejects locked/missing entries, and has no side effects', async () => {
+    const { ctx, handle_, refreshAllIcons } = makeCtx();
+    expect(await handle_({ type: 'getEntryNotes', entryId: 'missing' }, panel)).toEqual({ ok: false, error: 'locked' });
+    await ctx.vault.open(fixture(), PW, null);
+    const id = ctx.vault.entriesForUrl('https://github.com')[0].id;
+    const stored = [...ctx.vault['db']!.getDefaultGroup().allEntries()].find(e => e.uuid.id === id)!;
+    const touch = vi.spyOn(ctx.autolock, 'touch');
+    try {
+      for (const field of [undefined, '', '  raw\r\nשלום\r ', kdbxweb.ProtectedValue.fromString('protected\nNotes')]) {
+        if (field === undefined) stored.fields.delete('Notes'); else stored.fields.set('Notes', field);
+        for (const sender of [panel, { ...panel, tab: { id: 9, url: panel.url } } as chrome.runtime.MessageSender]) {
+          expect(await handle_({ type: 'getEntryNotes', entryId: id }, sender)).toEqual({
+            ok: true, notes: field instanceof kdbxweb.ProtectedValue ? field.getText() : field ?? '',
+          });
+        }
+      }
+      expect(await handle_({ type: 'getEntryNotes', entryId: 'missing' }, panel)).toEqual({ ok: false, error: 'no entry' });
+      expect(ctx.vault.dirty).toBe(false); expect(ctx.vault.mutationVersion).toBe(0);
+      expect(touch).not.toHaveBeenCalled(); expect(refreshAllIcons).not.toHaveBeenCalled();
+      expect(writeBytes).not.toHaveBeenCalled(); expect(putCache).not.toHaveBeenCalled();
+    } finally { touch.mockRestore(); }
+  });
+
+  test.each([
+    {},
+    { url: 'chrome-extension://quickkee/src/pages/popup/index.html' },
+    { url: 'chrome-extension://quickkee/src/pages/options/index.html' },
+    { url: 'chrome-extension://other/src/pages/panel/index.html' },
+    { url: 'https://github.com/login', tab: { id: 7 }, frameId: 0 },
+  ])('rejects non-panel sender %j without reading Notes', async sender => {
+    const { ctx, handle_ } = makeCtx();
+    await ctx.vault.open(fixture(), PW, null);
+    const read = vi.spyOn(ctx.vault, 'getEntryNotes');
+    try {
+      expect(await handle_({ type: 'getEntryNotes', entryId: 'any' }, sender as chrome.runtime.MessageSender))
+        .toEqual({ ok: false, error: 'forbidden' });
+      expect(read).not.toHaveBeenCalled();
+    } finally { read.mockRestore(); }
   });
 });
 

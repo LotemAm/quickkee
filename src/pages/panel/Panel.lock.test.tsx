@@ -44,6 +44,7 @@ function respond(request: Request) {
   if (request.type === 'getTree') return { ok: true, tree };
   if (request.type === 'getEntry') return { ok: true, entry };
   if (request.type === 'getTotpConfig') return { ok: true, config };
+  if (request.type === 'getEntryNotes') return { ok: true, notes: 'Private notes\r\nsecond line' };
   if (request.type === 'previewTotp') return { ok: true, code: '123456', period: 30, expiresAt: Date.now() + 30_000 };
   return { ok: true };
 }
@@ -65,16 +66,49 @@ test.each(['lock', 'disconnect'])('%s removes revealed password, TOTP and editor
   await screen.findByText('123456');
   fireEvent.click(screen.getByRole('button', { name: 'TOTP settings' }));
   fireEvent.click(screen.getByRole('button', { name: 'Show TOTP secret' }));
+  fireEvent.click(screen.getByText('More'));
+  expect(screen.getByLabelText('Notes', { exact: true })).toHaveValue('Private notes\nsecond line');
+  fireEvent.change(screen.getByLabelText('Notes', { exact: true }), { target: { value: 'Private unsaved Notes' } });
   if (reason === 'lock') transition(true, 2); else act(() => onDisconnect.fire());
   expect(screen.getByRole('button', { name: 'Unlock' })).toBeVisible();
   expect(screen.queryByDisplayValue('private-password')).not.toBeInTheDocument();
   expect(screen.queryByLabelText('TOTP setup key or URI')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('Notes', { exact: true })).not.toBeInTheDocument();
+  expect(screen.queryByDisplayValue('Private unsaved Notes')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Apply changes' })).not.toBeInTheDocument();
   if (reason === 'lock') {
     transition(false, 3);
     await screen.findByRole('button', { name: /Private login/ });
     expect(screen.queryByDisplayValue('private-password')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Notes', { exact: true })).not.toBeInTheDocument();
   }
+  expect(mocks.send.mock.calls.some(([request]) => ['updateEntry', 'createEntry', 'save'].includes(request.type))).toBe(false);
+});
+
+test.each([
+  { reason: 'lock', phase: 'load' }, { reason: 'disconnect', phase: 'load' },
+  { reason: 'lock', phase: 'apply' }, { reason: 'disconnect', phase: 'apply' },
+])('$reason during Notes $phase discards late replies and cannot trigger follow-up writes', async ({ reason, phase }) => {
+  const late = deferred<unknown>();
+  const type = phase === 'load' ? 'getEntryNotes' : 'updateEntry';
+  mocks.send.mockImplementation(async (request: Request) => request.type === type ? late.promise : respond(request));
+  render(<Panel />); transition(false);
+  fireEvent.click(await screen.findByRole('button', { name: /Private login/ }));
+  if (phase === 'apply') {
+    const notes = await screen.findByLabelText('Notes', { exact: true });
+    fireEvent.click(screen.getByText('More'));
+    fireEvent.change(notes, { target: { value: 'Private draft' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply changes' }));
+  }
+  await waitFor(() => expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ type, entryId: 'entry' })));
+  const before = mocks.send.mock.calls.length;
+  if (reason === 'lock') transition(true, 2); else act(() => onDisconnect.fire());
+  await act(async () => { late.resolve(phase === 'load' ? { ok: true, notes: 'Late secret\r\nnotes' } : { ok: true }); });
+  expect(screen.getByRole('button', { name: 'Unlock' })).toBeVisible();
+  expect(screen.queryByLabelText('Notes', { exact: true })).not.toBeInTheDocument();
+  expect(screen.queryByDisplayValue('Late secret\nnotes')).not.toBeInTheDocument();
+  expect(mocks.send.mock.calls).toHaveLength(before);
+  expect(mocks.send.mock.calls.filter(([request]) => request.type === 'updateEntry')).toHaveLength(phase === 'apply' ? 1 : 0);
 });
 
 test('a delayed tree cannot populate the replacement session or select an old entry', async () => {

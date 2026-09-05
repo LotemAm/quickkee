@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import * as kdbxweb from 'kdbxweb';
 import { vi } from 'vitest';
 import { Vault, isInvalidKey } from './vault';
+import { registerXmlParser } from './xml';
 import { CARD_FLAG_KEY, OTP_FIELD_KEY } from '../shared/entry';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -25,6 +26,111 @@ function bytesOf(text: string): ArrayBuffer {
   new Uint8Array(ab).set(encoded);
   return ab;
 }
+
+test('Notes read returns exact text without changing vault state or broad projections', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  const stored = [...v['db']!.getDefaultGroup().allEntries()].find(e => e.uuid.id === id)!;
+  const notes = '  Notes only\r\nשלום <b>& **plain**\rlast\n ';
+  stored.fields.set('Notes', kdbxweb.ProtectedValue.fromString(notes));
+  const version = v.mutationVersion; const modified = stored.times.lastModTime;
+  expect(v.getEntryNotes(id)).toBe(notes);
+  expect(v.dirty).toBe(false);
+  expect(v.mutationVersion).toBe(version);
+  expect(stored.times.lastModTime).toEqual(modified);
+  for (const projection of [v.getEntry(id), v.getTree(), v.entriesForUrl('https://github.com'), v.entrySummariesForUrl('https://github.com')]) {
+    expect(JSON.stringify(projection)).not.toContain('Notes only');
+    expect(JSON.stringify(projection)).not.toContain('"Notes"');
+  }
+  expect(() => v.getEntryNotes('missing')).toThrow('no entry');
+  v.lock();
+  expect(() => v.getEntryNotes(id)).toThrow('locked');
+});
+
+function notesDatabase(protectedNotes: boolean, version: 3 | 4 = 3) {
+  registerXmlParser();
+  const db = kdbxweb.Kdbx.create(new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString('notes password')), 'Notes fixture');
+  db.setVersion(version);
+  if (version === 4) db.setKdf(kdbxweb.Consts.KdfId.Aes);
+  db.meta.memoryProtection.notes = protectedNotes;
+  return db;
+}
+
+const notesFormats = [
+  { version: 3 as const, protectedNotes: false }, { version: 3 as const, protectedNotes: true },
+  { version: 4 as const, protectedNotes: false }, { version: 4 as const, protectedNotes: true },
+];
+
+test.each(notesFormats)('Notes exact values survive read, unrelated edit, edit and clear (KDBX $version, protected=$protectedNotes)', async ({ version, protectedNotes }) => {
+  const db = notesDatabase(protectedNotes, version);
+  const originals = [undefined, '', ' \t\n  ', 'שלום 😀 <tag> & "quotes" **literal**', 'first\nsecond\n', 'first\r\nsecond\r\n', 'first\rsecond\r'];
+  const cases = originals.map((notes, index) => {
+    const e = db.createEntry(db.getDefaultGroup());
+    // KDBX stores timestamps at second precision; make fixture times exact before serialization.
+    e.times.creationTime = new Date('2026-01-01T00:00:00Z');
+    e.times.lastModTime = new Date('2026-01-01T00:00:00Z');
+    e.fields.set('Title', `Notes ${index}`);
+    e.fields.set('UserName', 'unchanged user');
+    e.fields.set('Password', kdbxweb.ProtectedValue.fromString('unchanged password'));
+    if (notes === undefined) e.fields.delete('Notes');
+    else e.fields.set('Notes', protectedNotes ? kdbxweb.ProtectedValue.fromString(notes) : notes);
+    return { id: e.uuid.id, notes, created: e.times.creationTime!.getTime() };
+  });
+  const vault = new Vault(); await vault.open(await db.save(), 'notes password', null);
+  const mutationVersion = vault.mutationVersion;
+  for (const { id, notes } of cases) expect(vault.getEntryNotes(id)).toBe(notes ?? '');
+  expect(vault.dirty).toBe(false); expect(vault.mutationVersion).toBe(mutationVersion);
+
+  async function assertSaved(expected: (original: string | undefined) => string | undefined) {
+    const saved = await vault.serialize();
+    const reopened = await kdbxweb.Kdbx.load(saved, new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString('notes password')));
+    for (const { id, notes, created } of cases) {
+      const e = [...reopened.getDefaultGroup().allEntries()].find(entry => entry.uuid.id === id)!;
+      const field = e.fields.get('Notes');
+      const value = expected(notes);
+      expect(field instanceof kdbxweb.ProtectedValue).toBe(protectedNotes && value !== undefined && notes !== undefined);
+      expect(field instanceof kdbxweb.ProtectedValue ? field.getText() : field).toBe(value);
+      expect(e.fields.get('UserName')).toBe('unchanged user');
+      expect((e.fields.get('Password') as kdbxweb.ProtectedValue).getText()).toBe('unchanged password');
+      expect(e.times.creationTime!.getTime()).toBe(created);
+      expect(e.times.lastModTime!.getTime()).toBeGreaterThanOrEqual(created);
+    }
+    const reopenedVault = new Vault(); await reopenedVault.open(saved, 'notes password', null);
+    for (const { id, notes } of cases) expect(reopenedVault.getEntryNotes(id)).toBe(expected(notes) ?? '');
+  }
+
+  await assertSaved(notes => notes);
+  for (const { id } of cases) vault.updateEntry(id, { Title: 'Other edit' }, undefined, ['Notes']);
+  expect(vault.mutationVersion).toBe(mutationVersion + cases.length);
+  await assertSaved(notes => notes);
+  const edited = '  edited\nשלום & <plain>\n ';
+  for (const { id } of cases) vault.updateEntry(id, { Notes: edited });
+  expect(vault.mutationVersion).toBe(mutationVersion + cases.length * 2);
+  await assertSaved(() => edited);
+  for (const { id } of cases) vault.updateEntry(id, { Notes: '' });
+  expect(vault.mutationVersion).toBe(mutationVersion + cases.length * 3);
+  await assertSaved(() => '');
+});
+
+test.each(notesFormats)('new Notes use the database default (KDBX $version, protected=$protectedNotes)', async ({ version, protectedNotes }) => {
+  const vault = new Vault(); await vault.open(await notesDatabase(protectedNotes, version).save(), 'notes password', null);
+  const originals = ['', '  \n\t ', 'created\nשלום & <tag> 😀'];
+  const ids = originals.map(Notes => vault.createEntry(vault.getTree().groupId, { Title: 'New note', ...(Notes ? { Notes } : {}) }));
+  const reopened = await kdbxweb.Kdbx.load(await vault.serialize(), new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString('notes password')));
+  for (const [index, id] of ids.entries()) {
+    const field = [...reopened.getDefaultGroup().allEntries()].find(e => e.uuid.id === id)!.fields.get('Notes');
+    expect(field instanceof kdbxweb.ProtectedValue).toBe(protectedNotes);
+    expect(field instanceof kdbxweb.ProtectedValue ? field.getText() : field).toBe(originals[index]);
+    expect(vault.getEntryNotes(id)).toBe(originals[index]);
+  }
+});
+
+test('the KDBX patch retains XML tabs while still filtering invalid control characters', () => {
+  registerXmlParser();
+  const invalid = String.fromCharCode(0, 8, 11, 12, 14, 31);
+  const xml = kdbxweb.XmlUtils.parse(`<root>before\t${invalid}after</root>`);
+  expect(xml.documentElement.textContent).toBe('before\tafter');
+});
 
 test('open + read entry by url', async () => {
   const v = new Vault(); await v.open(fixture(), 'correct horse', null);

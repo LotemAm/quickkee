@@ -249,6 +249,12 @@ export class Vault {
 
   getEntry(id: string): EntryView | null { const e = this.findEntry(id); return e ? this.toView(e) : null; }
 
+  getEntryNotes(id: string): string {
+    if (!this.isOpen()) throw new Error('locked');
+    const e = this.findEntry(id); if (!e) throw new Error('no entry');
+    return str(e.fields.get('Notes'));
+  }
+
   getTotpConfig(id: string): TotpConfig | null {
     const e = this.findEntry(id); if (!e) throw new Error('no entry');
     return this.readTotp(e);

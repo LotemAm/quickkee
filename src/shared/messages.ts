@@ -35,6 +35,7 @@ export type Request =
   | { type: 'getEntrySummariesForUrl'; url: string }
   | { type: 'getCardEntrySummariesForUrl'; url: string }
   | { type: 'getEntry'; entryId: string }
+  | { type: 'getEntryNotes'; entryId: string }
   | { type: 'getTotpConfig'; entryId: string }
   | { type: 'getTotpCode'; entryId: string }
   | { type: 'previewTotp'; config: TotpConfig }
@@ -126,6 +127,7 @@ type OkFor = {
   getEntrySummariesForUrl: Ok<{ summaries: EntrySummary[] }>;
   getCardEntrySummariesForUrl: Ok<{ summaries: EntrySummary[] }>;
   getEntry: Ok<{ entry: EntryView | null }>;
+  getEntryNotes: Ok<{ notes: string }>;
   getTree: Ok<{ tree: TreeNode }>;
   getPasswordHealthReport: Ok<{ report: PasswordHealthReport }>;
   createEntry: Ok<{ entryId: string }>;

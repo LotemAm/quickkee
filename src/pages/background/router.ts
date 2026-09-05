@@ -302,6 +302,12 @@ export function makeRouter(ctx: SwContext) {
         return ctx.vault.isOpen() ? { ok: true, summaries: ctx.vault.cardSummariesForUrl(req.url) } : { ok: false, error: 'locked' };
       case 'getEntry':
         return { ok: true, entry: ctx.vault.getEntry(req.entryId) };
+      case 'getEntryNotes': {
+        if (!isExtensionPage(sender, 'panel')) return { ok: false, error: 'forbidden' };
+        if (!ctx.vault.isOpen()) return { ok: false, error: 'locked' };
+        try { return { ok: true, notes: ctx.vault.getEntryNotes(req.entryId) }; }
+        catch (e) { return { ok: false, error: e instanceof Error ? e.message : 'Could not load Notes.' }; }
+      }
       case 'getTotpConfig': {
         if (!isExtensionPage(sender, 'panel')) return { ok: false, error: 'forbidden' };
         if (!ctx.vault.isOpen()) return { ok: false, error: 'locked' };

@@ -53,6 +53,10 @@ function SelectedEntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onCha
   const [showPass, setShowPass] = useState(false);
   const [showCardNumber, setShowCardNumber] = useState(false);
   const [expires, setExpires] = useState<number | null>(null);
+  // Keep stored line endings until an intentional edit; textareas display CRLF/CR as LF.
+  const [rawNotes, setRawNotes] = useState('');
+  const notesBaseline = rawNotes.replace(/\r\n?/g, '\n');
+  const [notes, setNotes] = useState('');
   // editable additional fields + the original keys (to compute deletions/renames on save)
   const [custom, setCustom] = useState<{ key: string; value: string }[]>([]);
   const [origKeys, setOrigKeys] = useState<string[]>([]);
@@ -82,13 +86,16 @@ function SelectedEntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onCha
     setLoadError('');
     void (async () => {
       try {
-        const [entryResult, totpResult] = await Promise.all([
+        const [entryResult, totpResult, notesResult] = await Promise.all([
           sendToSW({ type: 'getEntry', entryId }),
           sendToSW({ type: 'getTotpConfig', entryId }),
+          sendToSW({ type: 'getEntryNotes', entryId }),
         ]);
         if (!isAlive() || cancelled) return;
         if (!entryResult.ok) throw new Error(entryResult.error);
         if (!totpResult.ok) throw new Error(totpResult.error);
+        if (!notesResult.ok) throw new Error(notesResult.error);
+        if (typeof notesResult.notes !== 'string') throw new Error('Could not load Notes.');
         const loaded = entryResult.entry;
         if (!loaded || loaded.id !== entryId
           || [loaded.title, loaded.username, loaded.password, loaded.url].some(value => typeof value !== 'string')
@@ -98,9 +105,11 @@ function SelectedEntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onCha
         if (totpResult.config === undefined) throw new Error('Could not load the authenticator configuration.');
         // Validate before mounting TotpSetup, which serializes the configuration.
         if (totpResult.config !== null) toOtpUri(totpResult.config);
-        const fields = loaded.fields.filter(f => f.key !== CARDHOLDER_NAME_KEY)
+        const fields = loaded.fields.filter(f => f.key !== CARDHOLDER_NAME_KEY && f.key !== 'Notes')
           .map(f => ({ key: f.key, value: f.value }));
-        const keys = loaded.fields.map(f => f.key);
+        const keys = loaded.fields.map(f => f.key).filter(key => key !== 'Notes');
+        setRawNotes(notesResult.notes);
+        setNotes(notesResult.notes.replace(/\r\n?/g, '\n'));
         setExpires(loaded.expires);
         setIsCard(loaded.isCard);
         setCardholderName(loaded.fields.find(f => f.key === CARDHOLDER_NAME_KEY)?.value ?? '');
@@ -227,6 +236,8 @@ function SelectedEntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onCha
       Title: e.title, UserName: e.username, URL: e.url, Password: e.password,
       [CARD_FLAG_KEY]: isCard ? '1' : '',
     };
+    const submittedNotes = notes;
+    if (entryId === null ? submittedNotes !== '' : submittedNotes !== notesBaseline) fields.Notes = submittedNotes;
     const keptKeys = new Set<string>();
     for (const f of custom) {
       const k = f.key.trim();
@@ -238,7 +249,10 @@ function SelectedEntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onCha
       try {
         const r = await sendToSW({ type: 'createEntry', groupId: selectedGroupId, fields, expires, ...(totp ? { totp } : {}) });
         if (!isAlive()) return;
-        if (r.ok) onCreated?.(r.entryId, selectedGroupId);
+        if (r.ok) {
+          setRawNotes(submittedNotes);
+          onCreated?.(r.entryId, selectedGroupId);
+        }
         else setSaveError(r.error);
       } catch { if (isAlive()) setSaveError('Could not create entry.'); }
       return;
@@ -254,6 +268,8 @@ function SelectedEntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onCha
     // added on one Apply-changes click can never be removed by a later one — its
     // key never enters `fields` (once cleared) nor `removeKeys` (stale origKeys).
     setOrigKeys([...keptKeys]);
+    // Advance only to the accepted value; keep any newer draft typed during the request.
+    if (fields.Notes !== undefined) setRawNotes(submittedNotes);
     onChanged(selectedGroupId);
   }
   async function del() {
@@ -364,6 +380,18 @@ function SelectedEntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onCha
             </span>
           </summary>
           <div className="space-y-4 border-t px-3 py-3" style={{ borderColor: 'var(--border)', background: 'var(--surface)' }}>
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <label className="section-title block" htmlFor="entry-notes">Notes</label>
+                <button className="icon-btn" aria-label="Copy Notes" title="Copy Notes"
+                  disabled={notes === ''} onClick={() => copy(notes, 'Notes')}>
+                  <Copy size={15} />
+                </button>
+              </div>
+              <textarea id="entry-notes" className="input w-full resize-y" rows={5} value={notes}
+                onChange={event => setNotes(event.target.value)} />
+            </div>
+
             <div>
               <label className="section-title block" htmlFor="entry-group">Group</label>
               <select id="entry-group" className="input w-full" value={selectedGroupId}

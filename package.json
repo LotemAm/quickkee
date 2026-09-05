@@ -26,7 +26,7 @@
     "@zxing/browser": "^0.2.1",
     "@zxing/library": "^0.23.0",
     "hash-wasm": "^4.12.0",
-    "kdbxweb": "^2.1.1",
+    "kdbxweb": "patch:kdbxweb@npm%3A2.1.1#~/.yarn/patches/kdbxweb-npm-2.1.1-135bdb8acb.patch",
     "lucide-react": "^1.21.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
