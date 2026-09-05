@@ -35,6 +35,7 @@ beforeEach(() => {
       hasTotp: false, totpPeriod: null, attachments: [],
     } };
     if (request.type === 'getTotpConfig') return { ok: true, config: null };
+    if (request.type === 'getEntryNotes') return { ok: true, notes: '' };
     if (request.type === 'previewTotp') return {
       ok: true, code: '123456', period: 30, expiresAt: Date.now() + 30_000,
     };
@@ -151,6 +152,234 @@ function editor(entryId: string | null, callbacks = {}, groupId = 'group-1') {
   return <EntryEditor {...editorProps} entryId={entryId} groupId={groupId}
     onChanged={vi.fn()} onDeleted={vi.fn()} {...callbacks} />;
 }
+
+function replyWithNotes(notes: string) {
+  const original = mocks.sendToSW.getMockImplementation()!;
+  mocks.sendToSW.mockImplementation((request: { type: string }) => request.type === 'getEntryNotes'
+    ? { ok: true, notes } : original(request));
+}
+
+function entryMutations() {
+  return mocks.sendToSW.mock.calls.map(([request]) => request)
+    .filter(request => ['createEntry', 'updateEntry', 'save'].includes(request.type));
+}
+
+test('Notes is the first section in collapsed More and applies the exact multiline draft', async () => {
+  replyWithNotes('Saved\r\nשלום\rnote');
+  const onChanged = vi.fn();
+  render(editor('entry-1', { onChanged }));
+  const notes = await screen.findByLabelText('Notes', { exact: true });
+  expect(notes).toHaveValue('Saved\nשלום\nnote');
+  expect(notes.tagName).toBe('TEXTAREA');
+  expect(notes.closest('details')).not.toHaveAttribute('open');
+  expect(notes.closest('details')!.querySelector('textarea, select')).toBe(notes);
+  fireEvent.click(screen.getByText('More'));
+  fireEvent.change(notes, { target: { value: '  <b>**literal**</b>\nשלום & 😀\n ' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply changes' }));
+  await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+  expect(mocks.sendToSW).toHaveBeenCalledWith(expect.objectContaining({
+    type: 'updateEntry', entryId: 'entry-1', fields: expect.objectContaining({ Notes: '  <b>**literal**</b>\nשלום & 😀\n ' }),
+  }));
+});
+
+test.each(['untouched', 'undo'])('%s Notes are omitted when changing title, password and group', async action => {
+  replyWithNotes(' \tFirst\r\nSecond\rLast ');
+  const onChanged = vi.fn();
+  render(editor('entry-1', { onChanged }));
+  const notes = await screen.findByLabelText('Notes', { exact: true });
+  expect(notes).toHaveValue(' \tFirst\nSecond\nLast ');
+  fireEvent.click(screen.getByText('More'));
+  if (action === 'undo') {
+    fireEvent.change(notes, { target: { value: 'temporary' } });
+    fireEvent.change(notes, { target: { value: ' \tFirst\nSecond\nLast ' } });
+  }
+  fireEvent.change(screen.getByLabelText('Group'), { target: { value: 'group-2' } });
+  fireEvent.change(screen.getByDisplayValue('Acme'), { target: { value: 'New title' } });
+  fireEvent.change(screen.getByDisplayValue('secret'), { target: { value: 'new password' } });
+  fireEvent.click(screen.getByText('More'));
+  expect(entryMutations()).toEqual([]);
+  fireEvent.click(screen.getByRole('button', { name: 'Apply changes' }));
+  await waitFor(() => expect(onChanged).toHaveBeenCalledExactlyOnceWith('group-2'));
+  expect(entryMutations()).toHaveLength(1);
+  expect(entryMutations()[0]).toMatchObject({ type: 'updateEntry', entryId: 'entry-1', groupId: 'group-2',
+    fields: { Title: 'New title', Password: 'new password' } });
+  expect(entryMutations()[0].fields).not.toHaveProperty('Notes');
+  expect(entryMutations()[0].removeKeys).not.toContain('Notes');
+});
+
+test('More retains the draft, Copy Notes uses the clipboard timer, and textarea Ctrl+C stays native', async () => {
+  render(editor('entry-1'));
+  const notes = await screen.findByLabelText('Notes', { exact: true });
+  fireEvent.click(screen.getByText('More'));
+  expect(screen.getByRole('button', { name: 'Copy Notes' })).toBeDisabled();
+  fireEvent.change(notes, { target: { value: '  Current\n\tשלום <b>plain</b> ' } });
+  fireEvent.click(screen.getByText('More')); fireEvent.click(screen.getByText('More'));
+  expect(screen.getByLabelText('Notes', { exact: true })).toBe(notes);
+  fireEvent.click(screen.getByRole('button', { name: 'Copy Notes' }));
+  expect(mocks.copyWithClear).toHaveBeenCalledExactlyOnceWith('  Current\n\tשלום <b>plain</b> ', 30);
+  expect(screen.getByText('Notes copied')).toBeVisible();
+  notes.focus();
+  expect(fireEvent.keyDown(notes, { key: 'c', ctrlKey: true })).toBe(true);
+  expect(mocks.copyWithClear).toHaveBeenCalledOnce();
+  expect(entryMutations()).toEqual([]);
+});
+
+test.each(['', '  \n\t ', 'created\nשלום & <text>'])('new entry includes nonempty Notes without reading an entry: %j', async draft => {
+  const original = mocks.sendToSW.getMockImplementation()!;
+  mocks.sendToSW.mockImplementation((request: { type: string }) => request.type === 'createEntry'
+    ? { ok: true, entryId: 'created' } : original(request));
+  const onCreated = vi.fn();
+  render(editor(null, { onCreated }));
+  const notes = screen.getByLabelText('Notes', { exact: true });
+  expect(notes).toHaveValue('');
+  expect(notes.closest('details')).not.toHaveAttribute('open');
+  fireEvent.click(screen.getByText('More'));
+  fireEvent.change(notes, { target: { value: draft } });
+  fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+  await waitFor(() => expect(onCreated).toHaveBeenCalledExactlyOnceWith('created', 'group-1'));
+  expect(mocks.sendToSW.mock.calls.some(([request]) => ['getEntry', 'getEntryNotes'].includes(request.type))).toBe(false);
+  expect(entryMutations()).toHaveLength(1);
+  expect(entryMutations()[0]).toMatchObject({ type: 'createEntry', groupId: 'group-1' });
+  if (draft !== '') expect(entryMutations()[0].fields.Notes).toBe(draft);
+  else expect(entryMutations()[0].fields).not.toHaveProperty('Notes');
+});
+
+test.each(['', '  \n\t '])('editing Notes to %j writes it once and advances the successful baseline', async draft => {
+  replyWithNotes('original');
+  const onChanged = vi.fn(); render(editor('entry-1', { onChanged }));
+  const notes = await screen.findByLabelText('Notes', { exact: true });
+  fireEvent.click(screen.getByText('More'));
+  fireEvent.change(notes, { target: { value: draft } });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply changes' }));
+  await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+  expect(entryMutations()[0].fields.Notes).toBe(draft);
+  expect(entryMutations()[0].removeKeys).not.toContain('Notes');
+  fireEvent.click(screen.getByRole('button', { name: 'Apply changes' }));
+  await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(2));
+  expect(entryMutations()).toHaveLength(2);
+  expect(entryMutations()[1].fields).not.toHaveProperty('Notes');
+});
+
+test.each([
+  { ok: false, error: 'Notes unavailable' }, { ok: true }, { ok: true, notes: null }, { ok: true, notes: 42 }, new Error('Worker disconnected'),
+])('failed Notes load blocks the editor and retries coherently: %j', async reply => {
+  const original = mocks.sendToSW.getMockImplementation()!;
+  mocks.sendToSW.mockImplementation((request: { type: string }) => request.type === 'getEntryNotes'
+    ? reply instanceof Error ? Promise.reject(reply) : reply : original(request));
+  render(editor('entry-1'));
+  await screen.findByRole('alert');
+  expectNoEditorActions(); expect(screen.queryByLabelText('Notes', { exact: true })).not.toBeInTheDocument();
+  replyWithNotes('Retry\r\nnotes');
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  expect(await screen.findByLabelText('Notes', { exact: true })).toHaveValue('Retry\nnotes');
+  for (const type of ['getEntry', 'getTotpConfig', 'getEntryNotes']) {
+    expect(mocks.sendToSW.mock.calls.filter(([request]) => request.type === type)).toHaveLength(2);
+  }
+  expect(entryMutations()).toEqual([]);
+});
+
+test.each([
+  { type: 'updateEntry', throws: false }, { type: 'updateEntry', throws: true },
+  { type: 'createEntry', throws: false }, { type: 'createEntry', throws: true },
+])('$type failure (throws=$throws) retains Notes and retries without false success', async ({ type, throws }) => {
+  replyWithNotes('baseline');
+  const original = mocks.sendToSW.getMockImplementation()!;
+  let attempts = 0;
+  mocks.sendToSW.mockImplementation((request: { type: string }) => {
+    if (request.type !== type) return original(request);
+    if (++attempts > 1) return { ok: true, entryId: 'created' };
+    return throws ? Promise.reject(new Error('connection lost')) : { ok: false, error: 'write failed' };
+  });
+  const callbacks = { onChanged: vi.fn(), onCreated: vi.fn() };
+  render(editor(type === 'createEntry' ? null : 'entry-1', callbacks));
+  const notes = await screen.findByLabelText('Notes', { exact: true });
+  fireEvent.click(screen.getByText('More'));
+  fireEvent.change(notes, { target: { value: 'keep this draft\n ' } });
+  const apply = screen.getByRole('button', { name: type === 'createEntry' ? 'Create' : 'Apply changes' });
+  fireEvent.click(apply); await screen.findByText(throws ? `Could not ${type === 'createEntry' ? 'create' : 'update'} entry.` : 'write failed');
+  expect(notes).toHaveValue('keep this draft\n ');
+  expect(callbacks.onChanged).not.toHaveBeenCalled(); expect(callbacks.onCreated).not.toHaveBeenCalled();
+  fireEvent.click(apply);
+  await waitFor(() => expect(type === 'createEntry' ? callbacks.onCreated : callbacks.onChanged).toHaveBeenCalledOnce());
+  expect(entryMutations()).toHaveLength(2);
+  for (const request of entryMutations()) expect(request).toMatchObject({ type, fields: { Notes: 'keep this draft\n ' } });
+});
+
+test('a successful apply advances only to its submitted Notes while keeping a newer draft', async () => {
+  replyWithNotes('baseline');
+  const pending = deferred<unknown>(); const original = mocks.sendToSW.getMockImplementation()!;
+  let updates = 0;
+  mocks.sendToSW.mockImplementation((request: { type: string }) => request.type === 'updateEntry' && ++updates === 1
+    ? pending.promise : original(request));
+  const onChanged = vi.fn(); render(editor('entry-1', { onChanged }));
+  const notes = await screen.findByLabelText('Notes', { exact: true });
+  fireEvent.click(screen.getByText('More'));
+  fireEvent.change(notes, { target: { value: 'submitted' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply changes' }));
+  fireEvent.change(notes, { target: { value: 'newer\nlocal draft' } });
+  await act(async () => { pending.resolve({ ok: true }); });
+  expect(notes).toHaveValue('newer\nlocal draft');
+  expect(entryMutations()[0].fields.Notes).toBe('submitted');
+  fireEvent.click(screen.getByRole('button', { name: 'Apply changes' }));
+  await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(2));
+  expect(entryMutations()[1].fields.Notes).toBe('newer\nlocal draft');
+  fireEvent.click(screen.getByRole('button', { name: 'Apply changes' }));
+  await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(3));
+  expect(entryMutations()).toHaveLength(3);
+  expect(entryMutations()[2].fields).not.toHaveProperty('Notes');
+});
+
+test('Notes cannot be overwritten or removed through Additional fields', async () => {
+  replyWithNotes('baseline');
+  render(editor('entry-1')); await screen.findByLabelText('Notes', { exact: true });
+  fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+  fireEvent.change(screen.getByPlaceholderText('Name'), { target: { value: ' Notes ' } });
+  fireEvent.change(screen.getByPlaceholderText('Value'), { target: { value: 'wrong place' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply changes' }));
+  await waitFor(() => expect(entryMutations()).toHaveLength(1));
+  expect(entryMutations()[0].fields).not.toHaveProperty('Notes');
+  expect(entryMutations()[0].removeKeys).not.toContain('Notes');
+});
+
+test.each(['B', 'A', 'create', 'unmount'])('late Notes responses cannot restore A after switching to %s', async target => {
+  const notesLoads: ReturnType<typeof deferred<unknown>>[] = [];
+  const original = mocks.sendToSW.getMockImplementation()!;
+  mocks.sendToSW.mockImplementation((request: { type: string }) => {
+    if (request.type !== 'getEntryNotes') return original(request);
+    const pending = deferred<unknown>(); notesLoads.push(pending); return pending.promise;
+  });
+  const onChanged = vi.fn(); const view = render(editor('A', { onChanged }));
+  await waitFor(() => expect(notesLoads).toHaveLength(1));
+  expectNoEditorActions();
+  if (target === 'unmount') view.unmount();
+  else {
+    view.rerender(editor('B', { onChanged }));
+    if (target === 'A') view.rerender(editor('A', { onChanged }));
+    if (target === 'create') view.rerender(editor(null));
+    if (target !== 'create') {
+      expectNoEditorActions();
+      await act(async () => { notesLoads.at(-1)!.resolve({ ok: true, notes: 'current\r\nline\rend' }); });
+      expect(screen.getByLabelText('Notes', { exact: true })).toHaveValue('current\nline\nend');
+    }
+  }
+  await act(async () => {
+    notesLoads[0].resolve({ ok: true, notes: 'stale A\r\nsecret' });
+    if (target === 'A' || target === 'create') notesLoads[1].resolve({ ok: true, notes: 'stale B' });
+  });
+  expect(screen.queryByDisplayValue('stale A\nsecret')).not.toBeInTheDocument();
+  expect(screen.queryByDisplayValue('stale B')).not.toBeInTheDocument();
+  expect(entryMutations()).toEqual([]); expect(onChanged).not.toHaveBeenCalled();
+  if (target === 'create') expect(screen.getByLabelText('Notes', { exact: true })).toHaveValue('');
+  else if (target === 'unmount') expect(screen.queryByLabelText('Notes', { exact: true })).not.toBeInTheDocument();
+  else {
+    fireEvent.change(screen.getByDisplayValue(target), { target: { value: 'unrelated edit' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply changes' }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+    expect(entryMutations()).toHaveLength(1);
+    expect(entryMutations()[0]).toMatchObject({ entryId: target, fields: { Title: 'unrelated edit' } });
+    expect(entryMutations()[0].fields).not.toHaveProperty('Notes');
+  }
+});
 
 function holdLoads() {
   const loads: { entryId: string; type: string; reply: ReturnType<typeof deferred<unknown>> }[] = [];
@@ -295,16 +524,21 @@ test('StrictMode cleanup never revives abandoned load responses', async () => {
 test('existing entry group changes retain the draft, but creation group changes reset it', async () => {
   const view = render(editor('entry-1'));
   fireEvent.change(await screen.findByDisplayValue('Acme'), { target: { value: 'draft' } });
+  fireEvent.change(screen.getByLabelText('Notes', { exact: true }), { target: { value: 'Notes draft' } });
   fireEvent.click(screen.getByRole('button', { name: 'Show Password' }));
   view.rerender(editor('entry-1', {}, 'group-2'));
   expect(screen.getByDisplayValue('draft')).toBeInTheDocument();
+  expect(screen.getByLabelText('Notes', { exact: true })).toHaveValue('Notes draft');
   expect(screen.getByDisplayValue('secret')).toHaveAttribute('type', 'text');
   expect(mocks.sendToSW.mock.calls.filter(([request]) => request.type === 'getEntry')).toHaveLength(1);
   view.rerender(editor(null));
   expect(screen.queryByDisplayValue('draft')).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Notes', { exact: true })).toHaveValue('');
+  fireEvent.change(screen.getByLabelText('Notes', { exact: true }), { target: { value: 'New Notes draft' } });
   fireEvent.change(screen.getAllByRole('textbox')[0], { target: { value: 'new draft' } });
   view.rerender(editor(null, {}, 'group-2'));
   expect(screen.queryByDisplayValue('new draft')).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Notes', { exact: true })).toHaveValue('');
   expect(screen.getByLabelText('Group')).toHaveValue('group-2');
 });
 
@@ -539,9 +773,10 @@ test.each(['selected', 'clear button', 'empty input', 'untouched'] as const)(
   },
 );
 
-test('creation carries expiry together with card, custom and TOTP fields', async () => {
+test('creation carries Notes and expiry together with card, custom and TOTP fields', async () => {
   const view = render(editor(null));
   fireEvent.click(screen.getByText('More'));
+  fireEvent.change(screen.getByLabelText('Notes', { exact: true }), { target: { value: 'Card notes\nשלום' } });
   fireEvent.click(screen.getByRole('checkbox', { name: 'Mark as credit card data' }));
   fireEvent.change(screen.getByLabelText('Cardholder Name'), { target: { value: 'Test Holder' } });
   fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
@@ -554,6 +789,6 @@ test('creation carries expiry together with card, custom and TOTP fields', async
   fireEvent.click(screen.getByRole('button', { name: 'Create' }));
   expect(mocks.sendToSW).toHaveBeenCalledWith(expect.objectContaining({
     type: 'createEntry', expires: new Date(2030, 5, 15, 12, 34).getTime(), totp: scannedConfig,
-    fields: expect.objectContaining({ 'QK-IsCard': '1', 'Cardholder Name': 'Test Holder', Reference: 'keep-me' }),
+    fields: expect.objectContaining({ 'QK-IsCard': '1', 'Cardholder Name': 'Test Holder', Reference: 'keep-me', Notes: 'Card notes\nשלום' }),
   }));
 });

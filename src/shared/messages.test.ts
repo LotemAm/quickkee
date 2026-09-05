@@ -15,6 +15,8 @@ test('sendToSW is typed per-request (type-level only, no runtime assertions)', (
   expectTypeOf(sendToSW({ type: 'getEntriesForUrl', url: 'x' })).resolves.toEqualTypeOf<ResponseFor<'getEntriesForUrl'>>();
   expectTypeOf(sendToSW({ type: 'getPendingCredentialPrompt' })).resolves.toEqualTypeOf<ResponseFor<'getPendingCredentialPrompt'>>();
   expectTypeOf(sendToSW({ type: 'getPasswordHealthReport' })).resolves.toEqualTypeOf<ResponseFor<'getPasswordHealthReport'>>();
+  expectTypeOf(sendToSW({ type: 'getEntryNotes', entryId: 'entry-1' })).resolves.toEqualTypeOf<ResponseFor<'getEntryNotes'>>();
+  expectTypeOf<Extract<ResponseFor<'getEntryNotes'>, { ok: true }>['notes']>().toEqualTypeOf<string>();
 
   const r = {} as ResponseFor<'getTree'>;
   if (r.ok) {
@@ -33,6 +35,15 @@ test('sendToSW is typed per-request (type-level only, no runtime assertions)', (
     // @ts-expect-error — password values never cross the password-health boundary
     void health.report.entries[0].password;
   }
+});
+
+test('typed Notes request and response forward the exact standard-field text', async () => {
+  const request: Extract<Request, { type: 'getEntryNotes' }> = { type: 'getEntryNotes', entryId: 'entry-1' };
+  const response: ResponseFor<'getEntryNotes'> = { ok: true, notes: '  raw\r\nשלום\r ' };
+  const sendMessage = vi.fn().mockResolvedValue(response);
+  (globalThis as unknown as { chrome: unknown }).chrome = { runtime: { sendMessage } };
+  await expect(sendToSW(request)).resolves.toEqual(response);
+  expect(sendMessage).toHaveBeenCalledExactlyOnceWith(request);
 });
 
 test.each([undefined, null, Date.UTC(2030, 5, 15, 12, 34, 56)])('typed create request forwards expiry %s', async expires => {

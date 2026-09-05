@@ -1,0 +1,53 @@
+diff --git a/dist/kdbxweb.js b/dist/kdbxweb.js
+index 7d330745e3ebc4c99c09a573824ae3bb08583565..c383f8b3ce769f24a3148e0c6881407dbd9124e4 100644
+--- a/dist/kdbxweb.js
++++ b/dist/kdbxweb.js
+@@ -5372,7 +5372,7 @@ function parse(xml) {
+     const parser = createDOMParser();
+     let doc;
+     // eslint-disable-next-line no-control-regex
+-    xml = xml.replace(/[\x00-\x09\x0B-\x0C\x0E-\x1F]/g, '');
++    xml = xml.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F]/g, '');
+     try {
+         doc = parser.parseFromString(xml, 'application/xml');
+     }
+@@ -5631,10 +5631,9 @@ function setProtectedValues(node, protectSaltGenerator) {
+         if (strToBoolean(node.getAttribute(XmlNames.Attr.Protected))) {
+             try {
+                 const value = (0, byte_utils_1.arrayToBuffer)((0, byte_utils_1.base64ToBytes)(node.textContent || ''));
+-                if (value.byteLength) {
+-                    const salt = protectSaltGenerator.getSalt(value.byteLength);
+-                    node.protectedValue = new protected_value_1.ProtectedValue(value, salt);
+-                }
++                // Empty protected fields still retain their protection marker.
++                const salt = protectSaltGenerator.getSalt(value.byteLength);
++                node.protectedValue = new protected_value_1.ProtectedValue(value, salt);
+             }
+             catch (e) {
+                 throw new kdbx_error_1.KdbxError(consts_1.ErrorCodes.FileCorrupt, `bad protected value at line ${node.lineNumber}: ${e}`);
+diff --git a/lib/utils/xml-utils.ts b/lib/utils/xml-utils.ts
+index 2d208bd92ef07d5ec30daf26a83f1c72dc9f1c38..d021698f443e4ead1f7d5c72496a9b287f368eea 100644
+--- a/lib/utils/xml-utils.ts
++++ b/lib/utils/xml-utils.ts
+@@ -62,6 +62,6 @@ export function parse(xml: string): Document {
+     let doc;
+     // eslint-disable-next-line no-control-regex
+-    xml = xml.replace(/[\x00-\x09\x0B-\x0C\x0E-\x1F]/g, '');
++    xml = xml.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F]/g, '');
+     try {
+         doc = parser.parseFromString(xml, 'application/xml');
+     } catch (e) {
+@@ -334,10 +334,9 @@ export function setProtectedValues(node: Node, protectSaltGenerator: ProtectSalt
+         if (strToBoolean(node.getAttribute(XmlNames.Attr.Protected))) {
+             try {
+                 const value = arrayToBuffer(base64ToBytes(node.textContent || ''));
+-                if (value.byteLength) {
+-                    const salt = protectSaltGenerator.getSalt(value.byteLength);
+-                    node.protectedValue = new ProtectedValue(value, salt);
+-                }
++                // Empty protected fields still retain their protection marker.
++                const salt = protectSaltGenerator.getSalt(value.byteLength);
++                node.protectedValue = new ProtectedValue(value, salt);
+             } catch (e) {
+                 throw new KdbxError(
+                     ErrorCodes.FileCorrupt,
