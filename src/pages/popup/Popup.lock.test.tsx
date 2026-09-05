@@ -198,6 +198,7 @@ test('mutation and save metadata refreshes keep the implicit creation form mount
     expect(screen.getByPlaceholderText('Password')).toHaveValue('generated');
     expect(mocks.send.mock.calls.filter(([r]) => r.type === 'getEntriesForUrl')).toHaveLength(1);
     expect(mocks.clearDraft).not.toHaveBeenCalled();
+    expect(mocks.send.mock.calls.filter(([r]) => r.type === 'getTree')).toHaveLength(dirty ? 1 : 2);
   }
   await act(async () => { save.resolve({ ok: true }); });
   await screen.findByText('Private login');

@@ -217,30 +217,40 @@ test.each(['getTree', 'getEntriesForUrl'])('accepted partial refresh invalidates
   expect(reads()).toHaveLength(2);
 });
 
-test('external vault mutation/save refreshes searchable TOTP metadata without fetching full URL entries or search details', async () => {
-  mocks.send.mockImplementation(async (request: Request) => request.type === 'getTotpCode'
-    ? { ok: true, code: '654321', period: 30, expiresAt: Date.now() + 30_000 } : respond(request));
+test('external mutation waits for save acknowledgement before one metadata refresh exposes TOTP', async () => {
+  const savedTree = deferred<unknown>();
+  let requestedTree = 0;
+  mocks.send.mockImplementation(async (request: Request) => {
+    if (request.type === 'getTree' && ++requestedTree === 2) return savedTree.promise;
+    if (request.type === 'getTotpCode') return { ok: true, code: '654321', period: 30, expiresAt: Date.now() + 30_000 };
+    return respond(request);
+  });
   await load(); search('match 000');
   expect(screen.queryByRole('button', { name: 'Show authenticator code' })).not.toBeInTheDocument();
   tree = { ...tree, children: [{ ...tree.children[0], entries: [{ ...summaries[0], hasTotp: true, totpPeriod: 30 }] }] };
-  act(() => onMessage.fire({ type: 'snapshot', snapshot: {
+  await act(async () => onMessage.fire({ type: 'snapshot', snapshot: {
     workerIdentity: 'worker', generation: 1, sequence: 2, locked: false, dirty: true,
   } }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Show authenticator code' }));
-  await screen.findByText('654321');
-  tree = { ...tree, children: [{ ...tree.children[0], entries: [{ ...summaries[0], title: 'Saved metadata' }] }] };
-  act(() => onMessage.fire({ type: 'snapshot', snapshot: {
+  expect(requestedTree).toBe(1);
+  expect(screen.queryByRole('button', { name: 'Show authenticator code' })).not.toBeInTheDocument();
+  await act(async () => onMessage.fire({ type: 'snapshot', snapshot: {
     workerIdentity: 'worker', generation: 1, sequence: 3, locked: false, dirty: false,
   } }));
-  search('user-0');
-  await screen.findByText('Saved metadata');
+  expect(requestedTree).toBe(2);
   expect(screen.queryByRole('button', { name: 'Show authenticator code' })).not.toBeInTheDocument();
-  expect(screen.queryByText('654321')).not.toBeInTheDocument();
+  await act(async () => { savedTree.resolve({ ok: true, tree }); });
+  fireEvent.click(screen.getByRole('button', { name: 'Show authenticator code' }));
+  await screen.findByText('654321');
+  // Another unchanged clean snapshot and more typing cannot remount the opened code.
+  await act(async () => onMessage.fire({ type: 'snapshot', snapshot: {
+    workerIdentity: 'worker', generation: 1, sequence: 4, locked: false, dirty: false,
+  } }));
+  search('user-0'); search('match 000');
+  expect(screen.getByText('654321')).toBeVisible();
   expect(reads()).toHaveLength(0);
   expect(mocks.send.mock.calls.filter(([r]) => r.type === 'getEntriesForUrl')).toHaveLength(1);
-  expect(mocks.send.mock.calls.filter(([r]) => r.type === 'getTree')).toHaveLength(3);
+  expect(requestedTree).toBe(2);
 });
-
 test('a superseded mutation metadata read cannot overwrite saved summaries or complete old password work', async () => {
   const staleTree = deferred<unknown>();
   const staleDetails = deferred<unknown>();
@@ -255,9 +265,15 @@ test('a superseded mutation metadata read cannot overwrite saved summaries or co
   act(() => onMessage.fire({ type: 'snapshot', snapshot: {
     workerIdentity: 'worker', generation: 1, sequence: 2, locked: false, dirty: true,
   } }));
-  tree = { ...tree, children: [{ ...tree.children[0], entries: [{ ...summaries[0], title: 'Current saved metadata' }] }] };
   act(() => onMessage.fire({ type: 'snapshot', snapshot: {
     workerIdentity: 'worker', generation: 1, sequence: 3, locked: false, dirty: false,
+  } }));
+  act(() => onMessage.fire({ type: 'snapshot', snapshot: {
+    workerIdentity: 'worker', generation: 1, sequence: 4, locked: false, dirty: true,
+  } }));
+  tree = { ...tree, children: [{ ...tree.children[0], entries: [{ ...summaries[0], title: 'Current saved metadata' }] }] };
+  act(() => onMessage.fire({ type: 'snapshot', snapshot: {
+    workerIdentity: 'worker', generation: 1, sequence: 5, locked: false, dirty: false,
   } }));
   await screen.findByText('Current saved metadata');
   await act(async () => {

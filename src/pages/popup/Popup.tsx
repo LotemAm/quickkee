@@ -65,9 +65,10 @@ function UnlockedPopup({ dirty, refresh, unlockNotice, sessionKey }: {
   useEffect(() => {
     if (previousDirty.current === dirty) return;
     previousDirty.current = dirty;
+    if (dirty) return;
     const isAlive = captureLifetime();
     let ignore = false;
-    // Refresh searchable metadata on mutation/save status changes, without unmounting
+    // Refresh searchable metadata after save acknowledgement, without unmounting
     // an in-progress implicit CreateForm by replacing its URL-matched entry list.
     void (async () => {
       try {
