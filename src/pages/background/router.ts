@@ -73,30 +73,35 @@ function validSecretBytes(bytes: number[], expectedLength?: number): boolean {
 function captureOpen(ctx: SwContext) {
   let session = ctx.vault.lifecycleGeneration;
   let source = ctx.getCurrentSource();
-  const sourceCurrent = () => ctx.getCurrentSource() === source;
+  let handle = ctx.getHandle();
+  let mutationVersion = ctx.vault.mutationVersion;
+  const sourceCurrent = () => ctx.getCurrentSource() === source && ctx.getHandle() === handle;
   const guard = () => {
-    if (ctx.vault.lifecycleGeneration !== session || !sourceCurrent()) throw new Error('staleSession');
+    if (ctx.vault.lifecycleGeneration !== session || ctx.vault.mutationVersion !== mutationVersion || !sourceCurrent()) throw new Error('staleSession');
   };
   return {
     guard, sourceCurrent,
     opened(token: number) {
       if (!ctx.vault.isSessionCurrent(token) || !sourceCurrent()) throw new Error('staleSession');
       session = token;
+      mutationVersion = ctx.vault.mutationVersion;
     },
-    install(handle: FileSystemFileHandle | null, next: DbSource) {
+    install(nextHandle: FileSystemFileHandle | null, next: DbSource) {
       guard();
-      ctx.setHandle(handle); ctx.setCurrentSource(next); source = next;
+      ctx.setHandle(nextHandle); ctx.setCurrentSource(next); source = next; handle = nextHandle;
     },
   };
 }
 
-async function finishOpen(ctx: SwContext, guard: () => void): Promise<void> {
-  guard();
+function finishOpen(ctx: SwContext, autoCloseHours: number): void {
+  ctx.autolock.arm(autoCloseHours);
   ctx.publishStatus?.();
-  const settings = await loadSettings();
-  guard();
-  ctx.autolock.arm(settings.autoCloseHours);
-  ctx.refreshAllIcons();
+}
+
+/** Optional presentation work cannot turn a committed open into a reported failure. */
+function refreshAfterOpen(ctx: SwContext): void {
+  try { void Promise.resolve(ctx.refreshAllIcons()).catch(() => {}); }
+  catch { /* The session is already committed. */ }
 }
 
 async function openLocalVault(
@@ -109,11 +114,13 @@ async function openLocalVault(
   opening.guard();
   const bytes = await readBytes(handle);
   opening.guard();
+  const settings = await loadSettings();
+  opening.guard();
   const session = await ctx.vault.open(bytes, password, keyFile);
   opening.opened(session);
   opening.install(handle, { kind: 'local', handleId: 'db' });
-  await finishOpen(ctx, opening.guard);
-  opening.guard();
+  finishOpen(ctx, settings.autoCloseHours);
+  refreshAfterOpen(ctx);
 }
 
 async function openCloudVault(
@@ -124,11 +131,21 @@ async function openCloudVault(
   opening = captureOpen(ctx),
 ) {
   opening.guard();
-  const outcome = await openCloud(source, { ...depsFor(ctx, source),
-    isCurrent: opening.sourceCurrent, onOpened: opening.opened }, password, keyFile);
-  opening.install(null, source);
-  await finishOpen(ctx, opening.guard);
+  const settings = await loadSettings();
   opening.guard();
+  const outcome = await openCloud(source, { ...depsFor(ctx, source),
+    isCurrent: opening.sourceCurrent,
+    commitOpen: adopt => {
+      opening.guard();
+      const session = adopt();
+      opening.opened(session);
+      opening.install(null, source);
+      finishOpen(ctx, settings.autoCloseHours);
+      return session;
+    },
+  }, password, keyFile);
+  opening.guard();
+  refreshAfterOpen(ctx);
   return outcome;
 }
 

@@ -28,7 +28,18 @@ export function isInvalidKey(e: unknown): boolean {
 const str = (v: unknown): string =>
   v == null ? '' : v instanceof kdbxweb.ProtectedValue ? v.getText() : String(v);
 
+/** Opaque, single-use preparation: only encrypted bytes can leave the candidate. */
+export interface PreparedOpen {
+  mergeRemote(bytes: ArrayBuffer, isCurrent?: () => boolean): Promise<void>;
+  serialize(): Promise<ArrayBuffer>;
+  markCached(): void;
+  discard(): void;
+}
+
 export class Vault {
+  private static readonly prepared = new WeakMap<PreparedOpen, {
+    owner: Vault; candidate: Vault; generation: number; version: number; busy: boolean;
+  }>();
   private db: kdbxweb.Kdbx | null = null;
   private creds: kdbxweb.Credentials | null = null;
   private generation = 0;
@@ -58,6 +69,48 @@ export class Vault {
     this.db = db;
     this.creds = creds;
     this.dirty = false;
+    return ++this.generation;
+  }
+
+  async prepareOpen(bytes: ArrayBuffer, password: string | null, keyFile: ArrayBuffer | null): Promise<PreparedOpen> {
+    const state = { owner: this, candidate: new Vault(), generation: this.generation, version: this.version, busy: false };
+    await state.candidate.open(bytes, password, keyFile);
+    if (this.generation !== state.generation || this.version !== state.version) {
+      state.candidate.lock();
+      throw new Error('staleSession');
+    }
+    const current = () => {
+      if (!Vault.prepared.has(prepared)) throw new Error('consumedPreparedOpen');
+      if (state.busy) throw new Error('busyPreparedOpen');
+    };
+    const run = async <T>(work: () => Promise<T>): Promise<T> => {
+      current(); state.busy = true;
+      try { return await work(); }
+      finally { state.busy = false; }
+    };
+    const prepared: PreparedOpen = {
+      mergeRemote: (remote, isCurrent) => run(() => state.candidate.mergeRemote(remote, isCurrent)),
+      serialize: () => run(() => state.candidate.serialize()),
+      markCached: () => { current(); state.candidate.dirty = false; },
+      discard: () => { Vault.prepared.delete(prepared); state.candidate.lock(); },
+    };
+    Vault.prepared.set(prepared, state);
+    return prepared;
+  }
+
+  /** Synchronous ownership transfer into this same live Vault; never copy candidate counters. */
+  adoptPrepared(prepared: PreparedOpen): number {
+    const state = Vault.prepared.get(prepared);
+    if (!state) throw new Error('consumedPreparedOpen');
+    if (state.owner !== this) throw new Error('foreignPreparedOpen');
+    if (state.busy) throw new Error('busyPreparedOpen');
+    if (this.generation !== state.generation || this.version !== state.version) throw new Error('staleSession');
+    this.db = state.candidate.db;
+    this.creds = state.candidate.creds;
+    this.dirty = state.candidate.dirty;
+    ++this.version;
+    Vault.prepared.delete(prepared);
+    state.candidate.lock();
     return ++this.generation;
   }
 

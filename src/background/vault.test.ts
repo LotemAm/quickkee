@@ -762,3 +762,88 @@ describe('password health report', () => {
     expect(await db.saveXml()).toBe(before);
   });
 });
+
+describe('prepared open ownership', () => {
+  async function generated() {
+    const credentials = new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString('candidate password'));
+    const db = kdbxweb.Kdbx.create(credentials, 'Prepared database');
+    db.setVersion(3);
+    const entry = db.createEntry(db.getDefaultGroup());
+    entry.fields.set('Title', 'Private candidate'); entry.fields.set('URL', 'https://candidate.example');
+    entry.fields.set('Password', kdbxweb.ProtectedValue.fromString('candidate secret'));
+    return { bytes: await db.save(), id: entry.uuid.id };
+  }
+
+  test('transfers private database, credentials, name and dirty state once without resetting live counters', async () => {
+    const { bytes, id } = await generated();
+    const live = new Vault(); await live.open(fixture(), 'correct horse', null);
+    const oldId = live.entriesForUrl('https://github.com')[0].id;
+    for (let i = 0; i < 4; ++i) live.updateEntry(oldId, { UserName: `old-${i}` });
+    const session = live.lifecycleGeneration; const version = live.mutationVersion;
+    const prepared = await live.prepareOpen(bytes, 'candidate password', null);
+    await prepared.mergeRemote(bytes);
+    expect(live.getEntry(id)).toBeNull(); expect(live.getEntry(oldId)?.username).toBe('old-3');
+    expect(live.lifecycleGeneration).toBe(session); expect(live.mutationVersion).toBe(version);
+    expect(live.adoptPrepared(prepared)).toBe(session + 1);
+    expect(live.getTree().name).toBe('Prepared database'); expect(live.getEntry(id)?.password).toBe('candidate secret');
+    expect(live.getEntry(oldId)).toBeNull(); expect(live.dirty).toBe(true);
+    expect(live.mutationVersion).toBeGreaterThan(version);
+    live.acknowledgeCached(session, live.mutationVersion); expect(live.dirty).toBe(true);
+    expect(() => live.adoptPrepared(prepared)).toThrow('consumedPreparedOpen');
+    await expect(prepared.serialize()).rejects.toThrow('consumedPreparedOpen');
+    await expect(prepared.mergeRemote(bytes)).rejects.toThrow('consumedPreparedOpen');
+    expect(() => prepared.markCached()).toThrow('consumedPreparedOpen');
+    prepared.discard(); expect(live.isSessionCurrent(session + 1)).toBe(true);
+    // A merge and round-trip require the transferred candidate credentials.
+    await live.mergeRemote(bytes);
+    const check = new Vault(); await check.open(await live.serialize(), 'candidate password', null);
+    expect(check.getEntry(id)?.password).toBe('candidate secret');
+  });
+
+  test('rejects foreign ownership, supports committed-clean state and discards unused candidates', async () => {
+    const { bytes } = await generated(); const live = new Vault(); const other = new Vault();
+    const prepared = await live.prepareOpen(bytes, 'candidate password', null);
+    expect(() => other.adoptPrepared(prepared)).toThrow('foreignPreparedOpen');
+    await prepared.mergeRemote(bytes); await prepared.serialize(); prepared.markCached();
+    live.adoptPrepared(prepared); expect(live.dirty).toBe(false); expect(other.isOpen()).toBe(false);
+    const unused = await live.prepareOpen(bytes, 'candidate password', null); unused.discard();
+    expect(() => live.adoptPrepared(unused)).toThrow('consumedPreparedOpen');
+  });
+
+  test.each(['lock', 'edit', 'new open'] as const)('%s invalidates prepared adoption', async action => {
+    const live = new Vault(); await live.open(fixture(), 'correct horse', null);
+    const prepared = await live.prepareOpen(fixture(), 'correct horse', null);
+    if (action === 'lock') live.lock();
+    else if (action === 'edit') live.updateEntry(live.entriesForUrl('https://github.com')[0].id, { UserName: 'intervening' });
+    else await live.open(fixture(), 'correct horse', null);
+    const generation = live.lifecycleGeneration; const version = live.mutationVersion;
+    expect(() => live.adoptPrepared(prepared)).toThrow('staleSession'); prepared.discard();
+    expect(live.lifecycleGeneration).toBe(generation); expect(live.mutationVersion).toBe(version);
+    if (action === 'edit') expect(live.entriesForUrl('https://github.com')[0].username).toBe('intervening');
+  });
+
+  test('a pending merge cannot be adopted and disposal invalidates its later completion', async () => {
+    const live = new Vault(); const prepared = await live.prepareOpen(fixture(), 'correct horse', null);
+    const gate = Promise.withResolvers<void>(); const started = Promise.withResolvers<void>();
+    const load = kdbxweb.Kdbx.load.bind(kdbxweb.Kdbx);
+    const hold = vi.spyOn(kdbxweb.Kdbx, 'load').mockImplementationOnce(async (...args) => {
+      started.resolve(); await gate.promise; return load(...args);
+    });
+    const merge = prepared.mergeRemote(fixture());
+    try {
+      await started.promise; expect(() => live.adoptPrepared(prepared)).toThrow('busyPreparedOpen');
+      prepared.discard(); const rejected = expect(merge).rejects.toThrow('staleSession');
+      gate.resolve(); await rejected; expect(live.isOpen()).toBe(false); expect(live.lifecycleGeneration).toBe(0);
+    } finally { gate.resolve(); await Promise.allSettled([merge]); hold.mockRestore(); }
+  });
+
+  test('failed candidate decrypt leaves the old dirty database and credentials usable', async () => {
+    const live = new Vault(); await live.open(fixture(), 'correct horse', null);
+    const id = live.entriesForUrl('https://github.com')[0].id; live.updateEntry(id, { UserName: 'unchanged' });
+    const generation = live.lifecycleGeneration; const version = live.mutationVersion;
+    await expect(live.prepareOpen(fixture(), 'wrong', null)).rejects.toBeDefined();
+    expect(live.lifecycleGeneration).toBe(generation); expect(live.mutationVersion).toBe(version); expect(live.dirty).toBe(true);
+    const check = new Vault(); await check.open(await live.serialize(), 'correct horse', null);
+    expect(check.getEntry(id)?.username).toBe('unchanged');
+  });
+});

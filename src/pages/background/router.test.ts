@@ -5,6 +5,9 @@
 // as extracted verbatim from src/pages/background/index.ts (plan 009). They assert what
 // the router DOES, not what it should do — any surprise here is a report item, not
 // something to "fix" in this file.
+import 'fake-indexeddb/auto';
+import * as kdbxweb from 'kdbxweb';
+import { FakeCloudProvider } from '../../background/sources/fakeCloudProvider';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,6 +35,7 @@ vi.mock('../../shared/settings', () => ({
 }));
 vi.mock('../../background/cache', () => ({
   getCache: vi.fn(),
+  putCache: vi.fn(),
   cacheKey: (provider: string, fileId: string) => `${provider}:${fileId}`,
 }));
 vi.mock('../../background/sync', () => ({
@@ -51,8 +55,8 @@ vi.mock('../../background/quickUnlockCrypto', () => ({
 
 import { loadHandle, ensurePermission, hasPermission, readBytes, writeBytes } from '../../background/fileHandle';
 import { loadSettings } from '../../shared/settings';
-import { getCache, type CacheRecord } from '../../background/cache';
-import { openCloud, saveCloud } from '../../background/sync';
+import { getCache, putCache, cacheKey, type CacheRecord } from '../../background/cache';
+import { openCloud, saveCloud, type SyncDeps } from '../../background/sync';
 import type { CloudFileSource } from '../../shared/dbSource';
 import {
   clearQuickUnlockEnrollment,
@@ -128,6 +132,16 @@ async function unlockHappyPath(handle_: ReturnType<typeof makeRouter>) {
   return handle_({ type: 'unlock', password: PW, keyFile: null });
 }
 
+async function mockCloudCommit(source: CloudFileSource, deps: SyncDeps) {
+  const prepared = await deps.vault.prepareOpen(fixture(), PW, null);
+  try {
+    const adopt = () => { const session = deps.vault.adoptPrepared(prepared); source.basedOnRev = 'rA'; return session; };
+    const session = deps.commitOpen ? deps.commitOpen(adopt) : adopt();
+    deps.onOpened?.(session);
+    return { basedOnRev: 'rA', merged: false, offline: false };
+  } finally { prepared.discard(); }
+}
+
 let chromeMock: {
   runtime: { id: string };
   tabs: { get: ReturnType<typeof vi.fn>; sendMessage: ReturnType<typeof vi.fn> };
@@ -137,6 +151,10 @@ let chromeMock: {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(openCloud).mockReset();
+  vi.mocked(getCache).mockReset();
+  vi.mocked(putCache).mockReset();
+  vi.mocked(loadSettings).mockReset().mockResolvedValue(DEFAULT_SETTINGS_STUB);
   chromeMock = {
     runtime: { id: 'quickkee' },
     tabs: { get: vi.fn(), sendMessage: vi.fn() },
@@ -229,14 +247,12 @@ describe('open and save cancellation', () => {
     } finally { gate.resolve(); await Promise.allSettled([opening]); }
   });
 
-  test('cloud open cannot install its source after inner completion belongs to an old session', async () => {
+  test('cloud commit callback cannot adopt after a newer session has replaced it', async () => {
     const { ctx, handle_ } = makeCtx();
     const gate = Promise.withResolvers<void>(); const started = Promise.withResolvers<void>();
     vi.mocked(openCloud).mockImplementationOnce(async (_source, deps) => {
-      const token = await deps.vault.open(fixture(), PW, null);
-      deps.onOpened?.(token);
       started.resolve(); await gate.promise;
-      return { basedOnRev: 'rA', merged: false, offline: false };
+      return mockCloudCommit(_source, deps);
     });
     const opening = handle_({ type: 'openRemote', provider: 'dropbox', fileId: 'A', fileName: 'A.kdbx', password: PW, keyFile: null });
     try {
@@ -250,15 +266,12 @@ describe('open and save cancellation', () => {
     } finally { gate.resolve(); await Promise.allSettled([opening]); }
   });
 
-  test.each(['unlock', 'openRemote'] as const)('%s cannot arm autolock after lock while finishOpen loads settings', async route => {
+  test.each(['unlock', 'openRemote'] as const)('%s cannot open or arm autolock after lock while loading settings', async route => {
     const { ctx, handle_ } = makeCtx();
     vi.mocked(loadHandle).mockResolvedValue(fakeHandle());
     vi.mocked(ensurePermission).mockResolvedValue(true);
     vi.mocked(readBytes).mockResolvedValue(fixture());
-    if (route === 'openRemote') vi.mocked(openCloud).mockImplementationOnce(async (_source, deps) => {
-      const token = await deps.vault.open(fixture(), PW, null); deps.onOpened?.(token);
-      return { basedOnRev: 'rA', merged: false, offline: false };
-    });
+    if (route === 'openRemote') vi.mocked(openCloud).mockImplementationOnce(mockCloudCommit);
     const gate = Promise.withResolvers<void>(); const started = Promise.withResolvers<void>();
     vi.mocked(loadSettings).mockImplementationOnce(async () => {
       started.resolve(); await gate.promise; return DEFAULT_SETTINGS_STUB;
@@ -268,7 +281,7 @@ describe('open and save cancellation', () => {
       : handle_({ type: 'openRemote', provider: 'dropbox', fileId: 'A', fileName: 'A.kdbx', password: PW, keyFile: null });
     try {
       await started.promise;
-      expect(ctx.vault.isOpen()).toBe(true);
+      expect(ctx.vault.isOpen()).toBe(false);
       expect(await handle_({ type: 'lock' })).toEqual({ ok: true });
       gate.resolve(); expect((await opening).ok).toBe(false);
       expect(arm).not.toHaveBeenCalled(); expect(ctx.getCurrentSource()).toBeNull();
@@ -1435,8 +1448,7 @@ describe('device quick unlock routing', () => {
     vi.mocked(loadQuickUnlockEnrollment).mockResolvedValue({ record: cloudRecord, localHandle: null });
     vi.mocked(openCloud).mockImplementationOnce(async (_source, deps) => {
       expect(deps.isCurrent?.()).toBe(true);
-      const token = await deps.vault.open(fixture(), PW, null); deps.onOpened?.(token);
-      return { basedOnRev: 'r2', merged: false, offline: false };
+      return mockCloudCommit(_source, deps);
     });
     vi.mocked(loadSettings).mockResolvedValue(DEFAULT_SETTINGS_STUB);
 
@@ -1523,4 +1535,193 @@ describe('device quick unlock routing', () => {
       .toEqual({ ok: true });
     expect(clearQuickUnlockEnrollment).toHaveBeenCalledOnce();
   });
+});
+
+
+/** Run the actual queued cloud implementation and committed IDB adapter through the router. */
+async function realCloudRoute(fileId: string, pending = false, cached = false) {
+  const realSync = await vi.importActual<typeof import('../../background/sync')>('../../background/sync');
+  const realCache = await vi.importActual<typeof import('../../background/cache')>('../../background/cache');
+  vi.mocked(getCache).mockImplementation(realCache.getCache);
+  vi.mocked(putCache).mockImplementation(realCache.putCache);
+  const provider = new FakeCloudProvider(); provider.setFile(fileId, 'candidate.kdbx', fixture(), 'r2');
+  if (pending || cached) await realCache.putCache(cacheKey('dropbox', fileId), {
+    bytes: fixture(), basedOnRev: pending ? 'r1' : 'r2', pendingUpload: pending, lastSyncedAt: 0,
+  });
+  vi.mocked(openCloud).mockImplementationOnce((source, deps, password, keyFile) =>
+    realSync.openCloud(source, { ...deps, provider }, password, keyFile));
+  return provider;
+}
+
+function observedOpenState(ctx: SwContext) {
+  return { source: ctx.getCurrentSource(), handle: ctx.getHandle(), generation: ctx.vault.lifecycleGeneration,
+    version: ctx.vault.mutationVersion, locked: !ctx.vault.isOpen(), dirty: ctx.vault.dirty,
+    tree: ctx.vault.isOpen() ? ctx.vault.getTree() : null, timer: ctx.autolock['timer'] };
+}
+
+function cloudRequest(fileId: string) {
+  return { type: 'openRemote' as const, provider: 'dropbox' as const, fileId, fileName: 'candidate.kdbx', password: PW, keyFile: null };
+}
+
+describe.each(['locked', 'dirty replacement'] as const)('atomic router cloud open from %s', initial => {
+  test.each(['cached decrypt', 'remote decrypt', 'merge', 'serialize', 'cache abort', 'settings'] as const)(
+    '%s failure preserves entries, source, handle, generation, status and timer', async phase => {
+      const { ctx, handle_ } = makeCtx();
+      if (initial === 'dirty replacement') {
+        await unlockHappyPath(handle_);
+        ctx.vault.updateEntry(ctx.vault.entriesForUrl('https://github.com')[0].id, { UserName: 'old dirty' });
+      }
+      const fileId = `router-atomic-${initial}-${phase}`;
+      await realCloudRoute(fileId, phase === 'merge' || phase === 'serialize', phase === 'cached decrypt');
+      const before = observedOpenState(ctx);
+      const arm = vi.spyOn(ctx.autolock, 'arm'); const disarm = vi.spyOn(ctx.autolock, 'disarm');
+      const states: ReturnType<typeof observedOpenState>[] = [];
+      ctx.publishStatus = () => { states.push(observedOpenState(ctx)); };
+      const gate = Promise.withResolvers<void>(); const started = Promise.withResolvers<void>();
+      const failure = new Error(`failed ${phase}`);
+      const hold = phase === 'settings' ? vi.mocked(loadSettings).mockImplementationOnce(async () => {
+        started.resolve(); await gate.promise; throw failure;
+      }) : phase.includes('decrypt') ? vi.spyOn(kdbxweb.Kdbx, 'load').mockImplementationOnce(async () => {
+        started.resolve(); await gate.promise; throw failure;
+      }) : phase === 'merge' ? vi.spyOn(Vault.prototype, 'mergeRemote').mockImplementationOnce(async () => {
+        started.resolve(); await gate.promise; throw failure;
+      }) : phase === 'serialize' ? vi.spyOn(Vault.prototype, 'serialize').mockImplementationOnce(async () => {
+        started.resolve(); await gate.promise; throw failure;
+      }) : (() => {
+        const put = IDBObjectStore.prototype.put;
+        return vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementationOnce(function (this: IDBObjectStore, value, key) {
+          const request = put.call(this, value, key);
+          request.addEventListener('success', () => { this.transaction.abort(); started.resolve(); }); return request;
+        });
+      })();
+      const opening = handle_(cloudRequest(fileId));
+      try {
+        await started.promise; expect(observedOpenState(ctx)).toEqual(before);
+        gate.resolve(); expect((await opening).ok).toBe(false);
+        expect(observedOpenState(ctx)).toEqual(before);
+        expect(ctx.getCurrentSource()).toBe(before.source); expect(ctx.getHandle()).toBe(before.handle);
+        expect(arm).not.toHaveBeenCalled(); expect(disarm).not.toHaveBeenCalled();
+        expect(states.length).toBeGreaterThan(0); for (const state of states) expect(state).toEqual(before);
+      } finally {
+        gate.resolve(); await Promise.allSettled([opening]);
+        if (phase !== 'settings') hold.mockRestore();
+        arm.mockRestore(); disarm.mockRestore(); ctx.autolock.disarm();
+      }
+    },
+  );
+
+  test('publishes adopted source, committed revision and armed timer together after IDB completion', async () => {
+    const { ctx, handle_ } = makeCtx();
+    if (initial === 'dirty replacement') {
+      await unlockHappyPath(handle_);
+      ctx.vault.updateEntry(ctx.vault.entriesForUrl('https://github.com')[0].id, { UserName: 'old dirty' });
+    }
+    const fileId = `router-success-${initial}`;
+    await realCloudRoute(fileId, true);
+    const liveVault = ctx.vault;
+    const before = observedOpenState(ctx); const arm = vi.spyOn(ctx.autolock, 'arm');
+    const states: ReturnType<typeof observedOpenState>[] = [];
+    let committed = false;
+    ctx.publishStatus = () => {
+      expect(committed).toBe(true); expect(arm).toHaveBeenCalledExactlyOnceWith(8);
+      states.push(observedOpenState(ctx));
+    };
+    const put = IDBObjectStore.prototype.put;
+    const intercept = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementationOnce(function (this: IDBObjectStore, value, key) {
+      const request = put.call(this, value, key);
+      request.addEventListener('success', () => { expect(observedOpenState(ctx)).toEqual(before); });
+      this.transaction.addEventListener('complete', () => { committed = true; }); return request;
+    });
+    try {
+      expect(await handle_(cloudRequest(fileId))).toEqual({ ok: true, merged: true });
+      expect(states.length).toBeGreaterThan(0);
+      for (const state of states) {
+        expect(state).toMatchObject({ locked: false, generation: before.generation + 1, dirty: false, handle: null,
+          source: { kind: 'cloud', provider: 'dropbox', fileId, basedOnRev: 'r2' } });
+        expect(state.timer).not.toBeNull(); expect(state.timer).not.toBe(before.timer);
+      }
+      expect(ctx.vault).toBe(liveVault); expect((await getCache(cacheKey('dropbox', fileId)))?.pendingUpload).toBe(true);
+    } finally { intercept.mockRestore(); arm.mockRestore(); ctx.autolock.disarm(); }
+  });
+});
+
+describe.each(['settings', 'cache commit'] as const)('router cloud preparation at %s', phase => {
+  test.each(['lock', 'new open', 'source replacement', 'handle replacement', 'edit'] as const)(
+    '%s invalidates the candidate without modifying intervening state or timer', async action => {
+      const { ctx, handle_ } = makeCtx(); await unlockHappyPath(handle_);
+      const id = ctx.vault.entriesForUrl('https://github.com')[0].id;
+      ctx.vault.updateEntry(id, { UserName: 'old dirty' });
+      const replacement = await ctx.vault.prepareOpen(fixture(), PW, null);
+      const fileId = `router-cancel-${phase}-${action}`; await realCloudRoute(fileId);
+      const gate = Promise.withResolvers<void>(); const started = Promise.withResolvers<void>();
+      let after: ReturnType<typeof observedOpenState>;
+      const intervene = () => {
+        if (action === 'lock') ctx.doLock();
+        else if (action === 'new open') {
+          ctx.vault.adoptPrepared(replacement);
+          ctx.setCurrentSource({ kind: 'cloud', provider: 'gdrive', fileId: 'new', basedOnRev: 'new-rev' }); ctx.setHandle(null);
+          ctx.vault.updateEntry(id, { UserName: 'new session edit' }); ctx.autolock.arm(3);
+        } else if (action === 'source replacement') ctx.setCurrentSource({ kind: 'cloud', provider: 'gdrive', fileId: 'other', basedOnRev: 'other-rev' });
+        else if (action === 'handle replacement') ctx.setHandle(fakeHandle('other.kdbx'));
+        else ctx.vault.updateEntry(id, { UserName: 'edit during preparation' });
+        after = observedOpenState(ctx);
+      };
+      const states: ReturnType<typeof observedOpenState>[] = [];
+      ctx.publishStatus = () => { states.push(observedOpenState(ctx)); };
+      const hold = phase === 'settings' ? vi.mocked(loadSettings).mockImplementationOnce(async () => {
+        started.resolve(); await gate.promise; return DEFAULT_SETTINGS_STUB;
+      }) : (() => {
+        const put = IDBObjectStore.prototype.put;
+        return vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementationOnce(function (this: IDBObjectStore, value, key) {
+          const request = put.call(this, value, key);
+          request.addEventListener('success', () => { intervene(); started.resolve(); }); return request;
+        });
+      })();
+      const opening = handle_(cloudRequest(fileId));
+      try {
+        await started.promise; if (phase === 'settings') intervene();
+        gate.resolve(); expect(await opening).toEqual({ ok: false, error: 'openFailed: staleSession' });
+        expect(observedOpenState(ctx)).toEqual(after!);
+        for (const state of states) expect(state).toEqual(after!);
+      } finally {
+        gate.resolve(); await Promise.allSettled([opening]); if (phase !== 'settings') hold.mockRestore();
+        replacement.discard(); ctx.autolock.disarm();
+      }
+    },
+  );
+});
+
+test.each(['unlock', 'quick local', 'quick cloud'] as const)('%s publishes status only after matching source and timer are installed', async route => {
+  const { ctx, handle_ } = makeCtx();
+  vi.mocked(loadHandle).mockResolvedValue(fakeHandle()); vi.mocked(ensurePermission).mockResolvedValue(true);
+  vi.mocked(readBytes).mockResolvedValue(fixture());
+  vi.mocked(loadQuickUnlockEnrollment).mockResolvedValue({ record: route === 'quick cloud'
+    ? { ...quickRecord, source: { kind: 'cloud', provider: 'dropbox', fileId: 'quick-atomic', label: 'cloud.kdbx' } }
+    : quickRecord, localHandle: fakeHandle() });
+  if (route === 'quick cloud') await realCloudRoute('quick-atomic');
+  const arm = vi.spyOn(ctx.autolock, 'arm'); const states: ReturnType<typeof observedOpenState>[] = [];
+  ctx.publishStatus = () => { expect(arm).toHaveBeenCalledExactlyOnceWith(8); states.push(observedOpenState(ctx)); };
+  try {
+    const result = route === 'unlock' ? await handle_({ type: 'unlock', password: PW, keyFile: null })
+      : await handle_({ type: 'quickUnlock', credentialId: quickRecord.credentialId, prfOutput: Array(32).fill(3) }, quickPanelSender);
+    expect(result).toEqual({ ok: true }); expect(states.length).toBeGreaterThan(0);
+    for (const state of states) {
+      expect(state.locked).toBe(false); expect(state.timer).not.toBeNull();
+      expect(state.source?.kind).toBe(route === 'quick cloud' ? 'cloud' : 'local');
+      if (route === 'quick cloud') expect(state.handle).toBeNull(); else expect(state.handle?.name).toBe('vault.kdbx');
+    }
+  } finally { arm.mockRestore(); ctx.autolock.disarm(); }
+});
+
+test.each(['throw', 'reject'] as const)('optional icon refresh %s cannot fail a committed cloud open', async failure => {
+  const { ctx, handle_ } = makeCtx(); await realCloudRoute(`refresh-${failure}`);
+  vi.mocked(ctx.refreshAllIcons).mockImplementationOnce(() => {
+    if (failure === 'throw') throw new Error('icon refresh failed');
+    return Promise.reject(new Error('icon refresh failed'));
+  });
+  try {
+    expect(await handle_(cloudRequest(`refresh-${failure}`))).toEqual({ ok: true });
+    expect(ctx.vault.isOpen()).toBe(true); expect(ctx.getCurrentSource()).toMatchObject({ fileId: `refresh-${failure}`, basedOnRev: 'r2' });
+    expect(ctx.autolock['timer']).not.toBeNull();
+  } finally { ctx.autolock.disarm(); }
 });
