@@ -4,13 +4,13 @@ import type { Request } from '../../shared/messages';
 import type { EntryView, TreeNode } from '../../shared/entry';
 import type { ScannedPageTotp } from './scanVisibleTabForTotp';
 
-const mocks = vi.hoisted(() => ({ send: vi.fn(), scan: vi.fn() }));
+const mocks = vi.hoisted(() => ({ send: vi.fn(), scan: vi.fn(), writeDraft: vi.fn(), clearDraft: vi.fn() }));
 vi.mock('../../shared/messages', () => ({ sendToSW: mocks.send }));
 vi.mock('../../shared/UnlockScreen', () => ({ UnlockScreen: () => <button>Unlock</button> }));
 vi.mock('../../shared/settings', () => ({ loadSettings: async () => ({ theme: 'system', clipboardClearSeconds: 30,
   pwgen: { length: 20, lower: true, upper: true, digits: true, symbols: true } }) }));
 vi.mock('../../shared/theme', () => ({ applyTheme: vi.fn() }));
-vi.mock('../../shared/createDraft', () => ({ loadDraft: async () => null, saveDraft: vi.fn(), clearDraft: vi.fn() }));
+vi.mock('../../shared/createDraft', () => ({ loadDraft: async () => null, saveDraft: mocks.writeDraft, clearDraft: mocks.clearDraft }));
 vi.mock('./scanVisibleTabForTotp', () => ({ scanVisibleTabForTotp: mocks.scan,
   isScannablePageUrl: (url: string) => url?.startsWith('https:'), UNSUPPORTED_PAGE_MESSAGE: 'unsupported' }));
 vi.mock('./ScannedTotpDialog', () => ({ ScannedTotpDialog: ({ config, onConfirm }: {
@@ -54,6 +54,8 @@ beforeEach(() => {
   onMessage = event(); onDisconnect = event();
   mocks.send.mockReset().mockImplementation(async (request: Request) => respond(request));
   mocks.scan.mockReset().mockResolvedValue(scanned);
+  mocks.writeDraft.mockReset().mockResolvedValue(undefined);
+  mocks.clearDraft.mockReset().mockResolvedValue(undefined);
   vi.stubGlobal('chrome', { runtime: { id: 'own', getURL: (path: string) => path,
     connect: () => ({ onMessage, onDisconnect, postMessage: vi.fn(), disconnect: vi.fn() }) },
   tabs: { query: async () => [{ id: 1, url: entry.url }], onActivated: event(), onUpdated: event() } });
@@ -116,4 +118,40 @@ test('lock during scanned-TOTP mutation cancels the helper save and parent refre
   expect(mocks.send.mock.calls).toHaveLength(before);
   expect(mocks.send).not.toHaveBeenCalledWith({ type: 'save' });
   expect(screen.getByRole('button', { name: 'Unlock' })).toBeVisible();
+});
+
+
+test.each([true, false])('both creation render sites carry the exact session identity (existing entries: %s)', async hasEntries => {
+  mocks.send.mockImplementation(async (request: Request) => {
+    if (request.type === 'getEntriesForUrl') return { ok: true, entries: hasEntries ? [entry] : [] };
+    if (request.type === 'createEntry') return { ok: false, error: 'intentional' };
+    return respond(request);
+  });
+  render(<Popup />); transition(false, 7);
+  if (hasEntries) fireEvent.click(await screen.findByRole('button', { name: 'Add entry' }));
+  await waitFor(() => expect(screen.getByPlaceholderText('Password')).toHaveValue('generated'));
+  fireEvent.change(screen.getByPlaceholderText('Title'), { target: { value: 'Session-bound draft' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Create & Save' }));
+  await waitFor(() => expect(mocks.writeDraft).toHaveBeenCalledWith(expect.objectContaining({
+    submission: { status: 'creating', sessionKey: 'worker:7:1' },
+  }), expect.any(Function)));
+});
+
+test.each(['lock', 'disconnect', 'replacement'])('%s while creating cancels persistence and parent reload', async reason => {
+  const late = deferred<unknown>();
+  mocks.send.mockImplementation(async (r: Request) => r.type === 'createEntry' ? late.promise : respond(r));
+  render(<Popup />); transition(false);
+  fireEvent.click(await screen.findByRole('button', { name: 'Add entry' }));
+  await waitFor(() => expect(screen.getByPlaceholderText('Password')).toHaveValue('generated'));
+  fireEvent.change(screen.getByPlaceholderText('Title'), { target: { value: 'Private draft' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Create & Fill' }));
+  await waitFor(() => expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'createEntry' })));
+  if (reason === 'disconnect') act(() => onDisconnect.fire());
+  else transition(reason === 'lock', 2);
+  await act(async () => { await Promise.resolve(); });
+  const before = [mocks.send.mock.calls.length, mocks.writeDraft.mock.calls.length, mocks.clearDraft.mock.calls.length];
+  await act(async () => { late.resolve({ ok: true, entryId: 'new' }); });
+  expect([mocks.send.mock.calls.length, mocks.writeDraft.mock.calls.length, mocks.clearDraft.mock.calls.length]).toEqual(before);
+  expect(mocks.send).not.toHaveBeenCalledWith({ type: 'save' });
+  expect(mocks.send.mock.calls.some(([r]) => r.type === 'fillRequest')).toBe(false);
 });
