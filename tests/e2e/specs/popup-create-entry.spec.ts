@@ -1,4 +1,4 @@
-import { test, expect, openExtensionPage, installDb, openPopupForTab, swCmd, reReadKdbx, allEntryTitles } from '../helpers';
+import { test, expect, openExtensionPage, installDb, openPopupForTab, getTabId, reReadKdbx, allEntryTitles } from '../helpers';
 
 test('saved site: "Add entry" button creates a second entry from the popup', async ({ context, extensionId, http }) => {
   const seed = await openExtensionPage(context, extensionId, 'src/pages/popup/index.html');
@@ -11,7 +11,7 @@ test('saved site: "Add entry" button creates a second entry from the popup', asy
   // localhost already has a matching entry -> list shows, no auto CreateForm.
   const site = await context.newPage();
   await site.goto(http.url);
-  const { id: tabId } = await swCmd(seed, { cmd: 'tabId', url: http.url });
+  const tabId = await getTabId(seed, http.url);
 
   const popup = await openPopupForTab(context, extensionId, http.url, tabId);
   await expect(popup.getByText('Localhost Login')).toBeVisible();
@@ -58,7 +58,7 @@ test('saved site: Cancel returns to the list without creating an entry', async (
 
   const site = await context.newPage();
   await site.goto(http.url);
-  const { id: tabId } = await swCmd(seed, { cmd: 'tabId', url: http.url });
+  const tabId = await getTabId(seed, http.url);
 
   const popup = await openPopupForTab(context, extensionId, http.url, tabId);
   await popup.getByRole('button', { name: 'Add entry' }).click();

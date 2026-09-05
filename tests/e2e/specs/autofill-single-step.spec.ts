@@ -1,4 +1,4 @@
-import { test, expect, openExtensionPage, installDb, openPopupForTab, swCmd } from '../helpers';
+import { test, expect, openExtensionPage, installDb, openPopupForTab, getTabId } from '../helpers';
 
 test('single-step login: autofill fills email-only field when no password field present', async ({ context, extensionId, http }) => {
   const seed = await openExtensionPage(context, extensionId, 'src/pages/popup/index.html');
@@ -11,8 +11,7 @@ test('single-step login: autofill fills email-only field when no password field 
   const site = await context.newPage();
   await site.goto(http.singleUrl);
   await site.waitForLoadState('load');
-  const { id: tabId } = await swCmd(seed, { cmd: 'tabId', url: http.singleUrl });
-  expect(typeof tabId).toBe('number');
+  const tabId = await getTabId(seed, http.singleUrl);
 
   const popup = await openPopupForTab(context, extensionId, http.singleUrl, tabId);
   await expect(popup.getByText('Localhost Login')).toBeVisible();

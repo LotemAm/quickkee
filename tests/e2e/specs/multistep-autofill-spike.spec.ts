@@ -1,4 +1,4 @@
-import { test, expect, openExtensionPage, installDb, openPopupForTab, swCmd } from '../helpers';
+import { test, expect, openExtensionPage, installDb, openPopupForTab, getTabId } from '../helpers';
 
 interface SpikeEvent { tabId: number; url: string; frameId: number; ts: number }
 type SpikeSelf = { __qkSpikeEvents: SpikeEvent[] };
@@ -48,8 +48,7 @@ test('spike: step-two page is untouched today, and onCompleted is observable in 
   const site = await context.newPage();
   await site.goto(http.step1Url);
   await site.waitForLoadState('load');
-  const { id: tabId } = await swCmd(seed, { cmd: 'tabId', url: http.step1Url });
-  expect(typeof tabId).toBe('number');
+  const tabId = await getTabId(seed, http.step1Url);
 
   // Fill step one through QuickKee's real autofill path -- same pattern as
   // autofill-single-step.spec.ts: open the extension popup for this tab and
