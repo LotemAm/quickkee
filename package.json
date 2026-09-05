@@ -22,6 +22,7 @@
   },
   "type": "module",
   "dependencies": {
+    "@xmldom/xmldom": "0.8.15",
     "@zxing/browser": "^0.2.1",
     "@zxing/library": "^0.23.0",
     "hash-wasm": "^4.12.0",
@@ -60,5 +61,8 @@
     "vite": "^8.2.2",
     "vite-plugin-zip-pack": "^1.2.4",
     "vitest": "^4.1.9"
+  },
+  "resolutions": {
+    "@xmldom/xmldom": "0.8.15"
   }
 }

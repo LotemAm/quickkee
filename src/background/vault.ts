@@ -1,5 +1,6 @@
 import * as kdbxweb from 'kdbxweb';
 import { registerArgon2 } from './crypto';
+import { registerXmlParser } from './xml';
 import { urlMatches } from './matcher';
 import type { EntryView, EntryField, TreeNode, EntrySummary, AttachmentMeta } from '../shared/entry';
 import { CARD_FLAG_KEY, OTP_FIELD_KEY } from '../shared/entry';
@@ -61,6 +62,7 @@ export class Vault {
   async open(bytes: ArrayBuffer, password: string | null, keyFile: ArrayBuffer | null): Promise<number> {
     const generation = this.generation;
     registerArgon2();
+    registerXmlParser();
     const pv = password ? kdbxweb.ProtectedValue.fromString(password) : null;
     const creds = new kdbxweb.Credentials(pv, keyFile);
     const db = await kdbxweb.Kdbx.load(bytes, creds);
