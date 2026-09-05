@@ -280,7 +280,19 @@ export async function startHttpFixture() {
 }
 
 export async function startHttpsFixture() {
-  const pems = selfsigned.generate([{ name: 'commonName', value: 'localhost' }], { days: 1 });
+  const pems = await selfsigned.generate([{ name: 'commonName', value: 'localhost' }], {
+    algorithm: 'sha256',
+    notAfterDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    extensions: [
+      { name: 'basicConstraints', cA: false },
+      { name: 'keyUsage', digitalSignature: true, keyEncipherment: true },
+      { name: 'extKeyUsage', serverAuth: true },
+      { name: 'subjectAltName', altNames: [
+        { type: 2, value: 'localhost' },
+        { type: 7, ip: '127.0.0.1' },
+      ] },
+    ],
+  });
   const server = https.createServer({ key: pems.private, cert: pems.cert }, (_req, res) => {
     res.writeHead(200, { 'content-type': 'text/html' });
     res.end('<!doctype html><html><body><h1>insecure</h1></body></html>');

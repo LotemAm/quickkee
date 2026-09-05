@@ -15,6 +15,7 @@
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
     "lint": "eslint .",
     "build:chrome:test": "vite build --config vite.config.chrome.ts --mode test",
     "test:e2e": "yarn build:chrome:test && playwright test"

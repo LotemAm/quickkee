@@ -1,4 +1,4 @@
-import { test, expect, openExtensionPage, installDb, openPopupForTab, swCmd } from '../helpers';
+import { test, expect, openExtensionPage, installDb, openPopupForTab, getTabId, swCmd } from '../helpers';
 
 test('saved site: badge count, copy, autofill', async ({ context, extensionId, http }) => {
   // Install + unlock the vault via the popup.
@@ -13,8 +13,7 @@ test('saved site: badge count, copy, autofill', async ({ context, extensionId, h
   const site = await context.newPage();
   await site.goto(http.url);
   await site.waitForLoadState('load');
-  const { id: tabId } = await swCmd(seed, { cmd: 'tabId', url: http.url });
-  expect(typeof tabId).toBe('number');
+  const tabId = await getTabId(seed, http.url);
 
   // Badge: matcher state AND visible chrome.action badge.
   await expect.poll(async () => (await swCmd(seed, { cmd: 'match', url: http.url, tabId })).count).toBe(1);

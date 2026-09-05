@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import { startHttpFixture, startHttpsFixture } from './servers';
 export { SCANNED_TOTP_SECRET } from './servers';
 import kdbxweb from 'kdbxweb';
-import { argon2id, argon2d } from 'hash-wasm';
+import { registerArgon2 } from '../../src/background/crypto';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.resolve(__dirname, '../../dist_chrome');
@@ -134,6 +134,15 @@ export async function swCmd(page: Page, msg: Record<string, unknown>): Promise<S
   return (await page.evaluate((m) => chrome.runtime.sendMessage({ ...m, __qk: 'test' }), msg)) as SwCmdResponse;
 }
 
+/** Resolve a browser tab or fail before sending a command with a missing ID. */
+export async function getTabId(page: Page, url: string): Promise<number> {
+  const { id } = await swCmd(page, { cmd: 'tabId', url });
+  if (typeof id !== 'number' || !Number.isInteger(id) || id < 0) {
+    throw new Error(`Expected a non-negative integer tab ID for ${url}, received ${String(id)}`);
+  }
+  return id;
+}
+
 export async function openPopupForTab(
   context: BrowserContext, extensionId: string, url: string, tabId: number,
 ): Promise<Page> {
@@ -145,21 +154,9 @@ export async function openPopupForTab(
   return page;
 }
 
-let argonReady = false;
-function ensureArgon() {
-  if (argonReady) return;
-  kdbxweb.CryptoEngine.setArgon2Impl(async (pwd, salt, mem, iter, len, par, type, ver) => {
-    const fn = type === kdbxweb.CryptoEngine.Argon2TypeArgon2id ? argon2id : argon2d;
-    return fn({ password: new Uint8Array(pwd), salt: new Uint8Array(salt),
-      parallelism: par, iterations: iter, memorySize: mem, hashLength: len,
-      outputType: 'binary', version: ver });
-  });
-  argonReady = true;
-}
-
 /** Reads the current vault bytes back out of the extension page's IndexedDB and decrypts them. */
 export async function reReadKdbx(page: Page, password = 'correct horse'): Promise<kdbxweb.Kdbx> {
-  ensureArgon();
+  registerArgon2();
   const b64: string = await page.evaluate(() => new Promise<string>((res, rej) => {
     const open = indexedDB.open('quickkee', 2);
     open.onupgradeneeded = () => {

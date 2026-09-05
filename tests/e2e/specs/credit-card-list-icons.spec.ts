@@ -1,4 +1,4 @@
-import { test, expect, openExtensionPage, openEntryEditorMore, installDb, openPopupForTab, swCmd } from '../helpers';
+import { test, expect, openExtensionPage, openEntryEditorMore, installDb, openPopupForTab, getTabId } from '../helpers';
 
 test('panel and popup entry lists show a credit-card icon only once an entry is marked', async ({ context, extensionId, http }) => {
   const popup = await openExtensionPage(context, extensionId, 'src/pages/popup/index.html');
@@ -33,7 +33,7 @@ test('panel and popup entry lists show a credit-card icon only once an entry is 
   const site = await context.newPage();
   await site.goto(http.url);
   await site.waitForLoadState('load');
-  const { id: tabId } = await swCmd(panel, { cmd: 'tabId', url: http.url });
+  const tabId = await getTabId(panel, http.url);
   const cardPopup = await openPopupForTab(context, extensionId, http.url, tabId);
   const cardEntry = cardPopup.locator('.card', { hasText: 'Localhost Login' });
   await expect(cardEntry.locator('svg.lucide-credit-card')).toHaveCount(1);

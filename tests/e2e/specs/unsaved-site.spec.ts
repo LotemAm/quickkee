@@ -1,4 +1,4 @@
-import { test, expect, openExtensionPage, installDb, openPopupForTab, swCmd, reReadKdbx, allEntryTitles } from '../helpers';
+import { test, expect, openExtensionPage, installDb, openPopupForTab, getTabId, swCmd, reReadKdbx, allEntryTitles } from '../helpers';
 
 test('unsaved site: create + save persists and revisit shows the badge', async ({ context, extensionId, http }) => {
   const seed = await openExtensionPage(context, extensionId, 'src/pages/popup/index.html');
@@ -11,7 +11,7 @@ test('unsaved site: create + save persists and revisit shows the badge', async (
   // 127.0.0.1 is a non-matching hostname -> no entries -> CreateForm shows.
   const site = await context.newPage();
   await site.goto(http.altUrl);
-  const { id: tabId } = await swCmd(seed, { cmd: 'tabId', url: http.altUrl });
+  const tabId = await getTabId(seed, http.altUrl);
 
   const popup = await openPopupForTab(context, extensionId, http.altUrl, tabId);
   await expect(popup.getByText(`New entry for ${http.altUrl}`)).toBeVisible();

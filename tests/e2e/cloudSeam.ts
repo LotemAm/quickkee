@@ -1,22 +1,10 @@
 import type { Page } from '@playwright/test';
 import kdbxweb from 'kdbxweb';
-import { argon2id, argon2d } from 'hash-wasm';
-
-let argonReady = false;
-function ensureArgon() {
-  if (argonReady) return;
-  kdbxweb.CryptoEngine.setArgon2Impl(async (pwd, salt, mem, iter, len, par, type, ver) => {
-    const fn = type === kdbxweb.CryptoEngine.Argon2TypeArgon2id ? argon2id : argon2d;
-    return fn({ password: new Uint8Array(pwd), salt: new Uint8Array(salt),
-      parallelism: par, iterations: iter, memorySize: mem, hashLength: len,
-      outputType: 'binary', version: ver });
-  });
-  argonReady = true;
-}
+import { registerArgon2 } from '../../src/background/crypto';
 
 /** Build a base64 .kdbx in Node with one entry, optionally mutated. */
 export async function makeKdbxB64(mutate?: (db: kdbxweb.Kdbx) => void): Promise<string> {
-  ensureArgon();
+  registerArgon2();
   const creds = new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString('correct horse'));
   const db = kdbxweb.Kdbx.create(creds, 'Cloud E2E');
   const g = db.createGroup(db.getDefaultGroup(), 'Sites');
@@ -36,7 +24,7 @@ export async function makeKdbxB64(mutate?: (db: kdbxweb.Kdbx) => void): Promise<
  * The resulting DB shares the same root UUID as the original, so kdbxweb merge works.
  */
 export async function mutateKdbxB64(baseB64: string, mutate: (db: kdbxweb.Kdbx) => void): Promise<string> {
-  ensureArgon();
+  registerArgon2();
   const creds = new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString('correct horse'));
   const bin = atob(baseB64); const arr = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
@@ -67,7 +55,7 @@ export async function cloudUploadCount(page: Page): Promise<number> {
  * Use instead of reReadKdbx for cloud-sourced vaults.
  */
 export async function reReadCloudKdbx(page: Page, password = 'correct horse'): Promise<kdbxweb.Kdbx> {
-  ensureArgon();
+  registerArgon2();
   const b64: string = await page.evaluate(() => new Promise<string>((res, rej) => {
     const open = indexedDB.open('quickkee', 2);
     open.onupgradeneeded = () => {
