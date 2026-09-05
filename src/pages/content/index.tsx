@@ -70,8 +70,37 @@ function fillCardAndHide(fields: ReturnType<typeof findCardFields>, values: { nu
   hidePopup();
 }
 
+interface LoginContext {
+  anchor: HTMLInputElement;
+  form: HTMLFormElement | null;
+  parent: HTMLElement | null;
+  fields: ReturnType<typeof findLoginFields>;
+}
+
+let loginContext: LoginContext | null = null;
+
+function validLoginContext(context: LoginContext): boolean {
+  if (loginContext !== context || context.anchor.form !== context.form ||
+      context.anchor.parentElement !== context.parent) return false;
+  const current = findLoginFields(document, context.anchor);
+  return isLoginField(context.anchor, current) && current.username === context.fields.username &&
+    current.password === context.fields.password;
+}
+
+function toolbarLoginFields(): ReturnType<typeof findLoginFields> {
+  const empty = { username: null, password: null };
+  // A remembered destination must still be the original pair; do not retarget a stale anchor.
+  if (loginContext) return validLoginContext(loginContext) ? loginContext.fields : empty;
+  const active = document.activeElement;
+  if (active instanceof HTMLInputElement) {
+    const fields = findLoginFields(document, active);
+    return isLoginField(active, fields) ? fields : empty;
+  }
+  return findLoginFields(document);
+}
+
 chrome.runtime.onMessage.addListener((msg: { type: string; username?: string; password?: string; totp?: string; code?: string; number?: string; cardholderName?: string; cvv?: string; expires?: number | null }) => {
-  if (msg.type === 'fill') fillAndHide(findLoginFields(document), msg.username ?? '', msg.password ?? '', msg.totp);
+  if (msg.type === 'fill') fillAndHide(toolbarLoginFields(), msg.username ?? '', msg.password ?? '', msg.totp);
   if (msg.type === 'fillTotp') fillTotpAndHide(msg.code ?? '');
   if (msg.type === 'fillCard')
     fillCardAndHide(findCardFields(document), { number: msg.number ?? '', name: msg.cardholderName ?? '', cvv: msg.cvv ?? '', expires: msg.expires ?? null });
@@ -82,9 +111,11 @@ let hideTimer: ReturnType<typeof setTimeout> | null = null;
 document.addEventListener('focusin', ev => {
   if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
   if (filling) return;
-  if (credentialPrompt.isVisible()) return;
   const el = ev.target;
   if (!(el instanceof HTMLInputElement)) return;
+  loginContext = null;
+  hidePopup();
+  if (credentialPrompt.isVisible()) return;
 
   // Card fields take precedence over login-field detection so a field matching both
   // (e.g. a `type="password"` CVV input) is treated as a card field, not a login one.
@@ -119,16 +150,19 @@ document.addEventListener('focusin', ev => {
     return;
   }
 
-  const fields = findLoginFields(document);
+  const fields = findLoginFields(document, el);
   if (!isLoginField(el, fields)) return;
+  const context: LoginContext = { anchor: el, form: el.form, parent: el.parentElement, fields };
+  loginContext = context;
   void sendToSW({ type: 'getEntrySummariesForUrl', url: location.href }).then(res => {
-    if (!res.ok) return;
+    if (!res.ok || !validLoginContext(context)) return;
     const loginEntries = res.summaries.filter(s => !s.isCard);
     if (loginEntries.length === 0) return;
     showPopup(el, loginEntries, entry => {
+      if (!validLoginContext(context)) return;
       void recordVaultActivity();
       void sendToSW({ type: 'getEntry', entryId: entry.id }).then(full => {
-        if (full.ok && full.entry) fillAndHide(fields, full.entry.username, full.entry.password);
+        if (full.ok && full.entry && validLoginContext(context)) fillAndHide(fields, full.entry.username, full.entry.password);
       });
     });
   });
