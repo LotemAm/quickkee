@@ -34,3 +34,17 @@ test('sendToSW is typed per-request (type-level only, no runtime assertions)', (
     void health.report.entries[0].password;
   }
 });
+
+test.each([undefined, null, Date.UTC(2030, 5, 15, 12, 34, 56)])('typed create request forwards expiry %s', async expires => {
+  const request: Extract<Request, { type: 'createEntry' }> = {
+    type: 'createEntry', groupId: 'group-1', fields: { Title: 'Expiry' },
+    ...(expires === undefined ? {} : { expires }),
+  };
+  const sendMessage = vi.fn().mockResolvedValue({ ok: true, entryId: 'created' });
+  (globalThis as unknown as { chrome: unknown }).chrome = { runtime: { sendMessage } };
+  const result = sendToSW(request);
+  expectTypeOf(result).resolves.toEqualTypeOf<ResponseFor<'createEntry'>>();
+  expectTypeOf(request.expires).toEqualTypeOf<number | null | undefined>();
+  expect(sendMessage).toHaveBeenCalledExactlyOnceWith(request);
+  await expect(result).resolves.toEqual({ ok: true, entryId: 'created' });
+});

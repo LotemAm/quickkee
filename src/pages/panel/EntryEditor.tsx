@@ -236,7 +236,7 @@ function SelectedEntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onCha
     if (name) { fields[CARDHOLDER_NAME_KEY] = name; keptKeys.add(CARDHOLDER_NAME_KEY); }
     if (entryId === null) {
       try {
-        const r = await sendToSW({ type: 'createEntry', groupId: selectedGroupId, fields, ...(totp ? { totp } : {}) });
+        const r = await sendToSW({ type: 'createEntry', groupId: selectedGroupId, fields, expires, ...(totp ? { totp } : {}) });
         if (!isAlive()) return;
         if (r.ok) onCreated?.(r.entryId, selectedGroupId);
         else setSaveError(r.error);

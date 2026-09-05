@@ -847,3 +847,84 @@ describe('prepared open ownership', () => {
     expect(check.getEntry(id)?.username).toBe('unchanged');
   });
 });
+
+describe('creation expiry', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2030-06-15T12:00:00Z'));
+  });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  test.each([
+    ['omitted', undefined], ['disabled', null],
+    ['future', Date.UTC(2030, 5, 16, 12, 34, 56)],
+    ['past', Date.UTC(2030, 5, 14, 12, 34, 56)], ['epoch zero', 0],
+  ] as const)('%s expiry survives a KDBX round trip with one mutation', async (_name, expires) => {
+    const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+    const version = v.mutationVersion; const session = v.lifecycleGeneration;
+    const root = v.getTree().groupId;
+    const id = expires === undefined
+      ? v.createEntry(root, { Title: 'Expiry', URL: 'https://expiry.example' })
+      : v.createEntry(root, { Title: 'Expiry', URL: 'https://expiry.example' }, undefined, expires);
+    const expected = { expires: expires ?? null, expired: expires != null && expires < Date.now() };
+    expect(v.getEntry(id)).toMatchObject(expected);
+    expect(v.mutationVersion).toBe(version + 1);
+    expect(v.lifecycleGeneration).toBe(session);
+    expect(v.dirty).toBe(true);
+
+    const reopened = new Vault(); await reopened.open(await v.serialize(), 'correct horse', null);
+    expect(reopened.getEntry(id)).toMatchObject(expected);
+    const raw = reopened['db']!.getDefaultGroup().entries.find(e => e.uuid.id === id)!;
+    expect(raw.times.expires).toBe(expires != null);
+    if (expires != null) {
+      expect(raw.times.expiryTime?.getTime()).toBe(expires);
+      vi.setSystemTime(expires - 1);
+      expect(reopened.getEntry(id)?.expired).toBe(false);
+      vi.setSystemTime(expires + 1);
+      expect(reopened.getEntry(id)?.expired).toBe(true);
+      expect(reopened.getTree().entries.find(e => e.id === id)?.expired).toBe(true);
+    }
+  });
+
+  test.each([false, true])('invalid dates cannot allocate an entry or change state (dirty=%s)', async dirty => {
+    const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+    const root = v.getTree().groupId;
+    if (dirty) v.createEntry(root, { Title: 'Existing unsaved entry' });
+    const tree = v.getTree(); const version = v.mutationVersion; const session = v.lifecycleGeneration;
+    const allocate = vi.spyOn(v['db']!, 'createEntry');
+    for (const expires of [NaN, Infinity, -Infinity, 8_640_000_000_000_001, -8_640_000_000_000_001]) {
+      expect(() => v.createEntry(root, { Title: 'Must not exist' }, undefined, expires)).toThrow('invalid expiry');
+      expect(allocate).not.toHaveBeenCalled();
+      expect(v.getTree()).toEqual(tree);
+      expect(v.mutationVersion).toBe(version);
+      expect(v.lifecycleGeneration).toBe(session);
+      expect(v.dirty).toBe(dirty);
+    }
+  });
+
+  test('expiry coexists with TOTP, custom and card fields after reopening', async () => {
+    const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+    const config = { secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1' as const, digits: 6, period: 30, issuer: 'Travel', account: 'holder' };
+    const expires = Date.UTC(2032, 6, 20, 12, 34, 56);
+    const version = v.mutationVersion;
+    const id = v.createEntry(v.getTree().groupId, {
+      Title: 'Travel card', UserName: '4111111111111111', Password: '123',
+      [CARD_FLAG_KEY]: '1', 'Cardholder Name': 'Test Holder', Reference: 'keep-me',
+    }, config, expires);
+    expect(v.mutationVersion).toBe(version + 1);
+    const reopened = new Vault(); await reopened.open(await v.serialize(), 'correct horse', null);
+    expect(reopened.getEntry(id)).toMatchObject({
+      title: 'Travel card', username: '4111111111111111', password: '123',
+      expires, expired: false, isCard: true, hasTotp: true,
+      fields: expect.arrayContaining([
+        { key: 'Cardholder Name', value: 'Test Holder', protected: false },
+        { key: 'Reference', value: 'keep-me', protected: false },
+      ]),
+    });
+    expect(reopened.getTotpConfig(id)).toEqual(config);
+    expect(reopened.cardSummariesForUrl('https://shop.example')).toContainEqual(expect.objectContaining({ id }));
+    const raw = reopened['db']!.getDefaultGroup().entries.find(e => e.uuid.id === id)!;
+    expect(raw.fields.get(OTP_FIELD_KEY)).toBeInstanceOf(kdbxweb.ProtectedValue);
+    expect(raw.fields.get('Password')).toBeInstanceOf(kdbxweb.ProtectedValue);
+  });
+});

@@ -1725,3 +1725,53 @@ test.each(['throw', 'reject'] as const)('optional icon refresh %s cannot fail a 
     expect(ctx.autolock['timer']).not.toBeNull();
   } finally { ctx.autolock.disarm(); }
 });
+
+test.each([undefined, null, Date.UTC(2032, 5, 15, 12, 34, 56)])(
+  'createEntry forwards optional expiry %s after TOTP', async expires => {
+    const { ctx, handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    const create = vi.spyOn(ctx.vault, 'createEntry');
+    const config = { secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1' as const, digits: 6, period: 30 };
+    const groupId = ctx.vault.getTree().groupId; const fields = { Title: 'Expiry' };
+    try {
+      const response = await handle_({ type: 'createEntry', groupId, fields, totp: config,
+        ...(expires === undefined ? {} : { expires }) });
+      expect(response).toMatchObject({ ok: true, entryId: expect.any(String) });
+      expect(create).toHaveBeenCalledExactlyOnceWith(groupId, fields, config, expires);
+    } finally { create.mockRestore(); ctx.autolock.disarm(); }
+  },
+);
+
+test('new card expiry reaches autofill after saving and reopening KDBX', async () => {
+  const { ctx, handle_ } = makeCtx();
+  await unlockHappyPath(handle_);
+  const expires = Date.UTC(2032, 6, 20, 12, 34, 56);
+  try {
+    const response = await handle_({ type: 'createEntry', groupId: ctx.vault.getTree().groupId, expires,
+      fields: { Title: 'New card', URL: 'https://github.com', UserName: '4111111111111111', Password: '123',
+        [CARD_FLAG_KEY]: '1', [CARDHOLDER_NAME_KEY]: 'Test Holder' } });
+    expect(response).toMatchObject({ ok: true, entryId: expect.any(String) });
+    const entryId = (response as { entryId: string }).entryId;
+    const bytes = await ctx.vault.serialize();
+    ctx.vault.lock();
+    await ctx.vault.open(bytes, PW, null);
+    chromeMock.tabs.get.mockResolvedValue({ url: 'https://github.com/login' });
+    expect(await handle_({ type: 'fillRequest', entryId, tabId: 7 }, popupFillSender)).toEqual({ ok: true });
+    expect(chromeMock.tabs.sendMessage).toHaveBeenCalledExactlyOnceWith(7, {
+      type: 'fillCard', number: '4111111111111111', cvv: '123', cardholderName: 'Test Holder', expires,
+    }, { documentId: 'document-0' });
+  } finally { ctx.autolock.disarm(); }
+});
+
+test('invalid creation expiry propagates failure without changing the vault', async () => {
+  const { ctx, handle_ } = makeCtx();
+  await unlockHappyPath(handle_);
+  const tree = ctx.vault.getTree(); const version = ctx.vault.mutationVersion;
+  try {
+    await expect(handle_({ type: 'createEntry', groupId: tree.groupId, fields: { Title: 'Invalid' },
+      expires: 8_640_000_000_000_001 })).rejects.toThrow('invalid expiry');
+    expect(ctx.vault.getTree()).toEqual(tree);
+    expect(ctx.vault.mutationVersion).toBe(version);
+    expect(ctx.vault.dirty).toBe(false);
+  } finally { ctx.autolock.disarm(); }
+});
