@@ -35,6 +35,25 @@ function entry(db: kdbxweb.Kdbx): kdbxweb.KdbxEntry {
   return db.getDefaultGroup().groups.find(group => group.name === 'Group ' + text)!.groups[0].entries[0];
 }
 
+function historyValues(db: kdbxweb.Kdbx) {
+  return entry(db).history.map(old => ({
+    id: old.uuid.id, icon: old.icon, tags: old.tags,
+    times: {
+      created: old.times.creationTime?.toISOString(), modified: old.times.lastModTime?.toISOString(),
+      accessed: old.times.lastAccessTime?.toISOString(), moved: old.times.locationChanged?.toISOString(),
+      expires: old.times.expires, expiry: old.times.expiryTime?.toISOString(), usage: old.times.usageCount,
+    },
+    fields: Object.fromEntries([...old.fields].map(([name, value]) => [name, {
+      value: value instanceof kdbxweb.ProtectedValue ? value.getText() : value,
+      protected: value instanceof kdbxweb.ProtectedValue,
+    }])),
+    binaries: Object.fromEntries([...old.binaries].map(([name, value]) => {
+      const data = 'value' in value ? value.value : value;
+      return [name, Array.from(data instanceof kdbxweb.ProtectedValue ? data.getBinary() : new Uint8Array(data))];
+    })),
+  }));
+}
+
 function assertPreserved(db: kdbxweb.Kdbx, version: 3 | 4, username = 'current-user') {
   const current = entry(db);
   expect(db.versionMajor).toBe(version);
@@ -133,7 +152,7 @@ for (const version of [3, 4] as const) {
         : await kdbxweb.Kdbx.load(saved, (await access(mode)).credentials);
       assertPreserved(reopened, version, 'worker ' + text);
       expect(entry(reopened).uuid.id).toBe(initialId);
-      expect(entry(reopened).history.some(old => old.fields.get('UserName') === 'current-user')).toBe(true);
+      expect(historyValues(reopened)).toEqual(historyValues(initial));
       expect(await request(page, { type: 'lock' })).toEqual({ ok: true });
       expect(await request(page, unlock)).toEqual({ ok: true });
       const after = await request(page, { type: 'getEntry', entryId: initialId });
