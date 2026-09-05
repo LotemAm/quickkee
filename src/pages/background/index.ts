@@ -122,9 +122,13 @@ chrome.alarms.create('keepalive', { periodInMinutes: 0.5 });
 
 // retry deferred cloud uploads when connectivity returns or on the keepalive tick
 async function tryRetry() {
-  if (currentSource?.kind === 'cloud' && onlineNow()) {
-    try { await retryPending(currentSource, depsFor(ctx, currentSource)); } catch { /* stays pending */ }
-    finally { vaultStatus.publish(); }
+  const source = currentSource;
+  const session = vault.lifecycleGeneration;
+  if (source?.kind === 'cloud' && onlineNow()) {
+    try { await retryPending(source, depsFor(ctx, source)); } catch { /* stays pending */ }
+    finally {
+      if (source === currentSource && session === vault.lifecycleGeneration) vaultStatus.publish();
+    }
   }
 }
 if (typeof self !== 'undefined' && 'addEventListener' in self) self.addEventListener('online', () => void tryRetry());

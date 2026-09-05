@@ -12,7 +12,7 @@ import { vi, beforeEach, describe } from 'vitest';
 import { Vault } from '../../background/vault';
 import * as totp from '../../background/totp';
 import { AutoLock } from '../../background/autolock';
-import { makeRouter, type SwContext } from './router';
+import { makeRouter, depsFor, type SwContext } from './router';
 import type { DbSource } from '../../shared/dbSource';
 import { CARD_FLAG_KEY, CARDHOLDER_NAME_KEY } from '../../shared/entry';
 import { CredentialCaptureStore } from '../../background/credentialCaptureStore';
@@ -195,6 +195,137 @@ describe('unlock', () => {
     const { handle_ } = makeCtx();
     expect(await unlockHappyPath(handle_)).toEqual({ ok: true });
     expect(await handle_({ type: 'getStatus' })).toMatchObject({ ok: true, locked: false, dbName: 'vault.kdbx' });
+  });
+});
+
+describe('open and save cancellation', () => {
+  test.each(['handle', 'permission', 'read'] as const)('unlock captures validity before the %s await', async phase => {
+    const { ctx, handle_ } = makeCtx();
+    vi.mocked(loadHandle).mockResolvedValue(fakeHandle());
+    vi.mocked(ensurePermission).mockResolvedValue(true);
+    vi.mocked(readBytes).mockResolvedValue(fixture());
+    const gate = Promise.withResolvers<void>(); const started = Promise.withResolvers<void>();
+    if (phase === 'handle') vi.mocked(loadHandle).mockImplementationOnce(async () => {
+      started.resolve(); await gate.promise; return fakeHandle();
+    });
+    else if (phase === 'permission') vi.mocked(ensurePermission).mockImplementationOnce(async () => {
+      started.resolve(); await gate.promise; return true;
+    });
+    else vi.mocked(readBytes).mockImplementationOnce(async () => {
+      started.resolve(); await gate.promise; return fixture();
+    });
+    const opening = handle_({ type: 'unlock', password: PW, keyFile: null });
+    try {
+      await started.promise;
+      ctx.doLock(); await ctx.vault.open(fixture(), PW, null);
+      const replacement: CloudFileSource = { kind: 'cloud', provider: 'gdrive', fileId: 'B', basedOnRev: 'revB' };
+      ctx.setCurrentSource(replacement);
+      const id = ctx.vault.entriesForUrl('https://github.com')[0].id;
+      ctx.vault.updateEntry(id, { UserName: 'B' });
+      gate.resolve();
+      expect(await opening).toEqual({ ok: false, error: 'unlockFailed: staleSession' });
+      expect(ctx.getCurrentSource()).toBe(replacement); expect(ctx.getHandle()).toBeNull();
+      expect(ctx.vault.getEntry(id)?.username).toBe('B'); expect(ctx.vault.dirty).toBe(true);
+    } finally { gate.resolve(); await Promise.allSettled([opening]); }
+  });
+
+  test('cloud open cannot install its source after inner completion belongs to an old session', async () => {
+    const { ctx, handle_ } = makeCtx();
+    const gate = Promise.withResolvers<void>(); const started = Promise.withResolvers<void>();
+    vi.mocked(openCloud).mockImplementationOnce(async (_source, deps) => {
+      const token = await deps.vault.open(fixture(), PW, null);
+      deps.onOpened?.(token);
+      started.resolve(); await gate.promise;
+      return { basedOnRev: 'rA', merged: false, offline: false };
+    });
+    const opening = handle_({ type: 'openRemote', provider: 'dropbox', fileId: 'A', fileName: 'A.kdbx', password: PW, keyFile: null });
+    try {
+      await started.promise;
+      ctx.doLock(); await ctx.vault.open(fixture(), PW, null);
+      const source: CloudFileSource = { kind: 'cloud', provider: 'gdrive', fileId: 'B', basedOnRev: 'rB' };
+      ctx.setCurrentSource(source);
+      gate.resolve();
+      expect(await opening).toEqual({ ok: false, error: 'openFailed: staleSession' });
+      expect(ctx.getCurrentSource()).toBe(source);
+    } finally { gate.resolve(); await Promise.allSettled([opening]); }
+  });
+
+  test.each(['unlock', 'openRemote'] as const)('%s cannot arm autolock after lock while finishOpen loads settings', async route => {
+    const { ctx, handle_ } = makeCtx();
+    vi.mocked(loadHandle).mockResolvedValue(fakeHandle());
+    vi.mocked(ensurePermission).mockResolvedValue(true);
+    vi.mocked(readBytes).mockResolvedValue(fixture());
+    if (route === 'openRemote') vi.mocked(openCloud).mockImplementationOnce(async (_source, deps) => {
+      const token = await deps.vault.open(fixture(), PW, null); deps.onOpened?.(token);
+      return { basedOnRev: 'rA', merged: false, offline: false };
+    });
+    const gate = Promise.withResolvers<void>(); const started = Promise.withResolvers<void>();
+    vi.mocked(loadSettings).mockImplementationOnce(async () => {
+      started.resolve(); await gate.promise; return DEFAULT_SETTINGS_STUB;
+    });
+    const arm = vi.spyOn(ctx.autolock, 'arm');
+    const opening = route === 'unlock' ? handle_({ type: 'unlock', password: PW, keyFile: null })
+      : handle_({ type: 'openRemote', provider: 'dropbox', fileId: 'A', fileName: 'A.kdbx', password: PW, keyFile: null });
+    try {
+      await started.promise;
+      expect(ctx.vault.isOpen()).toBe(true);
+      expect(await handle_({ type: 'lock' })).toEqual({ ok: true });
+      gate.resolve(); expect((await opening).ok).toBe(false);
+      expect(arm).not.toHaveBeenCalled(); expect(ctx.getCurrentSource()).toBeNull();
+      expect(ctx.vault.isOpen()).toBe(false);
+    } finally { gate.resolve(); await Promise.allSettled([opening]); arm.mockRestore(); }
+  });
+
+  test('depsFor requires the captured active source rather than any cloud source', () => {
+    const { ctx } = makeCtx();
+    const source: CloudFileSource = { kind: 'cloud', provider: 'dropbox', fileId: 'A', basedOnRev: 'rA' };
+    ctx.setCurrentSource(source); const deps = depsFor(ctx, source);
+    expect(deps.isCurrent?.()).toBe(true);
+    ctx.setCurrentSource({ ...source }); expect(deps.isCurrent?.()).toBe(false);
+    ctx.doLock(); expect(deps.isCurrent?.()).toBe(false);
+  });
+
+  test.each(['serialize', 'write'] as const)('a stale local save at %s cannot acknowledge the replacement cloud vault', async phase => {
+    const { ctx, handle_ } = makeCtx(); await unlockHappyPath(handle_);
+    const id = ctx.vault.entriesForUrl('https://github.com')[0].id;
+    ctx.vault.updateEntry(id, { UserName: 'local' });
+    const gate = Promise.withResolvers<void>(); const started = Promise.withResolvers<void>();
+    const serialize = ctx.vault.serialize.bind(ctx.vault);
+    const hold = phase === 'serialize' ? vi.spyOn(ctx.vault, 'serialize').mockImplementationOnce(async () => {
+      const bytes = await serialize(); started.resolve(); await gate.promise; return bytes;
+    }) : vi.mocked(writeBytes).mockImplementationOnce(async () => { started.resolve(); await gate.promise; });
+    const work = handle_({ type: 'save' });
+    try {
+      await started.promise;
+      ctx.doLock(); await ctx.vault.open(fixture(), PW, null);
+      const source: CloudFileSource = { kind: 'cloud', provider: 'dropbox', fileId: 'B', basedOnRev: 'rB' };
+      ctx.setCurrentSource(source); ctx.vault.updateEntry(id, { UserName: 'cloud-B' });
+      gate.resolve(); expect(await work).toEqual({ ok: false, error: 'saveFailed' });
+      expect(ctx.vault.dirty).toBe(true); expect(ctx.getCurrentSource()).toBe(source);
+      expect(ctx.vault.getEntry(id)?.username).toBe('cloud-B');
+      expect(writeBytes).toHaveBeenCalledTimes(phase === 'write' ? 1 : 0);
+    } finally {
+      gate.resolve(); await Promise.allSettled([work]);
+      if (phase === 'serialize') hold.mockRestore();
+    }
+  });
+
+  test('a later local edit remains dirty after an earlier local write completes', async () => {
+    const { ctx, handle_ } = makeCtx(); await unlockHappyPath(handle_);
+    const id = ctx.vault.entriesForUrl('https://github.com')[0].id;
+    ctx.vault.updateEntry(id, { UserName: 'snapshot' });
+    const gate = Promise.withResolvers<void>(); const started = Promise.withResolvers<void>();
+    vi.mocked(writeBytes).mockImplementationOnce(async (_handle, bytes) => {
+      const check = new Vault(); await check.open(bytes, PW, null);
+      expect(check.getEntry(id)?.username).toBe('snapshot');
+      started.resolve(); await gate.promise;
+    });
+    const saving = handle_({ type: 'save' });
+    try {
+      await started.promise; ctx.vault.updateEntry(id, { UserName: 'live' });
+      gate.resolve(); expect(await saving).toEqual({ ok: true });
+      expect(ctx.vault.dirty).toBe(true);
+    } finally { gate.resolve(); await Promise.allSettled([saving]); }
   });
 });
 
@@ -1302,7 +1433,11 @@ describe('device quick unlock routing', () => {
       source: { kind: 'cloud', provider, fileId: `${provider}-id`, label: `${provider}.kdbx` },
     };
     vi.mocked(loadQuickUnlockEnrollment).mockResolvedValue({ record: cloudRecord, localHandle: null });
-    vi.mocked(openCloud).mockResolvedValue({ basedOnRev: 'r2', merged: false, offline: false });
+    vi.mocked(openCloud).mockImplementationOnce(async (_source, deps) => {
+      expect(deps.isCurrent?.()).toBe(true);
+      const token = await deps.vault.open(fixture(), PW, null); deps.onOpened?.(token);
+      return { basedOnRev: 'r2', merged: false, offline: false };
+    });
     vi.mocked(loadSettings).mockResolvedValue(DEFAULT_SETTINGS_STUB);
 
     expect(await handle_({ type: 'quickUnlock', credentialId: cloudRecord.credentialId, prfOutput: Array(32).fill(3) }, quickPanelSender))
@@ -1314,6 +1449,29 @@ describe('device quick unlock routing', () => {
       null,
     );
     expect(ctx.getCurrentSource()).toEqual(expect.objectContaining({ kind: 'cloud', provider, fileId: `${provider}-id` }));
+    expect(ctx.vault.isOpen()).toBe(true);
+  });
+
+  test.each(['local', 'cloud'] as const)('quick unlock preserves a replacement session after delayed %s material', async kind => {
+    const { ctx, handle_ } = makeCtx();
+    const record: QuickUnlockRecord = kind === 'local' ? quickRecord : {
+      ...quickRecord, source: { kind: 'cloud', provider: 'dropbox', fileId: 'A', label: 'A.kdbx' },
+    };
+    vi.mocked(loadQuickUnlockEnrollment).mockResolvedValue({ record, localHandle: kind === 'local' ? fakeHandle() : null });
+    const gate = Promise.withResolvers<void>(); const started = Promise.withResolvers<void>();
+    vi.mocked(unwrapQuickUnlockMaterial).mockImplementationOnce(async () => {
+      started.resolve(); await gate.promise; return { password: PW, keyFile: null };
+    });
+    const work = handle_({ type: 'quickUnlock', credentialId: record.credentialId, prfOutput: Array(32).fill(3) }, quickPopupSender);
+    try {
+      await started.promise;
+      ctx.doLock(); await ctx.vault.open(fixture(), PW, null);
+      const source: CloudFileSource = { kind: 'cloud', provider: 'gdrive', fileId: 'B', basedOnRev: 'rB' };
+      ctx.setCurrentSource(source);
+      gate.resolve(); expect((await work).ok).toBe(false);
+      expect(ctx.getCurrentSource()).toBe(source);
+      expect(openCloud).not.toHaveBeenCalled(); expect(readBytes).not.toHaveBeenCalled();
+    } finally { gate.resolve(); await Promise.allSettled([work]); }
   });
 
   test('requires cloud authorization before decrypting stored material', async () => {
