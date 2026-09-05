@@ -24,7 +24,7 @@ const scannedConfig = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.downloadAttachment.mockResolvedValue(null);
-  mocks.scanVisibleTabForTotp.mockResolvedValue({
+  mocks.scanVisibleTabForTotp.mockReset().mockResolvedValue({
     tabId: 12, pageUrl: 'https://example.com/login', config: scannedConfig,
   });
   mocks.sendToSW.mockImplementation(async (request: { type: string; entryId?: string }) => {
@@ -349,7 +349,7 @@ test.each(['success', 'failure'])('old QR %s cannot finish or replace a newer se
   await screen.findByDisplayValue('Acme');
   fireEvent.click(screen.getByRole('button', { name: 'Add Authenticator code' }));
   fireEvent.click(screen.getByRole('button', { name: 'Scan page QR' }));
-  view.rerender(editor('B'));
+  await act(async () => { view.rerender(editor('B')); });
   await screen.findByDisplayValue('B');
   fireEvent.click(screen.getByRole('button', { name: 'Add Authenticator code' }));
   fireEvent.click(screen.getByRole('button', { name: 'Scan page QR' }));
