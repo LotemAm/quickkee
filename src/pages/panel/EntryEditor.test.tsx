@@ -24,7 +24,7 @@ const scannedConfig = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.downloadAttachment.mockResolvedValue(null);
-  mocks.scanVisibleTabForTotp.mockResolvedValue({
+  mocks.scanVisibleTabForTotp.mockReset().mockResolvedValue({
     tabId: 12, pageUrl: 'https://example.com/login', config: scannedConfig,
   });
   mocks.sendToSW.mockImplementation(async (request: { type: string; entryId?: string }) => {
@@ -349,7 +349,7 @@ test.each(['success', 'failure'])('old QR %s cannot finish or replace a newer se
   await screen.findByDisplayValue('Acme');
   fireEvent.click(screen.getByRole('button', { name: 'Add Authenticator code' }));
   fireEvent.click(screen.getByRole('button', { name: 'Scan page QR' }));
-  view.rerender(editor('B'));
+  await act(async () => { view.rerender(editor('B')); });
   await screen.findByDisplayValue('B');
   fireEvent.click(screen.getByRole('button', { name: 'Add Authenticator code' }));
   fireEvent.click(screen.getByRole('button', { name: 'Scan page QR' }));
@@ -513,4 +513,47 @@ test('keyboard shortcuts cannot copy the old entry during the replacement commit
   holdLoads();
   view.rerender(<Selection entryId="B" />);
   expect(mocks.copyWithClear).not.toHaveBeenCalled();
+});
+
+test.each(['selected', 'clear button', 'empty input', 'untouched'] as const)(
+  'creation sends the current expiry: %s', async action => {
+    const onCreated = vi.fn();
+    const original = mocks.sendToSW.getMockImplementation()!;
+    mocks.sendToSW.mockImplementation((request: { type: string }) => request.type === 'createEntry'
+      ? Promise.resolve({ ok: true, entryId: 'created' }) : original(request));
+    const view = render(editor(null, { onCreated }));
+    fireEvent.click(screen.getByText('More'));
+    const dateInput = view.container.querySelector('input[type="datetime-local"]')!;
+    if (action !== 'untouched') fireEvent.change(dateInput, { target: { value: '2030-06-15T12:34' } });
+    if (action === 'clear button') fireEvent.click(screen.getByRole('button', { name: 'Clear expiry' }));
+    if (action === 'empty input') fireEvent.change(dateInput, { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('created', 'group-1'));
+    const creates = mocks.sendToSW.mock.calls.filter(([request]) => request.type === 'createEntry');
+    expect(creates).toHaveLength(1);
+    expect(creates[0][0]).toMatchObject({
+      type: 'createEntry', groupId: 'group-1',
+      expires: action === 'selected' ? new Date(2030, 5, 15, 12, 34).getTime() : null,
+    });
+    expect(mocks.sendToSW.mock.calls.some(([request]) => request.type === 'updateEntry')).toBe(false);
+  },
+);
+
+test('creation carries expiry together with card, custom and TOTP fields', async () => {
+  const view = render(editor(null));
+  fireEvent.click(screen.getByText('More'));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Mark as credit card data' }));
+  fireEvent.change(screen.getByLabelText('Cardholder Name'), { target: { value: 'Test Holder' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+  fireEvent.change(screen.getByPlaceholderText('Name'), { target: { value: 'Reference' } });
+  fireEvent.change(screen.getByPlaceholderText('Value'), { target: { value: 'keep-me' } });
+  fireEvent.change(view.container.querySelector('input[type="datetime-local"]')!, { target: { value: '2030-06-15T12:34' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add Authenticator code' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Scan page QR' }));
+  await screen.findByText('123456');
+  fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+  expect(mocks.sendToSW).toHaveBeenCalledWith(expect.objectContaining({
+    type: 'createEntry', expires: new Date(2030, 5, 15, 12, 34).getTime(), totp: scannedConfig,
+    fields: expect.objectContaining({ 'QK-IsCard': '1', 'Cardholder Name': 'Test Holder', Reference: 'keep-me' }),
+  }));
 });

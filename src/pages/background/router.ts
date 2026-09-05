@@ -337,7 +337,7 @@ export function makeRouter(ctx: SwContext) {
           ? { ok: true, report: ctx.vault.getPasswordHealthReport() }
           : { ok: false, error: 'locked' };
       case 'createEntry':
-        return { ok: true, entryId: ctx.vault.createEntry(req.groupId, req.fields, req.totp) };
+        return { ok: true, entryId: ctx.vault.createEntry(req.groupId, req.fields, req.totp, req.expires) };
       case 'updateEntry': ctx.vault.updateEntry(req.entryId, req.fields, req.expires, req.removeKeys, req.totp, req.groupId); return { ok: true };
       case 'updateGroup': ctx.vault.updateGroup(req.groupId, req.fields); return { ok: true };
       case 'createGroup': return { ok: true, groupId: ctx.vault.createGroup(req.parentId, req.name) };

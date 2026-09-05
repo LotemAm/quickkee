@@ -334,14 +334,22 @@ export class Vault {
     return analyzePasswordHealth(inputs, now);
   }
 
-  createEntry(groupId: string, fields: Record<string, string>, totp?: TotpConfig): string {
+  createEntry(groupId: string, fields: Record<string, string>, totp?: TotpConfig, expires?: number | null): string {
     if (!this.db) throw new Error('locked');
     const g = this.findGroup(groupId);
     if (!g) throw new Error('no group');
+    const expiryTime = expires == null ? null : new Date(expires);
+    if (expires != null && (!Number.isFinite(expires) || !Number.isFinite(expiryTime!.getTime()))) {
+      throw new Error('invalid expiry');
+    }
     const otpUri = totp ? toOtpUri(totp) : null;
     const e = this.db.createEntry(g);
     this.applyFields(e, fields);
     if (otpUri) e.fields.set(OTP_FIELD_KEY, kdbxweb.ProtectedValue.fromString(otpUri));
+    if (expires !== undefined) {
+      e.times.expires = expiryTime !== null;
+      if (expiryTime) e.times.expiryTime = expiryTime;
+    }
     this.markMutation(); return e.uuid.id;
   }
 

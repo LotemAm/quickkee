@@ -41,7 +41,7 @@ export type Request =
   | { type: 'importTotp'; assignments: TotpImportAssignment[] }
   | { type: 'getTree' }
   | { type: 'getPasswordHealthReport' }
-  | { type: 'createEntry'; groupId: string; fields: Record<string, string>; totp?: TotpConfig }
+  | { type: 'createEntry'; groupId: string; fields: Record<string, string>; totp?: TotpConfig; expires?: number | null }
   | { type: 'updateEntry'; entryId: string; fields: Record<string, string>; expires?: number | null; removeKeys?: string[]; totp?: TotpConfig | null; groupId?: string }
   | { type: 'updateGroup'; groupId: string; fields: Record<string, string> }
   | { type: 'createGroup'; parentId: string; name: string }
