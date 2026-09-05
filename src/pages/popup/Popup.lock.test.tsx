@@ -4,7 +4,7 @@ import type { Request } from '../../shared/messages';
 import type { EntryView, TreeNode } from '../../shared/entry';
 import type { ScannedPageTotp } from './scanVisibleTabForTotp';
 
-const mocks = vi.hoisted(() => ({ send: vi.fn(), scan: vi.fn(), writeDraft: vi.fn(), clearDraft: vi.fn() }));
+const mocks = vi.hoisted(() => ({ send: vi.fn(), scan: vi.fn(), writeDraft: vi.fn(), clearDraft: vi.fn(), copy: vi.fn() }));
 vi.mock('../../shared/messages', () => ({ sendToSW: mocks.send }));
 vi.mock('../../shared/UnlockScreen', () => ({ UnlockScreen: () => <button>Unlock</button> }));
 vi.mock('../../shared/settings', () => ({ loadSettings: async () => ({ theme: 'system', clipboardClearSeconds: 30,
@@ -17,6 +17,7 @@ vi.mock('./ScannedTotpDialog', () => ({ ScannedTotpDialog: ({ config, onConfirm 
   config: { secret: string }; onConfirm: (destination: { type: 'existing'; entryId: string }) => Promise<string | null>;
 }) => <div><input aria-label="Scanned secret" value={config.secret} readOnly />
   <button onClick={() => void onConfirm({ type: 'existing', entryId: 'entry' })}>Confirm scanned</button></div> }));
+vi.mock('../../shared/useClipboardTimer', () => ({ useClipboardTimer: () => ({ copy: mocks.copy, state: null }) }));
 import { Popup } from './Popup';
 
 function event() {
@@ -30,7 +31,8 @@ let onDisconnect: ReturnType<typeof event>;
 const entry: EntryView = { id: 'entry', title: 'Private login', username: 'alice', password: 'private-password',
   url: 'https://example.test', fields: [], expired: false, created: null, expires: null, isCard: false,
   hasTotp: true, totpPeriod: 30, attachments: [] };
-const tree: TreeNode = { groupId: 'root', name: 'Private group', children: [], entries: [{ ...entry, hasAttachments: false }] };
+const tree: TreeNode = { groupId: 'root', name: 'Private group', children: [], entries: [{ id: entry.id, title: entry.title, username: entry.username, url: entry.url,
+  expired: entry.expired, isCard: entry.isCard, hasTotp: entry.hasTotp, totpPeriod: entry.totpPeriod, hasAttachments: false }] };
 const scanned: ScannedPageTotp = { tabId: 1, pageUrl: entry.url, config: {
   secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1', digits: 6, period: 30,
 } };
@@ -52,6 +54,7 @@ function respond(request: Request) {
 }
 beforeEach(() => {
   onMessage = event(); onDisconnect = event();
+  mocks.copy.mockReset();
   mocks.send.mockReset().mockImplementation(async (request: Request) => respond(request));
   mocks.scan.mockReset().mockResolvedValue(scanned);
   mocks.writeDraft.mockReset().mockResolvedValue(undefined);
@@ -76,19 +79,36 @@ test.each(['lock', 'disconnect'])('%s unmounts visible TOTP, entries and search 
   expect(screen.queryByPlaceholderText('Search…')).not.toBeInTheDocument();
 });
 
-test('a late search result cannot populate a replacement session', async () => {
+test.each(['lock', 'disconnect', 'replacement'])('%s invalidates a pending search password copy and drops details', async reason => {
   const late = deferred<unknown>();
   mocks.send.mockImplementation(async (request: Request) => request.type === 'getEntry' ? late.promise : respond(request));
   render(<Popup />); transition(false);
   await screen.findByText('Private login');
   fireEvent.change(screen.getByPlaceholderText('Search…'), { target: { value: 'private' } });
-  await waitFor(() => expect(mocks.send).toHaveBeenCalledWith({ type: 'getEntry', entryId: 'entry' }));
-  transition(true, 2); transition(false, 3);
-  await act(async () => { late.resolve({ ok: true, entry: { ...entry, title: 'STALE SECRET' } }); });
+  expect(mocks.send.mock.calls.filter(([request]) => request.type === 'getEntry')).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: 'Copy password' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Toggle fields' }));
+  expect(mocks.send.mock.calls.filter(([request]) => request.type === 'getEntry')).toHaveLength(1);
+  if (reason === 'disconnect') act(() => onDisconnect.fire());
+  else transition(reason === 'lock', 2);
+  await act(async () => { late.resolve({ ok: true, entry: { ...entry, password: 'obsolete',
+    fields: [{ key: 'STALE FIELD', value: 'stale', protected: true }] } }); });
+  expect(mocks.copy).not.toHaveBeenCalled();
+  expect(screen.queryByText('STALE FIELD')).not.toBeInTheDocument();
+  expect(screen.queryByText('Loading entry details…')).not.toBeInTheDocument();
+  if (reason === 'disconnect') {
+    expect(screen.getByRole('button', { name: 'Unlock' })).toBeVisible();
+    return;
+  }
+  if (reason === 'lock') transition(false, 3);
+  await screen.findByText('Private login');
   expect(screen.getByPlaceholderText('Search…')).toHaveValue('');
-  expect(screen.queryByText('STALE SECRET')).not.toBeInTheDocument();
+  mocks.send.mockImplementation(async (request: Request) => respond(request));
+  fireEvent.change(screen.getByPlaceholderText('Search…'), { target: { value: 'private' } });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy password' })); });
+  expect(mocks.copy).toHaveBeenCalledExactlyOnceWith(entry.password, 'Password');
+  expect(mocks.send.mock.calls.filter(([request]) => request.type === 'getEntry')).toHaveLength(2);
 });
-
 test('a late scan does not request entries/tree or remount its secret dialog', async () => {
   const late = deferred<ScannedPageTotp>(); mocks.scan.mockReturnValue(late.promise);
   render(<Popup />); transition(false);
