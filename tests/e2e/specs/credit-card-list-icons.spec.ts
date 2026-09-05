@@ -1,4 +1,4 @@
-import { test, expect, openExtensionPage, openEntryEditorMore, installDb, openPopupForTab, getTabId } from '../helpers';
+import { test, expect, openExtensionPage, installDb, openPopupForTab, getTabId } from '../helpers';
 
 test('panel and popup entry lists show a credit-card icon only once an entry is marked', async ({ context, extensionId, http }) => {
   const popup = await openExtensionPage(context, extensionId, 'src/pages/popup/index.html');
@@ -18,8 +18,7 @@ test('panel and popup entry lists show a credit-card icon only once an entry is 
 
   await entryRow.click();
   await panel.getByRole('button', { name: 'Apply changes' }).waitFor();
-  await openEntryEditorMore(panel);
-  await panel.getByLabel('Mark as credit card data').check();
+  await panel.getByRole('button', { name: 'Credit card', exact: true }).click();
   await panel.getByRole('button', { name: 'Apply changes' }).click();
   const saveBtn = panel.getByRole('button', { name: /Save/ });
   await expect(saveBtn).toContainText('Save *');

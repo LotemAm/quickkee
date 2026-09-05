@@ -437,7 +437,7 @@ function UnlockedPanel({ dirty, refresh, unlockNotice }: {
       {(selEntry || creatingEntry) && (
         <div className="flex flex-col shrink-0" style={{ height: '45vh', borderTop: '1px solid var(--border)', background: 'var(--bg)' }}>
           <div className="flex items-center justify-between px-4 py-2" style={{ borderBottom: '1px solid var(--border)' }}>
-            <span className="section-title">{creatingEntry ? 'New entry' : 'Entry details'}</span>
+            <span className="section-title mb-0">{creatingEntry ? 'New entry' : 'Entry details'}</span>
             <button className="icon-btn" aria-label="Close details" title="Close details"
               onClick={() => { setSelEntry(null); setCreatingEntry(false); }}>
               <X size={15} />

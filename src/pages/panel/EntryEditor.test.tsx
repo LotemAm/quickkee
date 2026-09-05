@@ -711,7 +711,7 @@ test.each(['success', 'failure'])('QR %s after unmount cannot restore preview wo
 test('changing creation group resets card fields, expiry, TOTP, custom fields and reveal state', () => {
   const view = render(editor(null));
   fireEvent.click(screen.getByText('More'));
-  fireEvent.click(screen.getByRole('checkbox', { name: 'Mark as credit card data' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Credit card' }));
   fireEvent.change(screen.getByLabelText('Cardholder Name'), { target: { value: 'Private holder' } });
   fireEvent.click(screen.getByRole('button', { name: 'Show Card Number' }));
   fireEvent.click(screen.getByRole('button', { name: 'Show CVV' }));
@@ -777,7 +777,7 @@ test('creation carries Notes and expiry together with card, custom and TOTP fiel
   const view = render(editor(null));
   fireEvent.click(screen.getByText('More'));
   fireEvent.change(screen.getByLabelText('Notes', { exact: true }), { target: { value: 'Card notes\nשלום' } });
-  fireEvent.click(screen.getByRole('checkbox', { name: 'Mark as credit card data' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Credit card' }));
   fireEvent.change(screen.getByLabelText('Cardholder Name'), { target: { value: 'Test Holder' } });
   fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
   fireEvent.change(screen.getByPlaceholderText('Name'), { target: { value: 'Reference' } });

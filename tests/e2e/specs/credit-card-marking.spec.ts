@@ -10,7 +10,7 @@ function findEntry(db: kdbxweb.Kdbx, title: string): kdbxweb.KdbxEntry | undefin
   }
 }
 
-test('panel: mark an entry as credit card data, save, and verify persisted fields', async ({ context, extensionId }) => {
+test('panel: switch entry type, save, and verify persisted fields', async ({ context, extensionId }) => {
   const popup = await openExtensionPage(context, extensionId, 'src/pages/popup/index.html');
   await installDb(popup);
   await popup.reload();
@@ -28,8 +28,13 @@ test('panel: mark an entry as credit card data, save, and verify persisted field
   await expect(panel.getByText('URL')).toBeVisible();
   await expect(panel.getByLabel('Password rules')).toBeVisible();
 
+  const entryType = panel.getByRole('group', { name: 'Entry type' });
+  await expect(entryType.getByRole('button', { name: 'Login', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await entryType.getByRole('button', { name: 'Credit card', exact: true }).click();
+  await expect(entryType.getByRole('button', { name: 'Credit card', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(entryType.getByRole('button', { name: 'Login', exact: true })).toHaveAttribute('aria-pressed', 'false');
   await openEntryEditorMore(panel);
-  await panel.getByLabel('Mark as credit card data').check();
+  await expect(panel.getByLabel('Mark as credit card data')).toHaveCount(0);
 
   // Relabeled; URL and the password-rules button are hidden; Cardholder Name appears.
   await expect(panel.getByText('Card Number')).toBeVisible();
@@ -61,8 +66,14 @@ test('panel: mark an entry as credit card data, save, and verify persisted field
   expect(e.fields.get('QK-IsCard')?.toString()).toBe('1');
   expect(e.fields.get('Cardholder Name')?.toString()).toBe('Jane Doe');
 
+  // Reopening the entry restores its saved view.
+  await panel.getByRole('button', { name: 'Close details' }).click();
+  await panel.getByRole('button', { name: 'Localhost Login' }).click();
+  await expect(entryType.getByRole('button', { name: 'Credit card', exact: true })).toHaveAttribute('aria-pressed', 'true');
+
   // Unmark: labels revert; the underlying Cardholder Name field is left untouched.
-  await panel.getByLabel('Mark as credit card data').uncheck();
+  await entryType.getByRole('button', { name: 'Login', exact: true }).click();
+  await expect(entryType.getByRole('button', { name: 'Login', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(panel.getByText('Username')).toBeVisible();
   await expect(panel.getByText('URL')).toBeVisible();
   await panel.getByRole('button', { name: 'Apply changes' }).click();
@@ -88,8 +99,7 @@ test('clearing Cardholder Name and saving removes the Additional Field', async (
   await panel.getByRole('button', { name: 'Localhost Login' }).click();
   await panel.getByRole('button', { name: 'Apply changes' }).waitFor();
 
-  await openEntryEditorMore(panel);
-  await panel.getByLabel('Mark as credit card data').check();
+  await panel.getByRole('button', { name: 'Credit card', exact: true }).click();
   await panel.getByLabel('Cardholder Name').fill('Jane Doe');
   await panel.getByRole('button', { name: 'Apply changes' }).click();
   const saveBtn = panel.getByRole('button', { name: /Save/ });
