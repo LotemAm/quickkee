@@ -29,7 +29,7 @@
     "kdbxweb": "patch:kdbxweb@npm%3A2.1.1#~/.yarn/patches/kdbxweb-npm-2.1.1-135bdb8acb.patch",
     "lucide-react": "^1.21.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0",
+    "react-dom": "^19.2.8",
     "tldts": "^7.4.10"
   },
   "devDependencies": {
@@ -42,7 +42,7 @@
     "@types/chrome": "^0.1.11",
     "@types/node": "^26.2.0",
     "@types/react": "^19.1.8",
-    "@types/react-dom": "^19.1.6",
+    "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "^6.1.0",
     "eslint": "^9.32.0",
     "eslint-plugin-import": "^2.32.0",
