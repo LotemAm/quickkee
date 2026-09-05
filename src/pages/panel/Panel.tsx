@@ -436,36 +436,28 @@ function UnlockedPanel({ dirty, refresh, unlockNotice }: {
       {/* Bottom: entry details / edit / create */}
       {(selEntry || creatingEntry) && (
         <div className="flex flex-col shrink-0" style={{ height: '45vh', borderTop: '1px solid var(--border)', background: 'var(--bg)' }}>
-          <div className="flex items-center justify-between px-4 py-2" style={{ borderBottom: '1px solid var(--border)' }}>
-            <span className="section-title mb-0">{creatingEntry ? 'New entry' : 'Entry details'}</span>
-            <button className="icon-btn" aria-label="Close details" title="Close details"
-              onClick={() => { setSelEntry(null); setCreatingEntry(false); }}>
-              <X size={15} />
-            </button>
-          </div>
-          <div className="overflow-auto flex-1">
-            <EntryEditor entryId={creatingEntry ? null : selEntry} groupId={editorGroupId}
-              groups={groupOptions}
-              clearSecs={clearSecs} pwgen={pwgen}
-              onChanged={destinationGroupId => {
-                const isAlive = captureLifetime();
-                if (!isAlive()) return;
-                if (destinationGroupId) setSelGroup(destinationGroupId);
-                refresh();
-                void reload().then(latestTree => {
-                  if (!isAlive() || !latestTree || !selEntry) return;
-                  const found = findEntryGroup(latestTree, selEntry);
-                  if (found) setExpanded(current => new Set([...current, ...found.ancestors]));
-                });
-              }}
-              onCreated={(id, destinationGroupId) => {
-                if (!captureLifetime()()) return;
-                setCreatingEntry(false); setSelEntry(id);
-                if (destinationGroupId) setSelGroup(destinationGroupId);
-                refresh(); void reload();
-              }}
-              onDeleted={() => { if (captureLifetime()()) { setSelEntry(null); void refresh(); void reload(); } }} />
-          </div>
+          <EntryEditor entryId={creatingEntry ? null : selEntry} groupId={editorGroupId}
+            groups={groupOptions}
+            clearSecs={clearSecs} pwgen={pwgen}
+            onClose={() => { setSelEntry(null); setCreatingEntry(false); }}
+            onChanged={destinationGroupId => {
+              const isAlive = captureLifetime();
+              if (!isAlive()) return;
+              if (destinationGroupId) setSelGroup(destinationGroupId);
+              refresh();
+              void reload().then(latestTree => {
+                if (!isAlive() || !latestTree || !selEntry) return;
+                const found = findEntryGroup(latestTree, selEntry);
+                if (found) setExpanded(current => new Set([...current, ...found.ancestors]));
+              });
+            }}
+            onCreated={(id, destinationGroupId) => {
+              if (!captureLifetime()()) return;
+              setCreatingEntry(false); setSelEntry(id);
+              if (destinationGroupId) setSelGroup(destinationGroupId);
+              refresh(); void reload();
+            }}
+            onDeleted={() => { if (captureLifetime()()) { setSelEntry(null); void refresh(); void reload(); } }} />
         </div>)}
       </>)}
       {totpImport && tree && (

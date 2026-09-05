@@ -47,7 +47,7 @@ test('scans a page QR into the side-panel editor without saving immediately', as
   render(<EntryEditor entryId="entry-1" groupId="group-1" clearSecs={30}
     groups={[{ groupId: 'group-1', name: 'Sites', depth: 0 }]}
     pwgen={{ length: 20, lower: true, upper: true, digits: true, symbols: true }}
-    onChanged={vi.fn()} onDeleted={vi.fn()} />);
+    onChanged={vi.fn()} onDeleted={vi.fn()} onClose={vi.fn()} />);
 
   await screen.findByRole('button', { name: 'Apply changes' });
   await waitFor(() => expect(mocks.sendToSW).toHaveBeenCalledWith({ type: 'getTotpConfig', entryId: 'entry-1' }));
@@ -81,7 +81,7 @@ test('changes an existing entry group through the same update request', async ()
       { groupId: 'sites', name: 'Sites', depth: 1 },
     ]}
     pwgen={{ length: 20, lower: true, upper: true, digits: true, symbols: true }}
-    onChanged={onChanged} onDeleted={vi.fn()} />);
+    onChanged={onChanged} onDeleted={vi.fn()} onClose={vi.fn()} />);
 
   await screen.findByRole('button', { name: 'Apply changes' });
   const groupSelect = screen.getByLabelText('Group');
@@ -109,7 +109,7 @@ test('a held attachment file read sends no attachment or parent callback after s
   const view = render(<EntryEditor entryId="entry-1" groupId="group-1" clearSecs={30}
     groups={[{ groupId: 'group-1', name: 'Sites', depth: 0 }]}
     pwgen={{ length: 20, lower: true, upper: true, digits: true, symbols: true }}
-    onChanged={onChanged} onDeleted={vi.fn()} />);
+    onChanged={onChanged} onDeleted={vi.fn()} onClose={vi.fn()} />);
   await screen.findByRole('button', { name: 'Apply changes' });
   const file = new File(['private attachment'], 'private.txt');
   Object.defineProperty(file, 'arrayBuffer', { value: () => fileRead.promise });
@@ -128,7 +128,7 @@ test.each(['createEntry', 'updateEntry'])('%s reply cannot invoke parent callbac
   const view = render(<EntryEditor entryId={type === 'createEntry' ? null : 'entry-1'} groupId="group-1" clearSecs={30}
     groups={[{ groupId: 'group-1', name: 'Sites', depth: 0 }]}
     pwgen={{ length: 20, lower: true, upper: true, digits: true, symbols: true }}
-    onChanged={onChanged} onCreated={onCreated} onDeleted={vi.fn()} />);
+    onChanged={onChanged} onCreated={onCreated} onDeleted={vi.fn()} onClose={vi.fn()} />);
   fireEvent.click(await screen.findByRole('button', { name: type === 'createEntry' ? 'Create' : 'Apply changes' }));
   await waitFor(() => expect(mocks.sendToSW.mock.calls.some(([request]) => request.type === type)).toBe(true));
   view.unmount();
@@ -150,7 +150,7 @@ function entry(id: string, title = id) {
 
 function editor(entryId: string | null, callbacks = {}, groupId = 'group-1') {
   return <EntryEditor {...editorProps} entryId={entryId} groupId={groupId}
-    onChanged={vi.fn()} onDeleted={vi.fn()} {...callbacks} />;
+    onChanged={vi.fn()} onDeleted={vi.fn()} onClose={vi.fn()} {...callbacks} />;
 }
 
 function replyWithNotes(notes: string) {

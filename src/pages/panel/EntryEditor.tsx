@@ -37,6 +37,7 @@ interface EntryEditorProps {
   onChanged: (groupId?: string) => void;
   onCreated?: (entryId: string, groupId?: string) => void;
   onDeleted: () => void;
+  onClose: () => void;
 }
 
 export function EntryEditor(props: EntryEditorProps) {
@@ -45,7 +46,7 @@ export function EntryEditor(props: EntryEditorProps) {
   return <SelectedEntryEditor key={key} {...props} />;
 }
 
-function SelectedEntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChanged, onCreated, onDeleted }: EntryEditorProps) {
+function SelectedEntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChanged, onCreated, onDeleted, onClose }: EntryEditorProps) {
   const captureLifetime = useSessionLifetime();
   const [e, setE] = useState<EntryView | null>(entryId === null ? BLANK_ENTRY : null);
   const [loadError, setLoadError] = useState('');
@@ -145,14 +146,36 @@ function SelectedEntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onCha
     return () => window.removeEventListener('keydown', onKey);
   }, [e, copy, captureLifetime]);
 
-  if (!e) return (
-    <div className="p-4">
+  const header = (
+    <header className="flex shrink-0 items-center justify-between gap-2 px-4 py-2" style={{ borderBottom: '1px solid var(--border)' }}>
+      <span className="section-title mb-0">{entryId === null ? 'New entry' : 'Entry details'}</span>
+      <div className="flex shrink-0 items-center gap-2">
+        <div className="segmented" role="group" aria-label="Entry type">
+          <button type="button" className="segmented-item" aria-pressed={!isCard} disabled={!e}
+            onClick={() => setIsCard(false)}>
+            <KeyRound size={14} aria-hidden="true" /> Login
+          </button>
+          <button type="button" className="segmented-item" aria-pressed={isCard} disabled={!e}
+            onClick={() => setIsCard(true)}>
+            <CreditCard size={14} aria-hidden="true" /> Credit card
+          </button>
+        </div>
+        <button className="icon-btn" aria-label="Close details" title="Close details" onClick={onClose}>
+          <X size={15} />
+        </button>
+      </div>
+    </header>
+  );
+
+  if (!e) return (<>
+    {header}
+    <div className="overflow-auto flex-1 p-4">
       {loadError ? <>
         <p className="alert-error mb-3" role="alert">{loadError}</p>
         <button className="btn-xs" onClick={() => setLoadAttempt(attempt => attempt + 1)}>Retry</button>
       </> : <p role="status">Loading entry…</p>}
     </div>
-  );
+  </>);
   const field = (label: string, key: 'title' | 'username' | 'url' | 'password') => {
     const secret = key === 'password';
     // Card Number (username, when isCard) gets the same mask/reveal UX as Password/CVV, but
@@ -320,21 +343,12 @@ function SelectedEntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onCha
       if (isAlive() && error) setAttachError(error);
     } catch { if (isAlive()) setAttachError('Could not download attachment.'); }
   }
-  return (
-  <div>
+  return (<>
+  {header}
+  <div className="overflow-auto flex-1">
     {clipState && <ClipboardBar state={clipState} onCancel={cancel} />}
     <div className="p-4">
       <div className="card">
-        <div className="segmented mb-3" role="group" aria-label="Entry type">
-          <button type="button" className="segmented-item" aria-pressed={!isCard}
-            onClick={() => setIsCard(false)}>
-            <KeyRound size={14} aria-hidden="true" /> Login
-          </button>
-          <button type="button" className="segmented-item" aria-pressed={isCard}
-            onClick={() => setIsCard(true)}>
-            <CreditCard size={14} aria-hidden="true" /> Credit card
-          </button>
-        </div>
         {field('Title', 'title')}
         {field(isCard ? 'Card Number' : 'Username', 'username')}
         {field(isCard ? 'CVV' : 'Password', 'password')}
@@ -480,5 +494,6 @@ function SelectedEntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onCha
         </div>
       </div>
     </div>
-  </div>);
+  </div>
+  </>);
 }

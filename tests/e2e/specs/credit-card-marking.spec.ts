@@ -28,7 +28,8 @@ test('panel: switch entry type, save, and verify persisted fields', async ({ con
   await expect(panel.getByText('URL')).toBeVisible();
   await expect(panel.getByLabel('Password rules')).toBeVisible();
 
-  const entryType = panel.getByRole('group', { name: 'Entry type' });
+  const detailsHeader = panel.locator('header').filter({ has: panel.getByRole('button', { name: 'Close details' }) });
+  const entryType = detailsHeader.getByRole('group', { name: 'Entry type' });
   await expect(entryType.getByRole('button', { name: 'Login', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await entryType.getByRole('button', { name: 'Credit card', exact: true }).click();
   await expect(entryType.getByRole('button', { name: 'Credit card', exact: true })).toHaveAttribute('aria-pressed', 'true');
