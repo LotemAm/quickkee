@@ -66,3 +66,27 @@ test('automatic retry completion publishes changed dirty state and unchanged ret
   await vi.waitFor(() => expect(state.retry).toHaveBeenCalledTimes(2));
   expect(port.postMessage).toHaveBeenCalledTimes(2);
 });
+
+test.each(['lock', 'source change'] as const)('a held automatic retry does not republish after %s', async action => {
+  const { ctx, alarms, port } = await setup();
+  ctx.setCurrentSource({ kind: 'cloud', provider: 'dropbox', fileId: 'A', basedOnRev: 'rA' });
+  const gate = Promise.withResolvers<void>(); const started = Promise.withResolvers<void>();
+  state.retry.mockImplementationOnce(async () => { started.resolve(); await gate.promise; });
+  alarms.onAlarm.fire({ name: 'keepalive' });
+  try {
+    await started.promise;
+    if (action === 'lock') {
+      ctx.doLock();
+      expect(ctx.vault.isOpen()).toBe(false);
+      expect(port.postMessage).toHaveBeenLastCalledWith({ type: 'snapshot', snapshot: expect.objectContaining({ locked: true }) });
+    } else {
+      ctx.setCurrentSource({ kind: 'cloud', provider: 'gdrive', fileId: 'B', basedOnRev: 'rB' });
+      ctx.vault.dirty = false;
+    }
+    const published = port.postMessage.mock.calls.length;
+    gate.resolve(); await gate.promise;
+    // Retry resumes, then tryRetry's finally runs; both are promise continuations.
+    await Promise.resolve(); await Promise.resolve();
+    expect(port.postMessage).toHaveBeenCalledTimes(published);
+  } finally { gate.resolve(); }
+});

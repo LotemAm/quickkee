@@ -54,6 +54,78 @@ test('lifecycle tokens survive edits but expire on lock and successful replaceme
   expect(v.isSessionCurrent(replacement)).toBe(false);
 });
 
+test('every successful mutation advances the version while lifecycle stays fixed', async () => {
+  const v = new Vault(); const session = await v.open(fixture(), 'correct horse', null);
+  const root = v.getTree().groupId; const id = v.entriesForUrl('https://github.com')[0].id;
+  let entry = ''; let group = '';
+  const config = { secret: 'JBSWY3DPEHPK3PXP', algorithm: 'SHA1' as const, digits: 6 as const, period: 30 };
+  const mutations = [
+    () => { group = v.createGroup(root, 'Group'); },
+    () => v.updateGroup(group, { Name: 'Renamed' }),
+    () => { entry = v.createEntry(root, { Title: 'New' }); },
+    () => v.updateEntry(entry, { UserName: 'changed' }),
+    () => v.moveEntry(entry, group),
+    () => v.setTotpConfig(entry, config),
+    () => v.importTotp([{ keyId: 'existing', config, destination: { type: 'existing' as const, entryId: id } }]),
+    () => v.importTotp([{ keyId: 'new', config, destination: { type: 'new' as const, groupId: root, fields: { Title: 'Imported' } } }]),
+    () => v.addAttachment(entry, 'note', bytesOf('first')),
+    () => v.addAttachment(entry, 'note', bytesOf('replacement')),
+    () => v.removeAttachment(entry, 'note'),
+    () => v.deleteEntry(entry),
+    () => v.deleteGroup(group),
+    () => v.mergeRemote(fixture()),
+  ];
+  for (const mutate of mutations) {
+    const version = v.mutationVersion;
+    await mutate();
+    expect(v.mutationVersion).toBeGreaterThan(version);
+    expect(v.lifecycleGeneration).toBe(session);
+    v.acknowledgeCached(session, version); expect(v.dirty).toBe(true);
+    v.acknowledgeCached(session, v.mutationVersion); expect(v.dirty).toBe(false);
+  }
+  const version = v.mutationVersion;
+  await v.open(fixture(), 'correct horse', null);
+  v.updateEntry(id, { UserName: 'replacement-session' });
+  expect(v.mutationVersion).toBeGreaterThan(version);
+  v.acknowledgeCached(session, v.mutationVersion); expect(v.dirty).toBe(true);
+});
+
+test('failed edits and a no-op move cannot advance the mutation version', async () => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  const version = v.mutationVersion;
+  expect(() => v.updateEntry('missing', {})).toThrow('no entry');
+  expect(() => v.removeAttachment(id, 'missing')).toThrow('no attachment');
+  await expect(v.addAttachment('missing', 'note', bytesOf('x'))).rejects.toThrow('no entry');
+  const group = v['db']!.getDefaultGroup().groups.find(g => g.entries.some(e => e.uuid.id === id))!;
+  v.moveEntry(id, group.uuid.id);
+  expect(v.mutationVersion).toBe(version); expect(v.dirty).toBe(false);
+});
+
+test.each(['lock', 'replacement'] as const)('attachment hashing cannot modify or clean a database after %s', async action => {
+  const v = new Vault(); await v.open(fixture(), 'correct horse', null);
+  const id = v.entriesForUrl('https://github.com')[0].id;
+  const oldDb = v['db']!;
+  const binary = await oldDb.createBinary(bytesOf('old'));
+  const gate = Promise.withResolvers<typeof binary>();
+  const create = vi.spyOn(oldDb, 'createBinary').mockImplementationOnce(() => gate.promise);
+  const cleanup = vi.spyOn(oldDb, 'cleanup');
+  const work = v.addAttachment(id, 'old', bytesOf('old'));
+  try {
+    v.lock();
+    if (action === 'replacement') {
+      await v.open(fixture(), 'correct horse', null);
+      await v.addAttachment(id, 'new', bytesOf('new'));
+    }
+    const version = v.mutationVersion; const dirty = v.dirty;
+    const rejected = expect(work).rejects.toThrow('staleSession'); gate.resolve(binary); await rejected;
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(v.mutationVersion).toBe(version); expect(v.dirty).toBe(dirty);
+    if (action === 'replacement') expect(v.getEntry(id)?.attachments).toEqual([{ name: 'new', size: 3 }]);
+    else expect(v.isOpen()).toBe(false);
+  } finally { gate.resolve(binary); await Promise.allSettled([work]); create.mockRestore(); cleanup.mockRestore(); }
+});
+
 test.each(['lock', 'replacement'] as const)('a delayed open cannot restore the vault after %s', async action => {
   const v = new Vault();
   await v.open(fixture(), 'correct horse', null);

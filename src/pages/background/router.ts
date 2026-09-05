@@ -48,7 +48,8 @@ export interface SwContext {
 }
 
 export function depsFor(ctx: SwContext, src: CloudFileSource): SyncDeps {
-  return { vault: ctx.vault, provider: providerFor(src.provider), online: ctx.online };
+  return { vault: ctx.vault, provider: providerFor(src.provider), online: ctx.online,
+    isCurrent: () => ctx.getCurrentSource() === src };
 }
 
 function isExtensionPage(sender: chrome.runtime.MessageSender, ...pages: Array<'popup' | 'panel' | 'options'>): boolean {
@@ -68,9 +69,32 @@ function validSecretBytes(bytes: number[], expectedLength?: number): boolean {
     && bytes.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255);
 }
 
-async function finishOpen(ctx: SwContext): Promise<void> {
+/** Track preceding reads and our own successful open; never adopt a token read after an await. */
+function captureOpen(ctx: SwContext) {
+  let session = ctx.vault.lifecycleGeneration;
+  let source = ctx.getCurrentSource();
+  const sourceCurrent = () => ctx.getCurrentSource() === source;
+  const guard = () => {
+    if (ctx.vault.lifecycleGeneration !== session || !sourceCurrent()) throw new Error('staleSession');
+  };
+  return {
+    guard, sourceCurrent,
+    opened(token: number) {
+      if (!ctx.vault.isSessionCurrent(token) || !sourceCurrent()) throw new Error('staleSession');
+      session = token;
+    },
+    install(handle: FileSystemFileHandle | null, next: DbSource) {
+      guard();
+      ctx.setHandle(handle); ctx.setCurrentSource(next); source = next;
+    },
+  };
+}
+
+async function finishOpen(ctx: SwContext, guard: () => void): Promise<void> {
+  guard();
   ctx.publishStatus?.();
   const settings = await loadSettings();
+  guard();
   ctx.autolock.arm(settings.autoCloseHours);
   ctx.refreshAllIcons();
 }
@@ -80,11 +104,16 @@ async function openLocalVault(
   handle: FileSystemFileHandle,
   password: string | null,
   keyFile: ArrayBuffer | null,
+  opening = captureOpen(ctx),
 ): Promise<void> {
-  await ctx.vault.open(await readBytes(handle), password, keyFile);
-  ctx.setHandle(handle);
-  ctx.setCurrentSource({ kind: 'local', handleId: 'db' });
-  await finishOpen(ctx);
+  opening.guard();
+  const bytes = await readBytes(handle);
+  opening.guard();
+  const session = await ctx.vault.open(bytes, password, keyFile);
+  opening.opened(session);
+  opening.install(handle, { kind: 'local', handleId: 'db' });
+  await finishOpen(ctx, opening.guard);
+  opening.guard();
 }
 
 async function openCloudVault(
@@ -92,11 +121,14 @@ async function openCloudVault(
   source: CloudFileSource,
   password: string | null,
   keyFile: ArrayBuffer | null,
+  opening = captureOpen(ctx),
 ) {
-  const outcome = await openCloud(source, depsFor(ctx, source), password, keyFile);
-  ctx.setHandle(null);
-  ctx.setCurrentSource(source);
-  await finishOpen(ctx);
+  opening.guard();
+  const outcome = await openCloud(source, { ...depsFor(ctx, source),
+    isCurrent: opening.sourceCurrent, onOpened: opening.opened }, password, keyFile);
+  opening.install(null, source);
+  await finishOpen(ctx, opening.guard);
+  opening.guard();
   return outcome;
 }
 
@@ -173,10 +205,19 @@ async function persistVault(ctx: SwContext): Promise<ResponseFor<'save'>> {
   }
   const handle = ctx.getHandle();
   if (!handle) return { ok: false, error: 'noFile' };
+  const session = ctx.vault.lifecycleGeneration;
+  const mutationVersion = ctx.vault.mutationVersion;
+  const guard = () => {
+    if (!ctx.vault.isSessionCurrent(session) || ctx.getCurrentSource() !== currentSource || ctx.getHandle() !== handle)
+      throw new Error('staleSession');
+  };
   try {
+    guard();
     const bytes = await ctx.vault.serialize();
+    guard();
     await writeBytes(handle, bytes);
-    ctx.vault.dirty = false;
+    guard();
+    ctx.vault.acknowledgeCached(session, mutationVersion);
     return { ok: true };
   } catch { return { ok: false, error: 'saveFailed' }; }
 }
@@ -213,15 +254,19 @@ export function makeRouter(ctx: SwContext) {
         return { ok: true };
       }
       case 'unlock': {
-        const handle = await loadHandle();
-        if (!handle) return { ok: false, error: 'noFile' };
-        if (!(await ensurePermission(handle, 'readwrite'))) return { ok: false, error: 'permission' };
+        const opening = captureOpen(ctx);
         const keyBytes = req.keyFile ? new Uint8Array(req.keyFile) : null;
         try {
+          const handle = await loadHandle();
+          opening.guard();
+          if (!handle) return { ok: false, error: 'noFile' };
+          const permitted = await ensurePermission(handle, 'readwrite');
+          opening.guard();
+          if (!permitted) return { ok: false, error: 'permission' };
           const keyFile = keyBytes
             ? keyBytes.buffer.slice(keyBytes.byteOffset, keyBytes.byteOffset + keyBytes.byteLength) as ArrayBuffer
             : null;
-          await openLocalVault(ctx, handle, req.password, keyFile);
+          await openLocalVault(ctx, handle, req.password, keyFile, opening);
         } catch (e) {
           if (isInvalidKey(e)) return { ok: false, error: 'badCredentials' };
           // Surface non-credential failures (corrupt file, missing WASM/CSP, runtime) instead of masking them.
@@ -462,6 +507,7 @@ export function makeRouter(ctx: SwContext) {
         if (!isExtensionPage(sender, 'popup', 'panel')) return { ok: false, error: 'forbidden' };
         if (ctx.vault.isOpen()) return { ok: false, error: 'alreadyUnlocked' };
         if (!validSecretBytes(req.prfOutput, 32)) return { ok: false, error: 'invalidPrfOutput' };
+        const opening = captureOpen(ctx);
         const prfOutput = new Uint8Array(req.prfOutput);
         let keyFile: Uint8Array | null = null;
         try {
@@ -482,7 +528,7 @@ export function makeRouter(ctx: SwContext) {
             if (!enrollment.localHandle) return { ok: false, error: 'corruptEnrollment' };
             const permitted = await hasPermission(enrollment.localHandle, 'readwrite');
             if (!permitted) return { ok: false, error: 'permissionRequired' };
-            try { await openLocalVault(ctx, enrollment.localHandle, material.password, keyBuffer); }
+            try { await openLocalVault(ctx, enrollment.localHandle, material.password, keyBuffer, opening); }
             catch (error) {
               return isInvalidKey(error)
                 ? { ok: false, error: 'staleCredentials' }
@@ -497,7 +543,7 @@ export function makeRouter(ctx: SwContext) {
             basedOnRev: '',
           };
           try {
-            const outcome = await openCloudVault(ctx, source, material.password, keyBuffer);
+            const outcome = await openCloudVault(ctx, source, material.password, keyBuffer, opening);
             return outcome.merged ? { ok: true, merged: true } : { ok: true };
           } catch (error) {
             if (isInvalidKey(error)) return { ok: false, error: 'staleCredentials' };
@@ -705,6 +751,7 @@ export function makeRouter(ctx: SwContext) {
         }
 
         const saved = await persistVault(ctx);
+        if (!ctx.vault.isSessionCurrent(token)) return { ok: false, error: 'locked' };
         if (!saved.ok) return saved;
         await ctx.credentialCaptures.dismiss(record.id, authority);
         if (!ctx.vault.isSessionCurrent(token)) return { ok: false, error: 'locked' };

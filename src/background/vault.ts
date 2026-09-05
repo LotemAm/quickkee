@@ -32,7 +32,16 @@ export class Vault {
   private db: kdbxweb.Kdbx | null = null;
   private creds: kdbxweb.Credentials | null = null;
   private generation = 0;
+  private version = 0;
   dirty = false;
+
+  /** Live mutations are independent of lifecycle identity and persisted KeePass times. */
+  get mutationVersion(): number { return this.version; }
+  private markMutation(): void { ++this.version; this.dirty = true; }
+
+  acknowledgeCached(session: number, mutationVersion: number): void {
+    if (this.isSessionCurrent(session) && this.version === mutationVersion) this.dirty = false;
+  }
 
   /** Identity of the current lifecycle, unchanged by ordinary entry edits. */
   get lifecycleGeneration(): number { return this.generation; }
@@ -194,7 +203,7 @@ export class Vault {
     const e = this.findEntry(id); if (!e) throw new Error('no entry');
     const otpUri = config ? toOtpUri(config) : null;
     this.replaceTotp(e, otpUri);
-    e.times.update(); this.dirty = true;
+    e.times.update(); this.markMutation();
   }
 
   entriesForUrl(pageUrl: string): EntryView[] {
@@ -280,7 +289,7 @@ export class Vault {
     const e = this.db.createEntry(g);
     this.applyFields(e, fields);
     if (otpUri) e.fields.set(OTP_FIELD_KEY, kdbxweb.ProtectedValue.fromString(otpUri));
-    this.dirty = true; return e.uuid.id;
+    this.markMutation(); return e.uuid.id;
   }
 
   updateEntry(id: string, fields: Record<string, string>, expires?: number | null, removeKeys?: string[], totp?: TotpConfig | null, groupId?: string): void {
@@ -298,7 +307,7 @@ export class Vault {
       else { e.times.expires = true; e.times.expiryTime = new Date(expires); }
     }
     if (destination && e.parentGroup !== destination) this.db!.move(e, destination);
-    e.times.update(); this.dirty = true;
+    e.times.update(); this.markMutation();
   }
 
   moveEntry(id: string, groupId: string): void {
@@ -307,7 +316,7 @@ export class Vault {
     const destination = this.findGroup(groupId); if (!destination) throw new Error('no group');
     if (e.parentGroup === destination) return;
     this.db.move(e, destination);
-    e.times.update(); this.dirty = true;
+    e.times.update(); this.markMutation();
   }
 
   importTotp(assignments: TotpImportAssignment[]): void {
@@ -345,7 +354,7 @@ export class Vault {
         this.replaceTotp(entry, item.otpUri);
       }
     }
-    this.dirty = true;
+    this.markMutation();
   }
 
   updateGroup(id: string, fields: Record<string, string>): void {
@@ -355,38 +364,40 @@ export class Vault {
       g.name = fields.Name;
       g.times.update();
     }
-    this.dirty = true;
+    this.markMutation();
   }
 
   createGroup(parentId: string, name: string): string {
     if (!this.db) throw new Error('locked');
     const parent = this.findGroup(parentId); if (!parent) throw new Error('no group');
     const g = this.db.createGroup(parent, name);
-    this.dirty = true; return g.uuid.id;
+    this.markMutation(); return g.uuid.id;
   }
 
   deleteGroup(id: string): void {
     if (!this.db) throw new Error('locked');
     if (id === this.root.uuid.id) throw new Error('cannot delete root');
     const g = this.findGroup(id); if (!g) throw new Error('no group');
-    this.db.remove(g); this.dirty = true;
+    this.db.remove(g); this.markMutation();
   }
 
   deleteEntry(id: string): void {
     if (!this.db) throw new Error('locked');
     const e = this.findEntry(id); if (!e) throw new Error('no entry');
-    this.db.remove(e); this.dirty = true;
+    this.db.remove(e); this.markMutation();
   }
 
   async addAttachment(entryId: string, name: string, data: ArrayBuffer): Promise<void> {
     if (!this.db) throw new Error('locked');
+    const db = this.db; const session = this.generation;
     const e = this.findEntry(entryId); if (!e) throw new Error('no entry');
-    const bin = await this.db.createBinary(data);
+    const bin = await db.createBinary(data);
+    if (!this.isSessionCurrent(session) || this.db !== db) throw new Error('staleSession');
     e.binaries.set(name, bin);
     e.times.update();
+    this.markMutation();
     // Cleans up the previous pool entry if `name` was overwritten and its hash isn't shared elsewhere.
-    await this.db.cleanup({ binaries: true });
-    this.dirty = true;
+    db.cleanup({ binaries: true });
   }
 
   removeAttachment(entryId: string, name: string): void {
@@ -395,7 +406,7 @@ export class Vault {
     if (!e.binaries.delete(name)) throw new Error('no attachment');
     e.times.update();
     this.db.cleanup({ binaries: true });
-    this.dirty = true;
+    this.markMutation();
   }
 
   getAttachmentBytes(entryId: string, name: string): ArrayBuffer | null {
@@ -420,11 +431,14 @@ export class Vault {
 
   /** Load remote bytes with the same credentials and merge them into the
    *  in-memory DB (KeePass-native union; local.merge(remote)). */
-  async mergeRemote(remoteBytes: ArrayBuffer): Promise<void> {
+  async mergeRemote(remoteBytes: ArrayBuffer, isCurrent: () => boolean = () => true): Promise<void> {
     if (!this.db || !this.creds) throw new Error('locked');
-    const remote = await kdbxweb.Kdbx.load(remoteBytes, this.creds);
-    this.db.merge(remote);
-    this.dirty = true;
+    const db = this.db; const creds = this.creds; const session = this.generation;
+    if (!isCurrent()) throw new Error('staleSession');
+    const remote = await kdbxweb.Kdbx.load(remoteBytes, creds);
+    if (!this.isSessionCurrent(session) || this.db !== db || !isCurrent()) throw new Error('staleSession');
+    db.merge(remote);
+    this.markMutation();
   }
 
   async serialize(): Promise<ArrayBuffer> {
