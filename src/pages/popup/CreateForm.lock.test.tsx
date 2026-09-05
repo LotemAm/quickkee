@@ -112,3 +112,21 @@ test('StrictMode cannot revive an obsolete draft load and overwrite recovered fi
   expect(mocks.send).not.toHaveBeenCalled();
   expect(mocks.saveDraft).not.toHaveBeenCalled();
 });
+
+test('the independent page scan remains usable while draft fields wait for hydration', async () => {
+  const late = deferred<null>();
+  mocks.loadDraft.mockReturnValue(late.promise);
+  const scan = vi.fn();
+  const view = render(<CreateForm sessionKey="session-a" url="https://example.test" tabId={1} defaultGroupId="root"
+    groups={[{ groupId: 'root', name: 'Root', depth: 0 }]} clearSecs={30} pwgen={DEFAULT_PWGEN}
+    scanPage={{ disabled: false, scanning: false, description: 'Scan', onClick: scan }} onCreated={vi.fn()} />);
+  expect(screen.getByPlaceholderText('Title')).toBeDisabled();
+  expect(screen.getByLabelText('TOTP setup key or URI')).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Create & Save' })).toBeDisabled();
+  const button = screen.getByRole('button', { name: 'Scan page QR' });
+  expect(button).toBeEnabled();
+  act(() => { button.click(); });
+  expect(scan).toHaveBeenCalledTimes(1);
+  view.unmount();
+  await act(async () => { late.resolve(null); });
+});

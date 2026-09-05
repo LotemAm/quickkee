@@ -254,6 +254,11 @@ export function CreateForm({ url, tabId, sessionKey, groups, defaultGroupId, cle
     finally { if (isAlive()) { inFlight.current = false; setSaving(false); } }
   }
   const isFullUrl = entryUrl === url;
+  const scanAction = <IconTooltipButton label={scanPage.scanning ? 'Scanning visible page' : 'Scan page QR'}
+    tooltipTitle="Scan page QR" tooltipDescription={scanPage.description}
+    disabled={scanPage.disabled || scanPage.scanning} onClick={() => { if (captureLifetime()()) scanPage.onClick(); }}>
+    {scanPage.scanning ? <Loader2 size={15} className="animate-spin" /> : <QrCode size={15} />}
+  </IconTooltipButton>;
   return (
     <div className="card space-y-2">
       <p className="text-sm font-medium" style={{ color: 'var(--text)' }}>New entry for <span className="break-all font-normal" style={{ color: 'var(--text-muted)' }}>{url}</span></p>
@@ -265,35 +270,35 @@ export function CreateForm({ url, tabId, sessionKey, groups, defaultGroupId, cle
       )}
       {error && <p className="alert-error" role="alert">{error}</p>}
       {!hydrated && error && <button className="btn-secondary" onClick={() => { setError(''); setLoadAttempt(n => n + 1); }}>Retry draft load</button>}
-      <fieldset disabled={!hydrated || !editable || saving} className="space-y-2 min-w-0">
-        <select className="input" value={groupId} onChange={e => setGroupId(e.target.value)} aria-label="Group">
-          {!groups.some(g => g.groupId === groupId) && <option value={groupId}>Original group unavailable</option>}
-          {groups.map(g => <option key={g.groupId} value={g.groupId}>{'\u00A0\u00A0'.repeat(g.depth) + g.name}</option>)}
-        </select>
-        <input className="input" placeholder="Title" value={title} onChange={e => setTitle(e.target.value)} />
-        <input className="input" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} />
-        <div className="flex gap-1.5">
-          <input className="input" placeholder="Password" value={password} onChange={e => { ++passwordGeneration.current; setPassword(e.target.value); }} />
-          <button className="btn-secondary shrink-0" aria-label="Regenerate password" title="Generate a new password"
-            disabled={noClass} onClick={() => regenerate(opts)}><RefreshCw size={15} /></button>
-          <button className="btn-secondary shrink-0" aria-label="Password rules" title="Password rules (this session)"
-            onClick={() => setShowRules(s => !s)}><SlidersHorizontal size={15} /></button>
-          <button className="btn-secondary shrink-0" aria-label="Copy password" title="Copy password"
-            disabled={!password} onClick={() => { if (captureLifetime()()) void copyWithClear(password, clearSecs); }}><Copy size={15} /></button>
-        </div>
-        {showRules && <PasswordRulesPanel opts={opts} onChange={setOpts} />}
-        <div className="flex gap-2 items-center">
-          <input className="input flex-1" placeholder="URL" value={entryUrl} onChange={e => setEntryUrl(e.target.value)} />
-          <IconTooltipButton label="Use full page URL" tooltipTitle="Use full page URL"
-            tooltipDescription="Use the current full page URL." disabled={isFullUrl} onClick={() => setEntryUrl(url)}><Link size={15} /></IconTooltipButton>
-        </div>
-        <TotpSetup initialConfig={initialTotp} issuer={title} account={username} resetKey={totpReset}
-          inputAction={<IconTooltipButton label={scanPage.scanning ? 'Scanning visible page' : 'Scan page QR'}
-            tooltipTitle="Scan page QR" tooltipDescription={scanPage.description}
-            disabled={scanPage.disabled || scanPage.scanning} onClick={() => { if (captureLifetime()()) scanPage.onClick(); }}>
-            {scanPage.scanning ? <Loader2 size={15} className="animate-spin" /> : <QrCode size={15} />}
-          </IconTooltipButton>}
+      <fieldset disabled={!editable || saving} className="space-y-2 min-w-0">
+        <fieldset disabled={!hydrated} className="space-y-2 min-w-0">
+          <select className="input" value={groupId} onChange={e => setGroupId(e.target.value)} aria-label="Group">
+            {!groups.some(g => g.groupId === groupId) && <option value={groupId}>Original group unavailable</option>}
+            {groups.map(g => <option key={g.groupId} value={g.groupId}>{'\u00A0\u00A0'.repeat(g.depth) + g.name}</option>)}
+          </select>
+          <input className="input" placeholder="Title" value={title} onChange={e => setTitle(e.target.value)} />
+          <input className="input" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} />
+          <div className="flex gap-1.5">
+            <input className="input" placeholder="Password" value={password} onChange={e => { ++passwordGeneration.current; setPassword(e.target.value); }} />
+            <button className="btn-secondary shrink-0" aria-label="Regenerate password" title="Generate a new password"
+              disabled={noClass} onClick={() => regenerate(opts)}><RefreshCw size={15} /></button>
+            <button className="btn-secondary shrink-0" aria-label="Password rules" title="Password rules (this session)"
+              onClick={() => setShowRules(s => !s)}><SlidersHorizontal size={15} /></button>
+            <button className="btn-secondary shrink-0" aria-label="Copy password" title="Copy password"
+              disabled={!password} onClick={() => { if (captureLifetime()()) void copyWithClear(password, clearSecs); }}><Copy size={15} /></button>
+          </div>
+          {showRules && <PasswordRulesPanel opts={opts} onChange={setOpts} />}
+          <div className="flex gap-2 items-center">
+            <input className="input flex-1" placeholder="URL" value={entryUrl} onChange={e => setEntryUrl(e.target.value)} />
+            <IconTooltipButton label="Use full page URL" tooltipTitle="Use full page URL"
+              tooltipDescription="Use the current full page URL." disabled={isFullUrl} onClick={() => setEntryUrl(url)}><Link size={15} /></IconTooltipButton>
+          </div>
+        </fieldset>
+        {hydrated ? <TotpSetup initialConfig={initialTotp} issuer={title} account={username} resetKey={totpReset}
+          inputAction={scanAction}
           onChange={(config, totpIssue) => { setTotp(config); setTotpError(totpIssue ?? ''); }} />
+          : <div className="flex gap-2 items-center"><input className="input flex-1" disabled aria-label="TOTP setup key or URI"
+            placeholder="Setup key or otpauth:// URI" />{scanAction}</div>}
       </fieldset>
       <div className="flex gap-1.5">
         {(editable || state.status === 'creating') ? <>
