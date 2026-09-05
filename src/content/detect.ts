@@ -1,23 +1,67 @@
 export interface LoginFields { username: HTMLInputElement | null; password: HTMLInputElement | null }
-export function findLoginFields(doc: Document): LoginFields {
-  const password = doc.querySelector<HTMLInputElement>('input[type="password"]');
+
+function loginTokens(input: HTMLInputElement): string[] {
+  return input.autocomplete.toLowerCase().split(/\s+/);
+}
+
+function eligibleLoginInput(input: HTMLInputElement): boolean {
+  if (!input.isConnected || input.matches(':disabled') || input.readOnly ||
+      !['text', 'email', 'tel', 'password'].includes(input.type)) return false;
+  if (loginTokens(input).some(token => token === 'one-time-code' || token.startsWith('cc-'))) return false;
+  for (let element: Element | null = input; element; element = element.parentElement) {
+    const style = input.ownerDocument.defaultView?.getComputedStyle(element);
+    if (element.hasAttribute('hidden') || style?.display === 'none' ||
+        style?.visibility === 'hidden' || style?.visibility === 'collapse') return false;
+  }
+  return true;
+}
+
+function usernameHint(input: HTMLInputElement): boolean {
+  return input.type !== 'password' && (loginTokens(input).some(token => token === 'username' || token === 'email') ||
+    input.type === 'email' || /user|email/i.test(`${input.name} ${input.id}`));
+}
+
+function loginFieldsInContext(inputs: HTMLInputElement[], preferred?: HTMLInputElement | null): LoginFields {
+  const empty: LoginFields = { username: null, password: null };
+  const passwords = inputs.filter(input => input.type === 'password');
+  const current = passwords.filter(input => loginTokens(input).includes('current-password'));
+  const existing = passwords.filter(input => !loginTokens(input).includes('new-password'));
+  const candidates = current.length ? current : existing.length ? existing : passwords;
+  const password = preferred && candidates.includes(preferred) ? preferred : candidates.length === 1 ? candidates[0] : null;
+  if (passwords.length && !password) return empty;
+
+  const usernames = inputs.filter(input => input.type !== 'password');
+  const explicit = usernames.filter(input => loginTokens(input).includes('username'));
+  const hinted = usernames.filter(usernameHint);
+  const choices = explicit.length ? explicit : hinted;
   let username: HTMLInputElement | null = null;
-  if (password) {
-    const inputs = Array.from(doc.querySelectorAll<HTMLInputElement>('input'));
-    const pwIdx = inputs.indexOf(password);
-    for (let i = pwIdx - 1; i >= 0; i--) {
-      const t = (inputs[i].type || 'text').toLowerCase();
-      if (t === 'text' || t === 'email' || t === 'tel') { username = inputs[i]; break; }
-    }
-    if (!username) username = doc.querySelector('input[autocomplete="username"], input[name*="user" i], input[name*="email" i]');
-  } else {
-    // Single-step flow (e.g. AWS, Google): only email/username visible, password appears after submit
-    username = doc.querySelector(
-      'input[type="email"], input[autocomplete="username"], input[autocomplete="email"], ' +
-      'input[name*="user" i], input[name*="email" i]'
-    );
+  if (preferred && choices.includes(preferred)) username = preferred;
+  else if (choices.length === 1) username = choices[0];
+  else if (choices.length > 1) return empty;
+  else if (password) {
+    // Document order is only a last resort, and only within this HTML form owner.
+    const preceding = inputs.slice(0, inputs.indexOf(password)).filter(input => input.type !== 'password');
+    username = preceding.at(-1) ?? null;
   }
   return { username, password };
+}
+
+export function findLoginFields(doc: Document, preferred?: HTMLInputElement | null): LoginFields {
+  const empty: LoginFields = { username: null, password: null };
+  if (preferred && (preferred.ownerDocument !== doc || !eligibleLoginInput(preferred))) return empty;
+  const inputs = Array.from(doc.querySelectorAll<HTMLInputElement>('input')).filter(eligibleLoginInput);
+  if (preferred) return loginFieldsInContext(inputs.filter(input => input.form === preferred.form), preferred);
+
+  const contexts = new Map<HTMLFormElement | null, HTMLInputElement[]>();
+  for (const input of inputs) {
+    const group = contexts.get(input.form) ?? [];
+    group.push(input); contexts.set(input.form, group);
+  }
+  // A newsletter-only context should not compete with a unique password step.
+  const groups = [...contexts.values()];
+  const passwordGroups = groups.filter(group => group.some(input => input.type === 'password'));
+  const candidates = passwordGroups.length ? passwordGroups : groups.filter(group => group.some(usernameHint));
+  return candidates.length === 1 ? loginFieldsInContext(candidates[0]) : empty;
 }
 
 export function isLoginField(el: HTMLElement, fields: LoginFields): boolean {

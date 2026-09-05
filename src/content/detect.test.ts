@@ -189,3 +189,123 @@ test('fillOtpFields sets a single field and dispatches input/change events', () 
   expect(input.value).toBe('654321');
   expect(onInput).toHaveBeenCalledOnce(); expect(onChange).toHaveBeenCalledOnce();
 });
+
+describe('login form scope', () => {
+  const input = (id: string) => document.getElementById(id) as HTMLInputElement;
+  const ids = (preferred?: HTMLInputElement | null) => {
+    const fields = findLoginFields(document, preferred);
+    return [fields.username?.id ?? null, fields.password?.id ?? null];
+  };
+
+  test('prefers the requested form over newsletter and earlier login', () => {
+    document.body.innerHTML = `<form><input type="email" id="newsletter"></form>
+      <form><input id="u1"><input type="password" id="p1"></form>
+      <form><input id="u2"><input type="password" id="p2"></form>`;
+    expect(ids(input('u2'))).toEqual(['u2', 'p2']);
+    expect(ids(input('p2'))).toEqual(['u2', 'p2']);
+    expect(ids()).toEqual([null, null]);
+  });
+
+  test('unique password context does not borrow newsletter username', () => {
+    document.body.innerHTML = `<form><input type="email" id="newsletter"></form>
+      <form><input type="password" id="p"></form>`;
+    expect(ids()).toEqual([null, 'p']);
+  });
+
+  test('includes externally associated controls and excludes nested controls owned elsewhere', () => {
+    document.body.innerHTML = `<form id="other"><input id="unrelated"></form>
+      <form id="login"><input id="misleading" form="other"><input type="password" id="p"></form>
+      <input id="u" form="login" autocomplete="section-login username">`;
+    expect(ids(input('p'))).toEqual(['u', 'p']);
+    expect(ids(input('u'))).toEqual(['u', 'p']);
+  });
+
+  test('explicit username after password outranks the preceding generic and email inputs', () => {
+    document.body.innerHTML = `<form><input id="email" type="email"><input id="generic">
+      <input id="p" type="password"><input id="u" autocomplete="SECTION-LOGIN USERNAME"></form>`;
+    expect(ids()).toEqual(['u', 'p']);
+  });
+
+  test.each(['disabled', 'readonly', 'type="hidden"', 'hidden', 'style="display:none"', 'style="visibility:hidden"'])(
+    'excludes ineligible %s inputs, including a preferred one', attribute => {
+      document.body.innerHTML = `<form><input id="bad" autocomplete="username" ${attribute}>
+        <input id="u"><input type="password" id="p"></form>`;
+      expect(ids()).toEqual(['u', 'p']);
+      expect(ids(input('bad'))).toEqual([null, null]);
+    },
+  );
+
+  test.each(['hidden', 'style="display:none"', 'style="visibility:hidden"'])(
+    'excludes a login hidden by ancestor %s', attribute => {
+      document.body.innerHTML = `<div ${attribute}><form><input id="bad-u"><input id="bad-p" type="password"></form></div>
+        <form><input id="u"><input id="p" type="password"></form>`;
+      expect(ids()).toEqual(['u', 'p']);
+      expect(ids(input('bad-p'))).toEqual([null, null]);
+    },
+  );
+
+  test('excludes disabled fieldset controls but keeps fixed-position inputs', () => {
+    document.body.innerHTML = `<fieldset disabled><input autocomplete="username" id="bad-u"><input type="password" id="bad-p"></fieldset>
+      <form style="position:fixed"><input id="u"><input type="password" id="p"></form>`;
+    expect(ids()).toEqual(['u', 'p']);
+    expect(ids(input('bad-p'))).toEqual([null, null]);
+  });
+
+  test('declines detached and foreign-document preferred inputs', () => {
+    document.body.innerHTML = `<input id="u" autocomplete="username"><input id="p" type="password">`;
+    const detached = input('p'); detached.remove();
+    expect(ids(detached)).toEqual([null, null]);
+    const other = document.implementation.createHTMLDocument();
+    other.body.innerHTML = '<input type="password">';
+    expect(ids(other.querySelector('input'))).toEqual([null, null]);
+  });
+
+  test('prefers current-password over new-password fields', () => {
+    document.body.innerHTML = `<form><input id="u" autocomplete="username">
+      <input id="next" type="password" autocomplete="new-password">
+      <input id="p" type="password" autocomplete="section-login current-password">
+      <input id="confirm" type="password" autocomplete="new-password"></form>`;
+    expect(ids()).toEqual(['u', 'p']);
+    expect(ids(input('u'))).toEqual(['u', 'p']);
+  });
+
+  test('focused password disambiguates unqualified same-owner passwords', () => {
+    document.body.innerHTML = `<form><input id="u" autocomplete="username">
+      <input id="p1" type="password"><input id="p2" type="password"></form>`;
+    expect(ids(input('p2'))).toEqual(['u', 'p2']);
+    expect(ids(input('u'))).toEqual([null, null]);
+    expect(ids()).toEqual([null, null]);
+  });
+
+  test('declines multiple unqualified form-less passwords', () => {
+    document.body.innerHTML = '<input id="u"><input id="p1" type="password"><input id="p2" type="password">';
+    expect(ids()).toEqual([null, null]);
+  });
+
+  test('form-less fallback never borrows a form-owned username', () => {
+    document.body.innerHTML = '<form><input id="u" autocomplete="username"></form><input type="password" id="p">';
+    expect(ids()).toEqual([null, 'p']);
+    expect(ids(input('p'))).toEqual([null, 'p']);
+  });
+
+  test('keeps username-only and password-only steps', () => {
+    document.body.innerHTML = '<form><input id="u" autocomplete="section-login username"></form>';
+    expect(ids()).toEqual(['u', null]);
+    document.body.innerHTML = '<form><input id="p" type="password"></form>';
+    expect(ids()).toEqual([null, 'p']);
+  });
+
+  test('declines ambiguous username-only contexts unless focused', () => {
+    document.body.innerHTML = '<form><input type="email" id="u1"></form><form><input type="email" id="u2"></form>';
+    expect(ids()).toEqual([null, null]);
+    expect(ids(input('u2'))).toEqual(['u2', null]);
+    document.body.innerHTML = '<input autocomplete="username" id="u1"><input autocomplete="username" id="u2">';
+    expect(ids()).toEqual([null, null]);
+    expect(ids(input('u2'))).toEqual(['u2', null]);
+  });
+
+  test('does not use a card or OTP input as the fallback username', () => {
+    document.body.innerHTML = '<form><input id="u"><input autocomplete="one-time-code"><input autocomplete="cc-name"><input id="p" type="password"></form>';
+    expect(ids()).toEqual(['u', 'p']);
+  });
+});

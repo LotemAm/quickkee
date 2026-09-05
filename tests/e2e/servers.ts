@@ -64,6 +64,28 @@ const LOGIN_PAGE = `<!doctype html><html><body>
 </form>
 </body></html>`;
 
+// Competing destinations deliberately have distinct values, including hidden controls.
+const LOGIN_FORM_SCOPE_PAGE = `<!doctype html><html><body>
+<h1>Choose account</h1>
+<form id="newsletter"><input id="newsletter-email" type="email" value="newsletter-before"></form>
+<form id="hidden-login" hidden>
+  <input id="hidden-user" autocomplete="username" value="hidden-user-before">
+  <input id="hidden-password" type="password" value="hidden-password-before">
+</form>
+<form id="first-login">
+  <input id="first-user" autocomplete="username" value="first-user-before">
+  <input id="first-password" type="password" autocomplete="current-password" value="first-password-before">
+  <button type="submit">Submit first login</button>
+</form>
+<form id="second-login">
+  <input id="second-unrelated" value="second-unrelated-before">
+  <input id="second-password" type="password" autocomplete="section-login current-password" value="second-password-before">
+  <input id="second-new-password" type="password" autocomplete="new-password" value="second-new-password-before">
+</form>
+<input id="second-user" form="second-login" autocomplete="section-login username" value="second-user-before">
+<div id="move-target"></div><script>document.getElementById("first-login").addEventListener("submit", event => event.preventDefault());</script>
+</body></html>`;
+
 const SINGLE_STEP_PAGE = `<!doctype html><html><body>
 <h1>Login</h1>
 <form>
@@ -238,6 +260,7 @@ export async function startHttpFixture() {
 <iframe id="unrelated" title="unrelated form" src="http://127.0.0.1:${port}/autofill-frame"></iframe>`));
     }
     else if (req.url === '/autofill-frame') res.end(autofillFramePage());
+    else if (req.url === '/login-form-scope') res.end(LOGIN_FORM_SCOPE_PAGE);
     else if (req.url === '/single') res.end(SINGLE_STEP_PAGE);
     else if (req.url === '/otp') res.end(OTP_PAGE);
     else if (req.url === '/totp-qr') res.end(TOTP_QR_PAGE);
@@ -261,6 +284,7 @@ export async function startHttpFixture() {
     port,
     url: `http://localhost:${port}/`,
     altUrl: `http://127.0.0.1:${port}/`,
+    loginFormScopeUrl: `http://localhost:${port}/login-form-scope`,
     singleUrl: `http://localhost:${port}/single`,
     otpUrl: `http://localhost:${port}/otp`,
     totpQrUrl: `http://localhost:${port}/totp-qr`,
