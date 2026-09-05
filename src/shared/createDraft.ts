@@ -1,4 +1,9 @@
 import type { PwGenOpts } from './pwgen';
+import type { TotpConfig } from '../background/totp';
+
+export type DraftSubmission =
+  | { status: 'creating' | 'unknown'; sessionKey: string }
+  | { status: 'created' | 'saved'; sessionKey: string; entryId: string };
 
 export interface CreateDraft {
   url: string;
@@ -9,6 +14,8 @@ export interface CreateDraft {
   entryUrl: string;
   opts: PwGenOpts;
   savedAt: number;
+  totp?: TotpConfig | null;
+  submission?: DraftSubmission;
 }
 
 const KEY = 'createDraft';
@@ -31,9 +38,11 @@ export async function loadDraft(url: string): Promise<CreateDraft | null> {
   return d && isFresh(d) ? d : null;
 }
 
-export async function saveDraft(d: CreateDraft): Promise<void> {
+export async function saveDraft(d: CreateDraft, isAlive: () => boolean = () => true): Promise<void> {
+  if (!isAlive()) return;
   const now = Date.now();
   const map = await loadMap();
+  if (!isAlive()) return;
   map[d.url] = { ...d, savedAt: now };
   const pruned = Object.fromEntries(
     Object.entries(map).filter(([, draft]) => now - draft.savedAt <= DRAFT_TTL_MS),
@@ -41,8 +50,10 @@ export async function saveDraft(d: CreateDraft): Promise<void> {
   await chrome.storage.session.set({ [KEY]: pruned });
 }
 
-export async function clearDraft(url: string): Promise<void> {
+export async function clearDraft(url: string, isAlive: () => boolean = () => true): Promise<void> {
+  if (!isAlive()) return;
   const map = await loadMap();
+  if (!isAlive()) return;
   delete map[url];
   await chrome.storage.session.set({ [KEY]: map });
 }

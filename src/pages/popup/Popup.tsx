@@ -37,15 +37,15 @@ export function Popup() {
   useVaultActivity(!locked);
   const [unlockNotice, setUnlockNotice] = useState('');
   useEffect(() => { void loadSettings().then(s => applyTheme(s.theme)); }, []);
-  if (locked) return <UnlockScreen onUnlocked={notice => {
+  if (locked || !sessionKey) return <UnlockScreen onUnlocked={notice => {
     setUnlockNotice(notice ?? '');
     void refresh();
   }} />;
-  return <UnlockedPopup key={sessionKey} dirty={dirty} refresh={refresh} unlockNotice={unlockNotice} />;
+  return <UnlockedPopup key={sessionKey} sessionKey={sessionKey} dirty={dirty} refresh={refresh} unlockNotice={unlockNotice} />;
 }
 
-function UnlockedPopup({ dirty, refresh, unlockNotice }: {
-  dirty: boolean; refresh: () => Promise<void>; unlockNotice: string;
+function UnlockedPopup({ dirty, refresh, unlockNotice, sessionKey }: {
+  sessionKey: string; dirty: boolean; refresh: () => Promise<void>; unlockNotice: string;
 }) {
   const captureLifetime = useSessionLifetime();
   const [entries, setEntries] = useState<EntryView[]>([]);
@@ -239,7 +239,7 @@ function UnlockedPopup({ dirty, refresh, unlockNotice }: {
             <button className="btn-secondary mb-2" onClick={() => setCreating(false)}>
               <X size={15} /> Cancel
             </button>
-            <CreateForm key={tab.url} url={tab.url} tabId={tab.id} groups={flattenGroups(tree)} defaultGroupId={rootGroup}
+            <CreateForm key={tab.url} sessionKey={sessionKey} url={tab.url} tabId={tab.id} groups={flattenGroups(tree)} defaultGroupId={rootGroup}
               clearSecs={clearSecs} pwgen={pwgen} scanPage={scanPageControl} onCreated={() => {
                 setCreating(false);
                 void reloadVaultData(tab.url);
@@ -255,7 +255,7 @@ function UnlockedPopup({ dirty, refresh, unlockNotice }: {
             {searching && shown.length === 0 &&
               <div className="empty-state mt-6">No entries match your search.</div>}
             {!searching && entries.length === 0 && tab && rootGroup && tree &&
-              <CreateForm key={tab.url} url={tab.url} tabId={tab.id} groups={flattenGroups(tree)} defaultGroupId={rootGroup}
+              <CreateForm key={tab.url} sessionKey={sessionKey} url={tab.url} tabId={tab.id} groups={flattenGroups(tree)} defaultGroupId={rootGroup}
                 clearSecs={clearSecs} pwgen={pwgen} scanPage={scanPageControl} onCreated={() =>
                 void reloadVaultData(tab.url)} />}
             {!searching && entries.length > 0 && tab && rootGroup && tree && (
