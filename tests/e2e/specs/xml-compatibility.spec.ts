@@ -239,7 +239,10 @@ test('production extension worker has no native XML globals before opening a vau
   // Two bounded builds (60s each), plus worker startup and observation.
   test.setTimeout(180_000);
   const yarn = process.platform === 'win32' ? 'yarn.cmd' : 'yarn';
-  const build = (script: string) => execFileSync(yarn, [script], { cwd: process.cwd(), windowsHide: true, timeout: 60_000 });
+  // Windows command shims require cmd.exe; these build script names are fixed below.
+  const build = (script: 'build:production' | 'build:chrome:test') => execFileSync(yarn, [script], {
+    cwd: process.cwd(), windowsHide: true, timeout: 60_000, shell: process.platform === 'win32',
+  });
   try {
     build('build:production');
     const extension = resolve('dist_chrome');
