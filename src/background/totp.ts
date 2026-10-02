@@ -107,7 +107,7 @@ export function toOtpUri(config: TotpConfig): string {
   return uri;
 }
 
-function decodeBase32(secret: string): Uint8Array {
+function decodeBase32(secret: string): Uint8Array<ArrayBuffer> {
   let value = 0;
   let bits = 0;
   const bytes: number[] = [];

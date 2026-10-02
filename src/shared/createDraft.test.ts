@@ -65,7 +65,7 @@ test('expired entry returns null and is pruned on next save', async () => {
 
   await saveDraft(draft(newUrl));
 
-  const got = await chrome.storage.session.get('createDraft');
+  const got = await chrome.storage.session.get<{ createDraft: Record<string, CreateDraft> }>('createDraft');
   expect(got.createDraft[oldUrl]).toBeUndefined();
   expect(await loadDraft(newUrl)).toMatchObject({ url: newUrl });
 });

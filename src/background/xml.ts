@@ -1,16 +1,9 @@
-import { DOMParser } from '@xmldom/xmldom';
+import { DOMParser, onWarningStopParsing } from '@xmldom/xmldom';
 
-// 0.8.15 documents this option in lib/dom-parser.js but omits it from Options.
-const parserOptions: ConstructorParameters<typeof DOMParser>[0] & {
-  normalizeLineEndings: (source: string) => string;
-} = {
+const parserOptions: ConstructorParameters<typeof DOMParser>[0] = {
   // Preserve CR/CRLF/NEL/LS in vault values written by xmldom 0.7.13.
   normalizeLineEndings: source => source,
-  errorHandler: {
-    warning: (error: unknown) => { throw error; },
-    error: (error: unknown) => { throw error; },
-    fatalError: (error: unknown) => { throw error; },
-  },
+  onError: onWarningStopParsing,
 };
 
 class KdbxDOMParser extends DOMParser {
@@ -22,6 +15,7 @@ class KdbxDOMParser extends DOMParser {
 /** Keep native DOM environments unchanged; workers use the configured parser for their lifetime. */
 export function registerXmlParser(): void {
   if (typeof globalThis.DOMParser === 'undefined') {
-    globalThis.DOMParser = KdbxDOMParser;
+    // kdbxweb uses the XML subset; xmldom does not implement the browser's full DOM.
+    globalThis.DOMParser = KdbxDOMParser as unknown as typeof globalThis.DOMParser;
   }
 }

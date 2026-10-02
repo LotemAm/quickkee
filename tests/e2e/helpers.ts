@@ -221,11 +221,14 @@ async function withClosedHostNodes<T>(page: Page, hostAttribute: string, run: Wi
   const client = await page.context().newCDPSession(page);
   try {
     await client.send('DOM.enable');
-    const documentResult = await client.send('DOM.getDocument', { depth: -1, pierce: true }) as unknown as { root: CdpNode };
-    const nodes = descendants(documentResult.root);
-    const host = nodes.find(node => attribute(node, hostAttribute) === 'true');
-    if (!host) throw new Error(`QuickKee host ${hostAttribute} not found`);
-    return await run(descendants(host), client);
+    let host: CdpNode | undefined;
+    // Content scripts attach their closed shadow hosts asynchronously after focus/submit.
+    await expect.poll(async () => {
+      const documentResult = await client.send('DOM.getDocument', { depth: -1, pierce: true }) as unknown as { root: CdpNode };
+      host = descendants(documentResult.root).find(node => attribute(node, hostAttribute) === 'true');
+      return Boolean(host);
+    }, { message: `QuickKee host ${hostAttribute} should attach` }).toBe(true);
+    return await run(descendants(host!), client);
   } finally { await client.detach(); }
 }
 
