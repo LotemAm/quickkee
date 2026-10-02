@@ -27,7 +27,7 @@ export class QuickUnlockCryptoError extends Error {
   }
 }
 
-function decode(value: unknown, expectedLength?: number): Uint8Array {
+function decode(value: unknown, expectedLength?: number): Uint8Array<ArrayBuffer> {
   if (typeof value !== 'string') throw new QuickUnlockCryptoError();
   try {
     const bytes = base64UrlToBytes(value);
@@ -67,14 +67,14 @@ export function assertQuickUnlockRecord(value: unknown): QuickUnlockRecord {
   return record as QuickUnlockRecord;
 }
 
-function aad(record: Pick<QuickUnlockRecord, 'version' | 'credentialId' | 'source'>): Uint8Array {
+function aad(record: Pick<QuickUnlockRecord, 'version' | 'credentialId' | 'source'>): Uint8Array<ArrayBuffer> {
   const source = record.source.kind === 'local'
     ? ['local', record.source.label]
     : ['cloud', record.source.provider, record.source.fileId, record.source.label];
   return new TextEncoder().encode(JSON.stringify([record.version, record.credentialId, source]));
 }
 
-async function deriveKey(prfOutput: Uint8Array, salt: Uint8Array): Promise<CryptoKey> {
+async function deriveKey(prfOutput: Uint8Array, salt: Uint8Array<ArrayBuffer>): Promise<CryptoKey> {
   if (prfOutput.byteLength !== PRF_BYTES || salt.byteLength !== SALT_BYTES) throw new QuickUnlockCryptoError();
   const copy = new Uint8Array(prfOutput);
   try {
@@ -90,7 +90,7 @@ async function deriveKey(prfOutput: Uint8Array, salt: Uint8Array): Promise<Crypt
   finally { copy.fill(0); }
 }
 
-function materialPayload(material: QuickUnlockMaterial): Uint8Array {
+function materialPayload(material: QuickUnlockMaterial): Uint8Array<ArrayBuffer> {
   if (material.password === null && material.keyFile === null) throw new QuickUnlockCryptoError('empty unlock material');
   if (material.password !== null && typeof material.password !== 'string') throw new QuickUnlockCryptoError();
   return new TextEncoder().encode(JSON.stringify({

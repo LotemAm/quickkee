@@ -7,16 +7,16 @@ vi.mock('./clipboard', () => ({ copyWithClear: vi.fn() }));
 vi.mock('./messages', () => ({ sendToSW: vi.fn().mockResolvedValue({ ok: true }) }));
 
 const writeTextMock = vi.fn().mockResolvedValue(undefined);
-(globalThis as unknown as { navigator: unknown }).navigator = {
-  clipboard: { writeText: writeTextMock, readText: vi.fn().mockResolvedValue('') },
-};
 
 beforeEach(() => {
+  vi.stubGlobal('navigator', {
+    clipboard: { writeText: writeTextMock, readText: vi.fn().mockResolvedValue('') },
+  });
   vi.useFakeTimers();
   writeTextMock.mockClear();
   vi.mocked(sendToSW).mockClear();
 });
-afterEach(() => { vi.useRealTimers(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 test('starts with null state', () => {
   const { result } = renderHook(() => useClipboardTimer(30));
