@@ -327,3 +327,16 @@ test('upload succeeds when rev still matches', async () => {
   const res = await new GDriveProvider(token).upload('d1', bytes, 'h2');
   expect(res).toEqual({ ok: true, rev: 'h3' });
 });
+
+test('createFile posts multipart metadata and bytes', async () => {
+  mockSequence((url, init) => {
+    expect(url).toBe('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,headRevisionId');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer TOKEN' });
+    expect((init.headers as Record<string, string>)['Content-Type']).toMatch(/^multipart\/related; boundary=quickkee-/);
+    expect(init.body).toBeInstanceOf(Blob);
+    return new Response(JSON.stringify({ id: 'd1', name: 'new.kdbx', headRevisionId: 'h1' }), { status: 200 });
+  });
+  expect(await new GDriveProvider(token).createFile('new.kdbx', new Uint8Array([7]).buffer))
+    .toEqual({ fileId: 'd1', name: 'new.kdbx', rev: 'h1' });
+});

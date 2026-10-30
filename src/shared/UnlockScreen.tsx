@@ -5,6 +5,7 @@ import { pickAndStoreDb, pickKeyFile, readStoredKeyBytes } from './pickFile';
 import { loadHandle, ensurePermission, loadKeyHandle, clearKeyHandle, loadLastCloud, saveLastCloud, clearLastCloud } from '../background/fileHandle';
 import { CloudConnect } from './CloudConnect';
 import { IconTooltipButton } from './IconTooltipButton';
+import { CreateDatabase } from './CreateDatabase';
 import type { RemoteFile } from '../background/sources/cloudProvider';
 import {
   createDeviceCredential,
@@ -53,7 +54,9 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: (notice?: string) => 
   const [picked, setPicked] = useState<RemoteFile | null>(null);
   const [dbName, setDbName] = useState<string | null>(null);
   const [useKey, setUseKey] = useState(false);
+  const [keySrc, setKeySrc] = useState<'local' | 'dropbox' | 'gdrive'>('local');
   const [keyName, setKeyName] = useState<string | null>(null);
+  const [pickedKey, setPickedKey] = useState<RemoteFile | null>(null);
   const [pwd, setPwd] = useState('');
   const [err, setErr] = useState('');
   const [cloudErr, setCloudErr] = useState(false); // open failed for a non-credential reason (likely auth)
@@ -63,6 +66,7 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: (notice?: string) => 
   const [setupQuickUnlock, setSetupQuickUnlock] = useState(false);
   const [quickBusy, setQuickBusy] = useState(false);
   const [quickErr, setQuickErr] = useState('');
+  const [creatingDatabase, setCreatingDatabase] = useState(false);
   useEffect(() => { void loadHandle().then(h => setDbName(h?.name ?? null)); }, []);
   // Auto-select the last loaded cloud database, if any.
   useEffect(() => {
@@ -86,9 +90,10 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: (notice?: string) => 
     });
   }, []);
 
+  const hasKey = useKey && (keySrc === 'local' ? !!keyName : pickedKey !== null);
   const canUnlock = src !== 'local'
-    ? (picked !== null) && ((pwd.length > 0) || (useKey && !!keyName))
-    : (pwd.length > 0) || (useKey && !!keyName);
+    ? (picked !== null) && ((pwd.length > 0) || hasKey)
+    : (pwd.length > 0) || hasKey;
   const selectedSource: QuickUnlockSourceIdentity | null = src === 'local'
     ? dbName ? { kind: 'local', label: dbName } : null
     : picked ? { kind: 'cloud', provider: src, fileId: picked.fileId } : null;
@@ -100,7 +105,11 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: (notice?: string) => 
     let unlockNotice: string | undefined;
     try {
       if (useKey) {
-        keyBytes = await readStoredKeyBytes();
+        if (keySrc === 'local') keyBytes = await readStoredKeyBytes();
+        else {
+          const remoteKey = await sendToSW({ type: 'readRemoteFile', provider: keySrc, fileId: pickedKey!.fileId });
+          keyBytes = remoteKey.ok ? remoteKey.bytes : null;
+        }
         if (!keyBytes) { setErr('Re-select the key file'); return; }
       }
       if (src === 'local') {
@@ -185,6 +194,10 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: (notice?: string) => 
     finally { output?.fill(0); setQuickBusy(false); }
   }
 
+  if (creatingDatabase) {
+    return <CreateDatabase onCancel={() => setCreatingDatabase(false)} onCreated={() => onUnlocked()} />;
+  }
+
   return (
     <div className="p-4">
       <div className="card space-y-3">
@@ -229,11 +242,32 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: (notice?: string) => 
         <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-muted)' }}>
           <input type="checkbox" checked={useKey} onChange={e => {
             setUseKey(e.target.checked);
-            if (!e.target.checked) { setKeyName(null); void clearKeyHandle(); }
+            if (!e.target.checked && keySrc === 'local') { setKeyName(null); void clearKeyHandle(); }
           }} /> Use key file
         </label>
-        {useKey && <button className="btn w-full" onClick={async () => { try { setKeyName(await pickKeyFile()); } catch (e) { if ((e as DOMException).name !== 'AbortError') throw e; } }}>
-          <KeyRound size={15} /> {keyName ? `Key file: ${keyName}` : 'Choose key file…'}</button>}
+        {useKey && <>
+          <div className="source-picker" role="tablist" aria-label="Key file location">
+            <button role="tab" aria-selected={keySrc === 'local'} onClick={() => { setKeySrc('local'); setPickedKey(null); setErr(''); }}>
+              <HardDrive size={17} /> Local file
+            </button>
+            <button role="tab" aria-selected={keySrc === 'dropbox'} onClick={() => { setKeySrc('dropbox'); setPickedKey(null); setErr(''); }}>
+              <Box size={17} /> Dropbox
+            </button>
+            <button role="tab" aria-selected={keySrc === 'gdrive'} onClick={() => { setKeySrc('gdrive'); setPickedKey(null); setErr(''); }}>
+              <Cloud size={17} /> Google Drive
+            </button>
+          </div>
+          {keySrc === 'local' && <button className="btn w-full" onClick={async () => { try { setKeyName(await pickKeyFile()); } catch (e) { if ((e as DOMException).name !== 'AbortError') throw e; } }}>
+            <KeyRound size={15} /> {keyName ? `Key file: ${keyName}` : 'Choose key file…'}</button>}
+          {keySrc !== 'local' && !pickedKey && <CloudConnect provider={keySrc} fileKind="key" onPicked={setPickedKey} />}
+          {keySrc !== 'local' && pickedKey && (
+            <div className="picked-file">
+              <KeyRound size={15} />
+              <span className="picked-name">{pickedKey.name}</span>
+              <button className="link-btn" onClick={() => setPickedKey(null)}>Change</button>
+            </div>
+          )}
+        </>}
         <div className="flex gap-2">
           {/* eslint-disable-next-line jsx-a11y/no-autofocus -- intentional: the unlock screen focuses its primary input */}
           <input type="password" className="input min-w-0 flex-1" placeholder="Master password" value={pwd} autoFocus
@@ -275,6 +309,9 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: (notice?: string) => 
             </IconTooltipButton>
           )}
         </div>
+        <button type="button" className="link-btn mx-auto block" onClick={() => setCreatingDatabase(true)}>
+          Create a new database
+        </button>
       </div>
     </div>
   );

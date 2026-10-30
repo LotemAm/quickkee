@@ -26,8 +26,13 @@ export interface CredentialPromptMetadata {
   retry?: boolean;
 }
 
+export type StorageDestination =
+  | { kind: 'local' }
+  | { kind: 'cloud'; provider: 'dropbox' | 'gdrive'; fileName: string };
+
 export type Request =
   | { type: 'unlock'; password: string | null; keyFile: number[] | null }
+  | { type: 'createDatabase'; destination: StorageDestination; password: string; keyDestination?: StorageDestination }
   | { type: 'lock' }
   | { type: 'vaultActivity' }
   | { type: 'getStatus' }
@@ -58,6 +63,8 @@ export type Request =
   | { type: 'connectCloud'; provider: 'dropbox' | 'gdrive' }
   | { type: 'getCloudConnectionStatus' }
   | { type: 'listRemoteFiles'; provider: 'dropbox' | 'gdrive' }
+  | { type: 'listRemoteKeyFiles'; provider: 'dropbox' | 'gdrive' }
+  | { type: 'readRemoteFile'; provider: 'dropbox' | 'gdrive'; fileId: string }
   | { type: 'openRemote'; provider: 'dropbox' | 'gdrive'; fileId: string; fileName: string; password: string | null; keyFile: number[] | null }
   | { type: 'getSyncStatus' }
   | { type: 'disconnectCloud'; provider: 'dropbox' | 'gdrive'; removeQuickUnlock?: boolean }
@@ -93,6 +100,7 @@ export type Err = { ok: false; error: string };
 // payload shape the router returns for it (see plans/010 for the source table).
 type OkFor = {
   unlock: Ok;
+  createDatabase: Ok;
   lock: Ok;
   vaultActivity: Ok;
   updateEntry: Ok;
@@ -136,6 +144,8 @@ type OkFor = {
   openRemote: Ok<{ merged?: boolean }>;
   generatePassword: Ok<{ password: string }>;
   listRemoteFiles: Ok<{ files: RemoteFile[] }>;
+  listRemoteKeyFiles: Ok<{ files: RemoteFile[] }>;
+  readRemoteFile: Ok<{ bytes: number[] }>;
   getSyncStatus: Ok<{ source: DbSource['kind'] | null; provider?: 'dropbox' | 'gdrive'; pendingUpload: boolean; online: boolean; lastSyncedAt?: number }>;
 };
 // Compile-time exhaustiveness: every Request type must appear in OkFor.

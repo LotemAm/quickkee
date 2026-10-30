@@ -15,6 +15,14 @@ export class GDriveProvider implements CloudProvider {
   async auth(): Promise<void> { await this.getToken(); }
 
   async listKdbxFiles(): Promise<RemoteFile[]> {
+    return (await this.listFiles()).filter(file => file.name.toLowerCase().endsWith('.kdbx'));
+  }
+
+  async listKeyFiles(): Promise<RemoteFile[]> {
+    return (await this.listFiles()).filter(file => file.name.toLowerCase().endsWith('.key'));
+  }
+
+  private async listFiles(): Promise<RemoteFile[]> {
     const q = encodeURIComponent("trashed = false and mimeType != 'application/vnd.google-apps.folder'");
     const url = `${API}/files?q=${q}&fields=${encodeURIComponent('nextPageToken,files(id,name,headRevisionId)')}`;
     const files: RemoteFile[] = [];
@@ -37,9 +45,7 @@ export class GDriveProvider implements CloudProvider {
             || (file.headRevisionId !== undefined && typeof file.headRevisionId !== 'string')) {
             throw new Error('gdriveList');
           }
-          if (file.name.toLowerCase().endsWith('.kdbx')) {
-            files.push({ fileId: file.id, name: file.name, rev: file.headRevisionId ?? '' });
-          }
+          files.push({ fileId: file.id, name: file.name, rev: file.headRevisionId ?? '' });
         }
         if (!data.nextPageToken) return files;
         pageToken = data.nextPageToken;
@@ -89,5 +95,29 @@ export class GDriveProvider implements CloudProvider {
     if (!res.ok) throw new Error('gdriveUpload');
     const data = await res.json() as { headRevisionId: string };
     return { ok: true, rev: data.headRevisionId };
+  }
+
+  async createFile(name: string, bytes: ArrayBuffer): Promise<RemoteFile> {
+    const boundary = `quickkee-${crypto.randomUUID()}`;
+    const body = new Blob([
+      `--${boundary}\r\n`,
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n',
+      JSON.stringify({ name }),
+      `\r\n--${boundary}\r\n`,
+      'Content-Type: application/octet-stream\r\n\r\n',
+      bytes,
+      `\r\n--${boundary}--`,
+    ]);
+    const res = await fetch(`${UPLOAD}/files?uploadType=multipart&fields=id,name,headRevisionId`, {
+      method: 'POST',
+      headers: { ...(await this.authHeader()), 'Content-Type': `multipart/related; boundary=${boundary}` },
+      body,
+    });
+    if (!res.ok) throw new Error('gdriveCreate');
+    const data = await res.json() as { id?: unknown; name?: unknown; headRevisionId?: unknown };
+    if (typeof data.id !== 'string' || typeof data.name !== 'string' || typeof data.headRevisionId !== 'string') {
+      throw new Error('gdriveCreate');
+    }
+    return { fileId: data.id, name: data.name, rev: data.headRevisionId };
   }
 }

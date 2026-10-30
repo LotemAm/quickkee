@@ -27,6 +27,25 @@ function bytesOf(text: string): ArrayBuffer {
   return ab;
 }
 
+test('createEmpty creates a password-protected empty database without opening a vault', async () => {
+  const bytes = await Vault.createEmpty('new vault password', null);
+  const vault = new Vault();
+  await vault.open(bytes, 'new vault password', null);
+  expect(vault.isOpen()).toBe(true);
+  expect(vault.getTree().entries).toEqual([]);
+  vault.lock();
+  await expect(new Vault().open(bytes, 'wrong password', null)).rejects.toSatisfy(isInvalidKey);
+});
+
+test('createEmpty requires the generated key file as well as its password', async () => {
+  const key = crypto.getRandomValues(new Uint8Array(32));
+  const bytes = await Vault.createEmpty('new vault password', key.buffer.slice(0));
+  const vault = new Vault();
+  await vault.open(bytes, 'new vault password', key.buffer.slice(0));
+  expect(vault.isOpen()).toBe(true);
+  await expect(new Vault().open(bytes, 'new vault password', null)).rejects.toSatisfy(isInvalidKey);
+});
+
 test('Notes read returns exact text without changing vault state or broad projections', async () => {
   const v = new Vault(); await v.open(fixture(), 'correct horse', null);
   const id = v.entriesForUrl('https://github.com')[0].id;

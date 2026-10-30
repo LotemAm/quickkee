@@ -70,6 +70,13 @@ async function enterPasswordAndUnlock() {
 }
 
 describe('device quick unlock UI', () => {
+  test('offers database creation from the locked screen', async () => {
+    render(<UnlockScreen onUnlocked={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Create a new database' }));
+    expect(screen.getByRole('heading', { name: 'New database' })).toBeVisible();
+    expect(screen.getByText('Save database to')).toBeVisible();
+  });
+
   test('shows quick unlock beside the password as an off-by-default toggle with a tooltip', async () => {
     render(<UnlockScreen onUnlocked={vi.fn()} />);
     expect(await screen.findByRole('button', { name: 'Unlock' })).toBeVisible();

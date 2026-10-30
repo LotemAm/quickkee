@@ -8,6 +8,17 @@ export async function pickAndStoreDb(): Promise<string> {
   await ensurePermission(handle, 'readwrite');
   await saveHandle(handle); return handle.name;
 }
+
+/** Pick a destination for a new database and retain its handle for the worker. */
+export async function pickAndStoreNewDb(): Promise<string> {
+  // @ts-expect-error experimental
+  const h = await window.showSaveFilePicker({
+    suggestedName: 'QuickKee.kdbx',
+    types: [{ description: 'KeePass', accept: { 'application/octet-stream': ['.kdbx'] } }],
+  });
+  await ensurePermission(h, 'readwrite');
+  await saveHandle(h); return h.name;
+}
 // Pick a key file and persist its handle (a reference to the file, not its bytes).
 // The name is shown in the UI; bytes are re-read on demand at unlock time.
 export async function pickKeyFile(): Promise<string> {
@@ -16,6 +27,17 @@ export async function pickKeyFile(): Promise<string> {
   await ensurePermission(h, 'read');
   await saveKeyHandle(h);
   return h.name as string;
+}
+
+/** Pick a destination for a generated key file and retain only its handle. */
+export async function pickAndStoreNewKeyFile(): Promise<string> {
+  // @ts-expect-error experimental
+  const h = await window.showSaveFilePicker({
+    suggestedName: 'QuickKee.key',
+    types: [{ description: 'KeePass key file', accept: { 'application/octet-stream': ['.key'] } }],
+  });
+  await ensurePermission(h, 'readwrite');
+  await saveKeyHandle(h); return h.name;
 }
 
 // Re-read bytes from the stored key-file handle. Returns null if no handle is

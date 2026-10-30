@@ -47,6 +47,14 @@ export class Vault {
   private version = 0;
   dirty = false;
 
+  /** Create encrypted bytes without changing the currently open vault. */
+  static async createEmpty(password: string, keyFile: ArrayBuffer | null): Promise<ArrayBuffer> {
+    registerArgon2();
+    registerXmlParser();
+    const credentials = new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString(password), keyFile);
+    return kdbxweb.Kdbx.create(credentials, 'QuickKee').save();
+  }
+
   /** Live mutations are independent of lifecycle identity and persisted KeePass times. */
   get mutationVersion(): number { return this.version; }
   private markMutation(): void { ++this.version; this.dirty = true; }

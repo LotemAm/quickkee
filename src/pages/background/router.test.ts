@@ -216,6 +216,35 @@ describe('unlock', () => {
   });
 });
 
+describe('createDatabase', () => {
+  test('creates, persists, and opens a new local database', async () => {
+    const { ctx, handle_ } = makeCtx();
+    const handle = fakeHandle('new.kdbx');
+    let saved: ArrayBuffer | null = null;
+    vi.mocked(loadHandle).mockResolvedValue(handle);
+    vi.mocked(ensurePermission).mockResolvedValue(true);
+    vi.mocked(writeBytes).mockImplementation(async (_handle, bytes) => { saved = bytes.slice(0); });
+    vi.mocked(readBytes).mockImplementation(async () => saved!);
+
+    expect(await handle_({ type: 'createDatabase', destination: { kind: 'local' }, password: 'new vault password' }))
+      .toEqual({ ok: true });
+    expect(saved).not.toBeNull();
+    expect(ctx.vault.isOpen()).toBe(true);
+    expect(ctx.getHandle()).toBe(handle);
+    expect(ctx.getCurrentSource()).toEqual({ kind: 'local', handleId: 'db' });
+    expect(ctx.vault.getTree().entries).toEqual([]);
+    ctx.autolock.disarm();
+  });
+
+  test('rejects creation while another database is open', async () => {
+    const { ctx, handle_ } = makeCtx();
+    await unlockHappyPath(handle_);
+    expect(await handle_({ type: 'createDatabase', destination: { kind: 'local' }, password: 'new vault password' }))
+      .toEqual({ ok: false, error: 'databaseAlreadyOpen' });
+    ctx.autolock.disarm();
+  });
+});
+
 describe('open and save cancellation', () => {
   test.each(['handle', 'permission', 'read'] as const)('unlock captures validity before the %s await', async phase => {
     const { ctx, handle_ } = makeCtx();

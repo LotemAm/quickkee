@@ -15,6 +15,14 @@ export class DropboxProvider implements CloudProvider {
   async auth(): Promise<void> { await this.getToken(); }
 
   async listKdbxFiles(): Promise<RemoteFile[]> {
+    return (await this.listFiles()).filter(file => file.name.toLowerCase().endsWith('.kdbx'));
+  }
+
+  async listKeyFiles(): Promise<RemoteFile[]> {
+    return (await this.listFiles()).filter(file => file.name.toLowerCase().endsWith('.key'));
+  }
+
+  private async listFiles(): Promise<RemoteFile[]> {
     const files: RemoteFile[] = [];
     let cursor: string | undefined;
     while (true) {
@@ -43,9 +51,7 @@ export class DropboxProvider implements CloudProvider {
           if (typeof entry.id !== 'string' || !entry.id || (entry.rev !== undefined && typeof entry.rev !== 'string')) {
             throw new Error('dropboxList');
           }
-          if (entry.name.toLowerCase().endsWith('.kdbx')) {
-            files.push({ fileId: entry.id, name: entry.name, rev: entry.rev ?? '' });
-          }
+          files.push({ fileId: entry.id, name: entry.name, rev: entry.rev ?? '' });
         }
         if (!data.has_more) return files;
         cursor = data.cursor;
@@ -93,5 +99,23 @@ export class DropboxProvider implements CloudProvider {
     if (!res.ok) throw new Error('dropboxUpload');
     const data = await res.json() as { rev: string };
     return { ok: true, rev: data.rev };
+  }
+
+  async createFile(name: string, bytes: ArrayBuffer): Promise<RemoteFile> {
+    const res = await fetch(`${CONTENT}/files/upload`, {
+      method: 'POST',
+      headers: {
+        ...(await this.authHeader()),
+        'Content-Type': 'application/octet-stream',
+        'Dropbox-API-Arg': JSON.stringify({ path: `/${name}`, mode: 'add', autorename: false, mute: true }),
+      },
+      body: bytes,
+    });
+    if (!res.ok) throw new Error('dropboxCreate');
+    const data = await res.json() as { id?: unknown; name?: unknown; rev?: unknown };
+    if (typeof data.id !== 'string' || typeof data.name !== 'string' || typeof data.rev !== 'string') {
+      throw new Error('dropboxCreate');
+    }
+    return { fileId: data.id, name: data.name, rev: data.rev };
   }
 }

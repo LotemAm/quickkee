@@ -52,3 +52,10 @@ test('listKdbxFiles lists set files', async () => {
   const files = await p.listKdbxFiles();
   expect(files).toEqual([{ fileId: 'f1', name: 'a.kdbx', rev: 'r1' }]);
 });
+
+test('createFile returns a new file that can be downloaded', async () => {
+  const p = new FakeCloudProvider();
+  const created = await p.createFile('new.kdbx', buf(9));
+  expect(created).toMatchObject({ fileId: expect.any(String), name: 'new.kdbx', rev: expect.any(String) });
+  expect(new Uint8Array((await p.download(created.fileId)).bytes)).toEqual(new Uint8Array([9]));
+});

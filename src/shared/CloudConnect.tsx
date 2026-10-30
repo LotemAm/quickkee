@@ -3,9 +3,10 @@ import { Cloud, FileKey } from 'lucide-react';
 import { sendToSW } from './messages';
 import type { RemoteFile } from '../background/sources/cloudProvider';
 
-export function CloudConnect({ provider, onPicked }: {
+export function CloudConnect({ provider, onPicked, fileKind = 'database' }: {
   provider: 'dropbox' | 'gdrive';
   onPicked: (file: RemoteFile) => void;
+  fileKind?: 'database' | 'key';
 }) {
   const [files, setFiles] = useState<RemoteFile[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -18,7 +19,7 @@ export function CloudConnect({ provider, onPicked }: {
     try {
       const c = await sendToSW({ type: 'connectCloud', provider });
       if (!c.ok) { setError('Could not connect. Try again.'); return; }
-      const r = await sendToSW({ type: 'listRemoteFiles', provider });
+      const r = await sendToSW({ type: fileKind === 'database' ? 'listRemoteFiles' : 'listRemoteKeyFiles', provider });
       if (r.ok) setFiles(r.files);
       else setError('Could not list files.');
     } finally {
@@ -36,7 +37,7 @@ export function CloudConnect({ provider, onPicked }: {
             </button>
           </li>
         ))}
-        {files.length === 0 && <li className="cloud-file-empty">No .kdbx files found.</li>}
+        {files.length === 0 && <li className="cloud-file-empty">No {fileKind === 'database' ? '.kdbx' : '.key'} files found.</li>}
       </ul>
     );
   }

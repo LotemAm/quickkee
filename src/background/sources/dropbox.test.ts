@@ -158,3 +158,18 @@ test('upload 409 conflict returns conflict result', async () => {
   const res = await new DropboxProvider(token).upload('id:1', new Uint8Array([9]).buffer, 'stale');
   expect(res).toEqual({ ok: false, conflict: true });
 });
+
+test('createFile uploads a new root file without autorenaming it', async () => {
+  const bytes = new Uint8Array([9]).buffer;
+  mockFetch((url, init) => {
+    expect(url).toBe('https://content.dropboxapi.com/2/files/upload');
+    expect(init).toMatchObject({ method: 'POST', body: bytes });
+    expect(init.headers).toEqual({
+      Authorization: 'Bearer TOKEN',
+      'Content-Type': 'application/octet-stream',
+      'Dropbox-API-Arg': JSON.stringify({ path: '/new.kdbx', mode: 'add', autorename: false, mute: true }),
+    });
+    return new Response(JSON.stringify({ id: 'id:new', name: 'new.kdbx', rev: 'r1' }), { status: 200 });
+  });
+  expect(await new DropboxProvider(token).createFile('new.kdbx', bytes)).toEqual({ fileId: 'id:new', name: 'new.kdbx', rev: 'r1' });
+});

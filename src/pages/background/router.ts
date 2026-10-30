@@ -1,6 +1,6 @@
 import { Vault, isInvalidKey } from '../../background/vault';
 import { AutoLock } from '../../background/autolock';
-import { loadHandle, ensurePermission, hasPermission, readBytes, writeBytes } from '../../background/fileHandle';
+import { loadHandle, ensurePermission, hasPermission, loadKeyHandle, readBytes, writeBytes } from '../../background/fileHandle';
 import { loadSettings } from '../../shared/settings';
 import { generatePassword, DEFAULT_PWGEN } from '../../shared/pwgen';
 import { urlMatches } from '../../background/matcher';
@@ -149,6 +149,78 @@ async function openCloudVault(
   return outcome;
 }
 
+function validCreateName(name: string, extension: '.kdbx' | '.key'): boolean {
+  return name.length > extension.length && name.toLowerCase().endsWith(extension)
+    && !/[\\/:*?"<>|]/.test(name) && name === name.trim();
+}
+
+async function createDatabase(ctx: SwContext, req: Extract<Request, { type: 'createDatabase' }>): Promise<Response> {
+  if (ctx.vault.isOpen()) return { ok: false, error: 'databaseAlreadyOpen' };
+  if (!req.password) return { ok: false, error: 'passwordRequired' };
+  if (req.destination.kind === 'cloud' && !validCreateName(req.destination.fileName, '.kdbx')) {
+    return { ok: false, error: 'invalidDatabaseName' };
+  }
+  if (req.keyDestination?.kind === 'cloud' && !validCreateName(req.keyDestination.fileName, '.key')) {
+    return { ok: false, error: 'invalidKeyFileName' };
+  }
+
+  const opening = captureOpen(ctx);
+  let keyBytes: Uint8Array | null = null;
+  let databaseBytes: ArrayBuffer | null = null;
+  try {
+    if (req.destination.kind === 'cloud' && !await cloudConnected(ctx, req.destination.provider)) {
+      return { ok: false, error: 'authRequired' };
+    }
+    if (req.keyDestination?.kind === 'cloud' && !await cloudConnected(ctx, req.keyDestination.provider)) {
+      return { ok: false, error: 'authRequired' };
+    }
+    opening.guard();
+    keyBytes = req.keyDestination ? crypto.getRandomValues(new Uint8Array(32)) : null;
+    const keyFile = keyBytes
+      ? keyBytes.buffer.slice(keyBytes.byteOffset, keyBytes.byteOffset + keyBytes.byteLength) as ArrayBuffer
+      : null;
+    databaseBytes = await Vault.createEmpty(req.password, keyFile);
+    opening.guard();
+
+    let localHandle: FileSystemFileHandle | null = null;
+    let cloudSource: CloudFileSource | null = null;
+    if (req.destination.kind === 'local') {
+      localHandle = await loadHandle();
+      opening.guard();
+      if (!localHandle || !await ensurePermission(localHandle, 'readwrite')) return { ok: false, error: 'databaseLocationRequired' };
+      opening.guard();
+      await writeBytes(localHandle, databaseBytes);
+    } else {
+      const created = await providerFor(req.destination.provider).createFile(req.destination.fileName, databaseBytes);
+      cloudSource = { kind: 'cloud', provider: req.destination.provider, fileId: created.fileId, basedOnRev: created.rev };
+    }
+    opening.guard();
+
+    if (req.keyDestination && keyBytes) {
+      if (req.keyDestination.kind === 'local') {
+        const keyHandle = await loadKeyHandle();
+        opening.guard();
+        if (!keyHandle || !await ensurePermission(keyHandle, 'readwrite')) return { ok: false, error: 'keyFileLocationRequired' };
+        opening.guard();
+        await writeBytes(keyHandle, keyFile!);
+      } else {
+        await providerFor(req.keyDestination.provider).createFile(req.keyDestination.fileName, keyFile!);
+      }
+      opening.guard();
+    }
+
+    if (localHandle) await openLocalVault(ctx, localHandle, req.password, keyFile, opening);
+    else if (cloudSource) await openCloudVault(ctx, cloudSource, req.password, keyFile, opening);
+    else throw new Error('no destination');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: `createFailed: ${e instanceof Error ? e.message : String(e)}` };
+  } finally {
+    keyBytes?.fill(0);
+    if (databaseBytes) new Uint8Array(databaseBytes).fill(0);
+  }
+}
+
 function sourceMatchesActive(source: QuickUnlockSource, ctx: SwContext): boolean {
   const active = ctx.getCurrentSource();
   let selected: QuickUnlockSourceIdentity | null = null;
@@ -291,6 +363,8 @@ export function makeRouter(ctx: SwContext) {
         } finally { keyBytes?.fill(0); req.keyFile?.fill(0); }
         return { ok: true };
       }
+      case 'createDatabase':
+        return createDatabase(ctx, req);
       case 'lock': ctx.doLock(); return { ok: true };
       case 'getStatus':
         return { ok: true, locked: !ctx.vault.isOpen(), dbName: ctx.getHandle()?.name, dirty: ctx.vault.dirty };
@@ -389,6 +463,16 @@ export function makeRouter(ctx: SwContext) {
       case 'listRemoteFiles': {
         try { return { ok: true, files: await providerFor(req.provider).listKdbxFiles() }; }
         catch { return { ok: false, error: 'authRequired' }; }
+      }
+      case 'listRemoteKeyFiles': {
+        if (!isExtensionPage(sender, 'popup', 'panel')) return { ok: false, error: 'forbidden' };
+        try { return { ok: true, files: await providerFor(req.provider).listKeyFiles() }; }
+        catch { return { ok: false, error: 'authRequired' }; }
+      }
+      case 'readRemoteFile': {
+        if (!isExtensionPage(sender, 'popup', 'panel')) return { ok: false, error: 'forbidden' };
+        try { return { ok: true, bytes: Array.from(new Uint8Array((await providerFor(req.provider).download(req.fileId)).bytes)) }; }
+        catch { return { ok: false, error: 'readFailed' }; }
       }
       case 'openRemote': {
         const src: CloudFileSource = { kind: 'cloud', provider: req.provider, fileId: req.fileId, basedOnRev: '' };

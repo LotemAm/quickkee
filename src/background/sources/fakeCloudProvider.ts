@@ -33,6 +33,14 @@ export class FakeCloudProvider implements CloudProvider {
   async auth(): Promise<void> { /* fake: always authorized */ }
 
   async listKdbxFiles(): Promise<RemoteFile[]> {
+    return (await this.listFiles()).filter(file => file.name.toLowerCase().endsWith('.kdbx'));
+  }
+
+  async listKeyFiles(): Promise<RemoteFile[]> {
+    return (await this.listFiles()).filter(file => file.name.toLowerCase().endsWith('.key'));
+  }
+
+  private async listFiles(): Promise<RemoteFile[]> {
     this.guard();
     return [...this.files.entries()].map(([fileId, f]) => ({ fileId, name: f.name, rev: f.rev }));
   }
@@ -57,5 +65,13 @@ export class FakeCloudProvider implements CloudProvider {
     f.bytes = bytes; f.rev = rev;
     this.uploads.push({ fileId, bytes, rev });
     return { ok: true, rev };
+  }
+
+  async createFile(name: string, bytes: ArrayBuffer): Promise<RemoteFile> {
+    this.guard();
+    const fileId = `fake-file-${++this.revCounter}`;
+    const rev = `fake-rev-${this.revCounter}`;
+    this.files.set(fileId, { name, bytes, rev });
+    return { fileId, name, rev };
   }
 }
