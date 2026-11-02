@@ -83,6 +83,7 @@ jobs:
       - name: Build production package
         run: yarn build:production
         env:
+          VITE_DROPBOX_CLIENT_ID: ${{ secrets.VITE_DROPBOX_CLIENT_ID }}
           VITE_GDRIVE_WEB_CLIENT_ID: ${{ secrets.VITE_GDRIVE_WEB_CLIENT_ID }}
 
       - name: Verify production package

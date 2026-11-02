@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { UnlockScreen } from './UnlockScreen';
@@ -68,6 +68,31 @@ async function enterPasswordAndUnlock() {
   fireEvent.change(password, { target: { value: 'correct horse' } });
   fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
 }
+
+describe('cloud database errors', () => {
+  test.each([
+    ['openFailed: dropboxDownload', 'Could not open the database: dropboxDownload', false],
+    ['openFailed: Error Unsupported: KDF', 'Could not open the database: Error Unsupported: KDF', false],
+    ['openFailed: authRequired', 'Reconnect your cloud account and try again.', true],
+    ['badCredentials', 'Wrong password or key file.', false],
+  ])('shows the actual failure for %s', async (error, message, reconnect) => {
+    mocks.loadLastCloud.mockResolvedValue({ provider: 'dropbox', fileId: 'file-1', fileName: 'Work.kdbx' });
+    mocks.sendToSW.mockImplementation(async (request: { type: string }) => {
+      if (request.type === 'getQuickUnlockStatus') return emptyStatus;
+      if (request.type === 'openRemote') return { ok: false, error };
+      return { ok: true };
+    });
+    const onUnlocked = vi.fn();
+    render(<UnlockScreen onUnlocked={onUnlocked} />);
+    await screen.findByText('Work.kdbx');
+    await act(enterPasswordAndUnlock);
+
+    expect(await screen.findByText(message)).toBeVisible();
+    expect(Boolean(screen.queryByRole('button', { name: 'Reconnect account' }))).toBe(reconnect);
+    expect(onUnlocked).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Unlock' })).toBeEnabled();
+  });
+});
 
 describe('device quick unlock UI', () => {
   test('offers database creation from the locked screen', async () => {

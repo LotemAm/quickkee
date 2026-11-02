@@ -59,7 +59,7 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: (notice?: string) => 
   const [pickedKey, setPickedKey] = useState<RemoteFile | null>(null);
   const [pwd, setPwd] = useState('');
   const [err, setErr] = useState('');
-  const [cloudErr, setCloudErr] = useState(false); // open failed for a non-credential reason (likely auth)
+  const [cloudErr, setCloudErr] = useState(false); // the account explicitly requires reauthentication
   const [unlocking, setUnlocking] = useState(false);
   const [quickStatus, setQuickStatus] = useState<QuickUnlockStatus | null>(null);
   const [deviceAvailable, setDeviceAvailable] = useState(false);
@@ -125,7 +125,12 @@ export function UnlockScreen({ onUnlocked }: { onUnlocked: (notice?: string) => 
         const r = await sendToSW({ type: 'openRemote', provider: src, fileId: picked!.fileId, fileName: picked!.name, password: pwd || null, keyFile: keyBytes });
         if (r.ok) await saveLastCloud({ provider: src, fileId: picked!.fileId, fileName: picked!.name });
         else if (r.ok === false && r.error === 'badCredentials') setErr('Wrong password or key file.');
-        else { setErr('Could not open the database — your account may need to reconnect.'); setCloudErr(true); }
+        else {
+          const reason = r.error.replace(/^openFailed:\s*/, '');
+          const authRequired = reason === 'authRequired';
+          setErr(authRequired ? 'Reconnect your cloud account and try again.' : `Could not open the database: ${reason}`);
+          setCloudErr(authRequired);
+        }
         if (!r.ok) return;
       }
 

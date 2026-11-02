@@ -3,7 +3,12 @@ import { DOMParser, onWarningStopParsing } from '@xmldom/xmldom';
 const parserOptions: ConstructorParameters<typeof DOMParser>[0] = {
   // Preserve CR/CRLF/NEL/LS in vault values written by xmldom 0.7.13.
   normalizeLineEndings: source => source,
-  onError: onWarningStopParsing,
+  onError: (level, message) => {
+    // U+FFFD is valid XML and may already be stored in KeePass field values.
+    // This warning needs no document repair; preserve the character verbatim.
+    if (level === 'warning' && message === 'Unicode replacement character detected, source encoding issues?') return;
+    onWarningStopParsing();
+  },
 };
 
 class KdbxDOMParser extends DOMParser {

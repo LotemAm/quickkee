@@ -20,6 +20,39 @@ test('configures exact line-ending preservation with the installed serializer fa
   expect(typeof globalThis.XMLSerializer).toBe('undefined');
 });
 
+test('preserves existing Unicode replacement characters in XML text and attributes', () => {
+  registerXmlParser();
+  const xml = '<root label="before\uFFFDafter">value\uFFFD' + lines + '</root>';
+  const doc = kdbxweb.XmlUtils.parse(xml);
+  expect(doc.documentElement.getAttribute('label')).toBe('before\uFFFDafter');
+  expect(doc.documentElement.textContent).toBe('value\uFFFD' + lines);
+  expect(kdbxweb.XmlUtils.serialize(doc)).toBe(xml);
+});
+
+test.each([3, 4] as const)('opens and saves a KDBX %i vault containing Unicode replacement characters without changing values', async version => {
+  const password = 'replacement-character-test';
+  const db = kdbxweb.Kdbx.create(new kdbxweb.Credentials(kdbxweb.ProtectedValue.fromString(password)), 'Vault\uFFFD');
+  db.setVersion(version);
+  db.setKdf(kdbxweb.Consts.KdfId.Aes);
+  const item = db.createEntry(db.getDefaultGroup());
+  item.fields.set('Title', 'Entry\uFFFD');
+  item.fields.set('Notes', 'Notes\uFFFD' + lines);
+  item.fields.set('Password', kdbxweb.ProtectedValue.fromString('Secret\uFFFD'));
+  const bytes = await db.save();
+
+  const vault = new Vault();
+  await vault.open(bytes, password, null);
+  const expected = vault.getEntry(item.uuid.id);
+  expect(expected?.title).toBe('Entry\uFFFD');
+  expect(expected?.password).toBe('Secret\uFFFD');
+  expect(vault.getEntryNotes(item.uuid.id)).toBe('Notes\uFFFD' + lines);
+  const saved = await vault.serialize();
+  vault.lock();
+  await vault.open(saved, password, null);
+  expect(vault.getEntry(item.uuid.id)).toEqual(expected);
+  expect(vault.getEntryNotes(item.uuid.id)).toBe('Notes\uFFFD' + lines);
+});
+
 test('registration is idempotent and leaves pre-existing native DOM APIs untouched', () => {
   registerXmlParser();
   const configured = globalThis.DOMParser;
@@ -40,6 +73,9 @@ test.each([
   ['warning', '<root attr=unquoted/>'],
   ['error', '<root>&unknown;</root>'],
   ['fatal error', '<root/><extra/>'],
+  ['warning with a replacement character', '<root attr=unquoted>\uFFFD</root>'],
+  ['error with a replacement character', '<root>\uFFFD&unknown;</root>'],
+  ['fatal error with a replacement character', '<root>\uFFFD</root><extra/>'],
 ])('rejects bounded parser %s instead of returning a repaired document', (_level, xml) => {
   registerXmlParser();
   expect(() => kdbxweb.XmlUtils.parse(xml)).toThrow(kdbxweb.KdbxError);

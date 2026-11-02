@@ -1,6 +1,30 @@
 import fs from 'node:fs';
 import { resolve } from 'node:path';
-import type { PluginOption } from 'vite';
+import type { Plugin, PluginOption } from 'vite';
+
+// Check the resolved environment so .env files and CI overrides follow Vite's
+// normal precedence. Test-mode builds intentionally use fake cloud providers.
+export function requireOAuthClients(nativeGoogleClientId: string | undefined): Plugin {
+  return {
+    name: 'require-oauth-clients',
+    configResolved(config) {
+      if (config.command !== 'build' || config.mode !== 'production') return;
+
+      const googleClientPattern = /^\d+-[a-z0-9]+\.apps\.googleusercontent\.com$/i;
+      const clients = [
+        ['VITE_DROPBOX_CLIENT_ID', config.env.VITE_DROPBOX_CLIENT_ID, /^[a-z0-9]+$/i],
+        ['VITE_GDRIVE_WEB_CLIENT_ID', config.env.VITE_GDRIVE_WEB_CLIENT_ID, googleClientPattern],
+        ['manifest.oauth2.client_id', nativeGoogleClientId, googleClientPattern],
+      ] as const;
+      const invalid = clients
+        .filter(([, value, pattern]) => typeof value !== 'string' || !pattern.test(value))
+        .map(([name]) => name);
+      if (invalid.length) {
+        throw new Error(`Production build requires configured OAuth client IDs: ${invalid.join(', ')}. See .env.example and README.md.`);
+      }
+    },
+  };
+}
 
 // plugin to remove dev icons from prod build
 export function stripDevIcons (isDev: boolean) {

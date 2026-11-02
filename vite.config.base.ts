@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import type { ManifestV3Export } from '@crxjs/vite-plugin';
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, type BuildOptions } from 'vite';
-import { stripDevIcons, crxI18n } from './custom-vite-plugins.ts';
+import { stripDevIcons, crxI18n, requireOAuthClients } from './custom-vite-plugins.ts';
 import manifest from './manifest.json' with { type: 'json' };
 import devManifest from './manifest.dev.json' with { type: 'json' };
 import pkg from './package.json' with { type: 'json' };
@@ -31,6 +31,7 @@ export const baseBuildOptions: BuildOptions = {
 
 export default defineConfig({
   plugins: [
+    requireOAuthClients(manifest.oauth2.client_id),
     tailwindcss(),
     react(),
     stripDevIcons(isDev),

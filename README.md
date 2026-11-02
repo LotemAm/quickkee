@@ -42,6 +42,13 @@ On first installation, a welcome tab helps you create a database or open an exis
 
 Open QuickKee's options, connect Dropbox or Google Drive, and choose a `.kdbx` file. QuickKee shows whether the vault is synced, waiting to upload, or working from its offline cache. If local and remote changes overlap, the vaults are merged on save.
 
+### OAuth build configuration
+
+- Copy `.env.example` to `.env` and configure `VITE_DROPBOX_CLIENT_ID` with the Dropbox app key and `VITE_GDRIVE_WEB_CLIENT_ID` with the Google Web application client ID.
+- Production builds require both IDs and the Chrome Extension client ID in `manifest.json`; missing or placeholder values stop the build.
+- CI reads both `VITE_DROPBOX_CLIENT_ID` and `VITE_GDRIVE_WEB_CLIENT_ID` from repository secrets. Store publishing reads the same secret names from the `chrome-web-store` environment (or repository secrets when no environment override exists).
+- Client IDs are public identifiers. OAuth client secrets must never be included in the extension.
+
 ### Google OAuth setup
 
 - Google Chrome uses the Chrome Extension OAuth client declared in `manifest.json`.

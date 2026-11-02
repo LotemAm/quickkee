@@ -242,6 +242,13 @@ test('production extension worker has no native XML globals before opening a vau
   // Windows command shims require cmd.exe; these build script names are fixed below.
   const build = (script: 'build:production' | 'build:chrome:test') => execFileSync(yarn, [script], {
     cwd: process.cwd(), windowsHide: true, timeout: 60_000, shell: process.platform === 'win32',
+    // This runtime-only check never authenticates. Keep it independent of
+    // ignored local .env files and release-only CI secrets.
+    env: {
+      ...process.env,
+      VITE_DROPBOX_CLIENT_ID: 'quickkeee2eclient',
+      VITE_GDRIVE_WEB_CLIENT_ID: '123456789-testclient.apps.googleusercontent.com',
+    },
   });
   try {
     build('build:production');
