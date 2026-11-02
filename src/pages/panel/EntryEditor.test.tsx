@@ -23,6 +23,9 @@ const scannedConfig = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubGlobal('chrome', { storage: { local: {
+    get: vi.fn().mockResolvedValue({}), set: vi.fn().mockResolvedValue(undefined),
+  } } });
   mocks.downloadAttachment.mockResolvedValue(null);
   mocks.scanVisibleTabForTotp.mockReset().mockResolvedValue({
     tabId: 12, pageUrl: 'https://example.com/login', config: scannedConfig,
@@ -41,6 +44,36 @@ beforeEach(() => {
     };
     return { ok: true };
   });
+});
+
+test.each([null, 'entry-1'])('generated username is editable, copied, and saved for %s', async entryId => {
+  render(editor(entryId));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Generate username' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Generate username' }));
+  const username = (screen.getByLabelText('Username') as HTMLInputElement).value;
+  expect(username).toMatch(/^[a-z]+-[a-z]+$/);
+  fireEvent.change(screen.getByLabelText('Username'), { target: { value: `${username}42` } });
+  fireEvent.click(screen.getByRole('button', { name: 'Copy Username' }));
+  expect(mocks.copyWithClear).toHaveBeenCalledWith(`${username}42`, 30);
+  fireEvent.click(screen.getByRole('button', { name: entryId === null ? 'Create' : 'Apply changes' }));
+  await waitFor(() => expect(mocks.sendToSW).toHaveBeenCalledWith(expect.objectContaining({
+    type: entryId === null ? 'createEntry' : 'updateEntry', fields: expect.objectContaining({ UserName: `${username}42` }),
+  })));
+  expect(chrome.storage.local.set).not.toHaveBeenCalled();
+});
+
+test('card fields hide name generation and switching back keeps this form\'s options', async () => {
+  render(editor(null));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Username options' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Username options' }));
+  fireEvent.change(screen.getByLabelText('Word separator'), { target: { value: '_' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Credit card' }));
+  expect(screen.queryByRole('button', { name: 'Generate username' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Username options' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Login' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Username options' }));
+  expect(screen.getByLabelText('Word separator')).toHaveValue('_');
+  expect(chrome.storage.local.set).not.toHaveBeenCalled();
 });
 
 test('scans a page QR into the side-panel editor without saving immediately', async () => {

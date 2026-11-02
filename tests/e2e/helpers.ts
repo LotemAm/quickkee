@@ -8,7 +8,7 @@ import kdbxweb from 'kdbxweb';
 import { registerArgon2 } from '../../src/background/crypto';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DIST = path.resolve(__dirname, '../../dist_chrome');
+const DIST = path.resolve(__dirname, '../..', process.env.QK_E2E_DIST ?? 'dist_chrome');
 
 export const test = base.extend<{
   context: BrowserContext;

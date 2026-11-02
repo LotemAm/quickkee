@@ -5,6 +5,8 @@ import { applyTheme, type ThemeMode } from '../../shared/theme';
 import { sendToSW } from '../../shared/messages';
 import { PasswordRulesPanel } from '../../shared/PasswordRulesPanel';
 import type { QuickUnlockStatus } from '../../shared/quickUnlock';
+import { useNameGenOptions } from '../../shared/namegenSettings';
+import { NameGeneratorOptionsPanel } from '../../shared/NameGeneratorOptionsPanel';
 
 const THEME_OPTIONS: { value: ThemeMode; label: string; icon: typeof Monitor }[] = [
   { value: 'system', label: 'System', icon: Monitor },
@@ -20,6 +22,7 @@ type CloudProviderId = typeof CLOUD_PROVIDERS[number]['id'];
 type ConnectionState = Record<CloudProviderId, boolean>;
 
 export function Options() {
+  const namegen = useNameGenOptions(true);
   const [s, setS] = useState<Settings>(DEFAULT_SETTINGS);
   const [connected, setConnected] = useState<ConnectionState>({ dropbox: false, gdrive: false });
   const [busyProvider, setBusyProvider] = useState<CloudProviderId | null>(null);
@@ -175,6 +178,12 @@ export function Options() {
         <section className="card space-y-3">
           <div className="section-title">Default generated password</div>
           <PasswordRulesPanel opts={s.pwgen} onChange={pwgen => update({ pwgen })} />
+        </section>
+        <section className="card space-y-3">
+          <div className="section-title">Default generated username</div>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Defaults for new forms. Inline changes stay in that form.</p>
+          <NameGeneratorOptionsPanel options={namegen.options} onChange={namegen.changeOptions} disabled={!namegen.ready} />
+          {namegen.notice && <p className="text-xs" role="status">{namegen.notice}</p>}
         </section>
       </div>
     </div>);

@@ -14,6 +14,8 @@ import { toOtpUri, type TotpConfig } from '../../background/totp';
 import { IconTooltipButton } from '../../shared/IconTooltipButton';
 import { scanVisibleTabForTotp } from '../popup/scanVisibleTabForTotp';
 import type { GroupOption } from '../../shared/groups';
+import { UsernameField } from '../../shared/UsernameField';
+import { useNameGenOptions } from '../../shared/namegenSettings';
 
 // epoch ms -> 'YYYY-MM-DDTHH:mm' (local) for <input type="datetime-local">
 const toLocalInput = (ms: number) => {
@@ -48,6 +50,7 @@ export function EntryEditor(props: EntryEditorProps) {
 
 function SelectedEntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onChanged, onCreated, onDeleted, onClose }: EntryEditorProps) {
   const captureLifetime = useSessionLifetime();
+  const namegen = useNameGenOptions();
   const [e, setE] = useState<EntryView | null>(entryId === null ? BLANK_ENTRY : null);
   const [loadError, setLoadError] = useState('');
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -177,6 +180,11 @@ function SelectedEntryEditor({ entryId, groupId, groups, clearSecs, pwgen, onCha
     </div>
   </>);
   const field = (label: string, key: 'title' | 'username' | 'url' | 'password') => {
+    if (key === 'username' && !isCard) return (
+      <div className="mb-3"><UsernameField variant="panel" value={e.username} generator={namegen}
+        onChange={username => setE(current => current ? { ...current, username } : current)}
+        onCopy={() => copy(e.username, 'Username')} canGenerate={() => captureLifetime()()} /></div>
+    );
     const secret = key === 'password';
     // Card Number (username, when isCard) gets the same mask/reveal UX as Password/CVV, but
     // uses its own reveal state so toggling one never reveals the other.

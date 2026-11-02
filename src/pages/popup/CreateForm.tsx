@@ -11,6 +11,8 @@ import type { TotpConfig } from '../../background/totp';
 import { canonicalPageOrigin } from '../../shared/entryDefaults';
 import { IconTooltipButton } from '../../shared/IconTooltipButton';
 import type { GroupOption } from '../../shared/groups';
+import { UsernameField } from '../../shared/UsernameField';
+import { useNameGenOptions } from '../../shared/namegenSettings';
 
 type SubmissionState =
   | { status: 'editing' | 'failed' | 'creating' | 'unknown' | 'review' }
@@ -28,6 +30,7 @@ export function CreateForm({ url, tabId, sessionKey, groups, defaultGroupId, cle
   onCreated: () => void;
 }) {
   const captureLifetime = useSessionLifetime();
+  const namegen = useNameGenOptions();
   const [title, setTitle] = useState(''); const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [groupId, setGroupId] = useState(defaultGroupId);
@@ -277,7 +280,9 @@ export function CreateForm({ url, tabId, sessionKey, groups, defaultGroupId, cle
             {groups.map(g => <option key={g.groupId} value={g.groupId}>{'\u00A0\u00A0'.repeat(g.depth) + g.name}</option>)}
           </select>
           <input className="input" placeholder="Title" value={title} onChange={e => setTitle(e.target.value)} />
-          <input className="input" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} />
+          <UsernameField value={username} onChange={setUsername} generator={namegen}
+            disabled={!hydrated || !editable || saving}
+            canGenerate={() => !inFlight.current && !submission.current && !cleared.current && captureLifetime()()} />
           <div className="flex gap-1.5">
             <input className="input" placeholder="Password" value={password} onChange={e => { ++passwordGeneration.current; setPassword(e.target.value); }} />
             <button className="btn-secondary shrink-0" aria-label="Regenerate password" title="Generate a new password"

@@ -31,7 +31,27 @@ beforeEach(() => {
   mocks.load.mockReset().mockResolvedValue(null);
   mocks.write.mockReset().mockResolvedValue(undefined);
   mocks.clear.mockReset().mockResolvedValue(undefined);
-  vi.stubGlobal('chrome', { sidePanel: { open: vi.fn().mockResolvedValue(undefined) } });
+  vi.stubGlobal('chrome', { sidePanel: { open: vi.fn().mockResolvedValue(undefined) }, storage: { local: {
+    get: vi.fn().mockResolvedValue({}), set: vi.fn().mockResolvedValue(undefined),
+  } } });
+});
+
+test('generated username is retained in the recovery draft and submitted with the entry', async () => {
+  const view = await setup();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Generate username' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Generate username' }));
+  const username = (screen.getByPlaceholderText('Username') as HTMLInputElement).value;
+  expect(username).toMatch(/^[a-z]+-[a-z]+$/);
+  await waitFor(() => expect(mocks.write).toHaveBeenLastCalledWith(expect.objectContaining({ username }), expect.any(Function)));
+  const draft = mocks.write.mock.calls.at(-1)![0] as CreateDraft;
+  view.unmount();
+  await setup(draft);
+  expect(screen.getByPlaceholderText('Username')).toHaveValue(username);
+  fireEvent.click(screen.getByRole('button', { name: 'Create & Save' }));
+  await waitFor(() => expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({
+    type: 'createEntry', fields: expect.objectContaining({ UserName: username }),
+  })));
+  expect(chrome.storage.local.set).not.toHaveBeenCalled();
 });
 
 test.each([

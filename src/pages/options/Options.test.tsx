@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { Options } from './Options';
@@ -20,6 +20,10 @@ vi.mock('../../shared/messages', () => ({ sendToSW: mocks.sendToSW }));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubGlobal('chrome', { storage: { local: {
+    get: vi.fn().mockResolvedValue({}),
+    set: vi.fn().mockResolvedValue(undefined),
+  } } });
   mocks.loadSettings.mockResolvedValue(DEFAULT_SETTINGS);
   mocks.sendToSW.mockImplementation(async (request: { type: string; provider?: string }) => {
     if (request.type === 'getCloudConnectionStatus')
@@ -28,6 +32,45 @@ beforeEach(() => {
       return { ok: true, enrolled: false, corrupt: false, source: null };
     return { ok: true };
   });
+});
+
+test('username defaults persist only when changed in Settings', async () => {
+  render(<Options />);
+  await waitFor(() => expect(screen.getByLabelText('Word separator')).toBeEnabled());
+  expect(chrome.storage.local.set).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('Word separator'), { target: { value: '_' } });
+  fireEvent.change(screen.getByLabelText('Name style'), { target: { value: 'alias' } });
+  await waitFor(() => expect(chrome.storage.local.set).toHaveBeenLastCalledWith({
+    nameGeneratorOptions: { style: 'alias', separator: '_', casing: 'lowercase', digits: 0 },
+  }));
+  expect(mocks.saveSettings).not.toHaveBeenCalled();
+});
+
+test('failed username-default writes show a notice and allow later changes', async () => {
+  vi.mocked(chrome.storage.local.set).mockRejectedValueOnce(new Error('quota'));
+  render(<Options />);
+  await waitFor(() => expect(screen.getByLabelText('Word separator')).toBeEnabled());
+  fireEvent.change(screen.getByLabelText('Word separator'), { target: { value: '' } });
+  expect(await screen.findByText('Could not save username defaults. Changes apply here only.')).toBeVisible();
+  fireEvent.change(screen.getByLabelText('Word separator'), { target: { value: '_' } });
+  await waitFor(() => expect(screen.queryByText('Could not save username defaults. Changes apply here only.')).not.toBeInTheDocument());
+  expect(screen.getByLabelText('Word separator')).toHaveValue('_');
+});
+
+test('rapid default changes save in order and finish after Settings closes', async () => {
+  let resolve!: () => void;
+  vi.mocked(chrome.storage.local.set).mockImplementationOnce(() => new Promise<void>(done => { resolve = done; }));
+  const view = render(<Options />);
+  await waitFor(() => expect(screen.getByLabelText('Word separator')).toBeEnabled());
+  fireEvent.change(screen.getByLabelText('Word separator'), { target: { value: '_' } });
+  await waitFor(() => expect(chrome.storage.local.set).toHaveBeenCalledTimes(1));
+  fireEvent.change(screen.getByLabelText('Word separator'), { target: { value: '' } });
+  expect(chrome.storage.local.set).toHaveBeenCalledTimes(1);
+  view.unmount();
+  await act(async () => { resolve(); });
+  await waitFor(() => expect(chrome.storage.local.set).toHaveBeenLastCalledWith({
+    nameGeneratorOptions: { style: 'adjective-noun', separator: '', casing: 'lowercase', digits: 0 },
+  }));
 });
 
 describe('Device quick unlock', () => {
