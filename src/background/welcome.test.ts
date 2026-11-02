@@ -13,13 +13,19 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 test('opens the welcome tab on first installation', async () => {
-  await openWelcomeOnInstall({ reason: 'install' as chrome.runtime.OnInstalledReason });
+  await openWelcomeOnInstall({ reason: 'install' });
   expect(createTab).toHaveBeenCalledExactlyOnceWith({
     url: 'chrome-extension://quickkee/src/pages/welcome/index.html',
   });
 });
 
-test.each(['update', 'chrome_update', 'shared_module_update'])('does not interrupt users on %s', async reason => {
-  await openWelcomeOnInstall({ reason: reason as chrome.runtime.OnInstalledReason });
+const updateEvents: chrome.runtime.InstalledDetails[] = [
+  { reason: 'update', previousVersion: '0.4.0' },
+  { reason: 'chrome_update' },
+  { reason: 'shared_module_update', id: 'shared-module' },
+];
+
+test.each(updateEvents)('does not interrupt users on $reason', async details => {
+  await openWelcomeOnInstall(details);
   expect(createTab).not.toHaveBeenCalled();
 });
