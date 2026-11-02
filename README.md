@@ -25,6 +25,8 @@ yarn build:chrome
 
 Then open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select `dist_chrome/`.
 
+On first installation, a welcome tab helps you create a database or open an existing KeePass `.kdbx` file.
+
 ## Development
 
 | Command | Purpose |

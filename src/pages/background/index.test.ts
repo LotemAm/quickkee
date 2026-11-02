@@ -26,7 +26,7 @@ function event() {
 async function setup() {
   vi.resetModules();
   const runtime = { id: 'own', getURL: (path: string) => `chrome-extension://own/${path}`,
-    onConnect: event(), onMessage: event(), onMessageExternal: event(), onSuspend: event(), onStartup: event(), getPlatformInfo: vi.fn() };
+    onConnect: event(), onMessage: event(), onMessageExternal: event(), onSuspend: event(), onStartup: event(), onInstalled: event(), getPlatformInfo: vi.fn() };
   const alarms = { create: vi.fn(), onAlarm: event() };
   vi.stubGlobal('chrome', { runtime, alarms,
     tabs: { onUpdated: event(), onRemoved: event(), query: vi.fn(async () => []) },

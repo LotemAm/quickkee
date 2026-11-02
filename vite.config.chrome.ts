@@ -33,11 +33,11 @@ export default defineConfig(({ mode }) =>
       ...baseBuildOptions,
       outDir,
       rolldownOptions: {
-        // Offscreen documents are created at runtime via chrome.offscreen.createDocument
-        // and are not referenced by manifest.json, so @crxjs won't discover this HTML page
-        // on its own; it must be added as an explicit Rolldown input.
+        // Runtime-opened pages are not referenced by manifest.json, so @crxjs
+        // needs explicit HTML inputs to include them in the build.
         input: {
           offscreen: resolve(import.meta.dirname, 'src/pages/offscreen/index.html'),
+          welcome: resolve(import.meta.dirname, 'src/pages/welcome/index.html'),
         },
       },
     },

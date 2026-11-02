@@ -24,7 +24,10 @@ export default mergeConfig(
     ],
     build: {
       ...baseBuildOptions,
-      outDir
+      outDir,
+      rolldownOptions: {
+        input: { welcome: resolve(import.meta.dirname, 'src/pages/welcome/index.html') },
+      },
     },
     publicDir: resolve(import.meta.dirname, 'public'),
   })

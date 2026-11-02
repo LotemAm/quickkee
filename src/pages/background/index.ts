@@ -10,6 +10,7 @@ import { makeRouter, depsFor, CLIPBOARD_CLEAR_ALARM, type SwContext } from './ro
 import { registerTestCommands } from './testCommands';
 import { CredentialCaptureStore } from '../../background/credentialCaptureStore';
 import { createVaultStatusPublisher } from '../../background/vaultStatus';
+import { openWelcomeOnInstall } from '../../background/welcome';
 import {
   GOOGLE_HOSTED_CALLBACK_MESSAGE,
   handleHostedGoogleOAuthMessage,
@@ -19,6 +20,8 @@ const vault = new Vault();
 const credentialCaptures = new CredentialCaptureStore();
 let handle: FileSystemFileHandle | null = null;
 const autolock = new AutoLock(() => doLock());
+
+chrome.runtime.onInstalled.addListener(openWelcomeOnInstall);
 
 let pendingClipboardHash: string | null = null;
 
