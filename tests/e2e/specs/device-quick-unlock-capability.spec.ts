@@ -5,6 +5,9 @@ for (const surface of ['popup', 'panel'] as const) {
     const page = await openExtensionPage(context, extensionId, `src/pages/${surface}/index.html`);
     await addPrfAuthenticator(page);
     await page.waitForFunction(() => Boolean((window as unknown as { __qkTest?: unknown }).__qkTest));
+    // The first-install welcome tab can take focus before a programmatic ceremony.
+    await page.bringToFront();
+    await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
 
     const proof = await page.evaluate(async () => {
       const seam = (window as unknown as { __qkTest: {

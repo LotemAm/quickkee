@@ -39,7 +39,12 @@ export const test = base.extend<{
   extensionId: async ({ context }, provide) => {
     let [sw] = context.serviceWorkers();
     if (!sw) sw = await context.waitForEvent('serviceworker');
-    await provide(new URL(sw.url()).host);
+    const extensionId = new URL(sw.url()).host;
+    const welcomeUrl = `chrome-extension://${extensionId}/src/pages/welcome/index.html`;
+    // Settle the first-install tab before test pages can start focus-sensitive work.
+    await expect.poll(() => context.pages().some(page => page.url() === welcomeUrl)).toBe(true);
+    await context.pages().find(page => page.url() === welcomeUrl)!.waitForLoadState();
+    await provide(extensionId);
   },
   // eslint-disable-next-line no-empty-pattern
   http: async ({}, provide) => { const s = await startHttpFixture(); await provide(s); await s.close(); },
