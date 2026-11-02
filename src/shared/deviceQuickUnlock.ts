@@ -58,7 +58,7 @@ function cachePrfFailure(): void {
   catch { /* Capability caching must not affect manual unlock. */ }
 }
 
-function randomBytes(length = RANDOM_BYTES): Uint8Array {
+function randomBytes(length = RANDOM_BYTES): Uint8Array<ArrayBuffer> {
   return crypto.getRandomValues(new Uint8Array(length));
 }
 
@@ -68,7 +68,7 @@ export function bytesToBase64Url(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/u, '');
 }
 
-export function base64UrlToBytes(value: string): Uint8Array {
+export function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
   if (!/^[A-Za-z0-9_-]+$/u.test(value)) throw new DeviceQuickUnlockError('invalidData');
   const padded = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - value.length % 4) % 4);
   try {
@@ -193,7 +193,7 @@ async function runCeremony<T>(operation: 'create' | 'get', options: CredentialCr
   } finally { clearTimeout(timeout); }
 }
 
-async function requestPrf(credentialId: string, rawId: Uint8Array, prfInput: Uint8Array): Promise<Uint8Array> {
+async function requestPrf(credentialId: string, rawId: Uint8Array<ArrayBuffer>, prfInput: Uint8Array<ArrayBuffer>): Promise<Uint8Array> {
   const publicKey: PublicKeyCredentialRequestOptions = {
     challenge: randomBytes(),
     allowCredentials: [{ type: 'public-key', id: rawId }],

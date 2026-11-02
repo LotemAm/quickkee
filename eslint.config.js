@@ -15,7 +15,9 @@ export default tseslint.config(
     settings: { react: { version: 'detect' } },
     rules: {
       ...react.configs.recommended.rules,
-      ...reactHooks.configs.recommended.rules,
+      // Preserve the existing Hooks checks across the React Compiler preset change.
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
       ...jsxA11y.configs.recommended.rules,
       'react/react-in-jsx-scope': 'off',
       // Mechanical: allow an intentional `_`/`_foo` prefix to opt out of unused-vars.

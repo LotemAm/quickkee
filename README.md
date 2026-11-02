@@ -15,7 +15,7 @@ KeePass-compatible password manager for Chrome (Manifest V3). Open local or clou
 
 ## Build and install
 
-Requires Node.js 22, Corepack/Yarn, and Chrome 114+.
+Requires Node.js 24.15+ (or 26+), Corepack/Yarn, and Chrome 114+.
 
 ```bash
 corepack enable
