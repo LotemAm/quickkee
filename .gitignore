@@ -395,6 +395,7 @@ public/manifest.json
 
 # project tooling
 .superpowers/
+.impeccable/
 
 # Playwright
 playwright-report/
